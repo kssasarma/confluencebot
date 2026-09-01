@@ -15,9 +15,10 @@ import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 @Service
 public class ChatServiceImpl implements ChatService {
@@ -73,17 +74,47 @@ public class ChatServiceImpl implements ChatService {
         return new ChatApiResponse(answer, sources);
     }
 
+    /**
+     * Builds one SourceReference per unique page from the retrieved chunks.
+     * Docs arrive ordered by similarity score (highest first), so the first chunk
+     * seen for each page_id is the best match — subsequent chunks for the same page
+     * are skipped.  The section heading from that best chunk is used to construct
+     * an anchor URL pointing directly to the relevant section on the Confluence page.
+     */
     private List<SourceReference> extractSources(List<Document> docs) {
-        return docs.stream()
-                .map(doc -> {
-                    Map<String, Object> meta = doc.getMetadata();
-                    return new SourceReference(
-                            (String) meta.getOrDefault("page_id", ""),
-                            (String) meta.getOrDefault("title", "Unknown"),
-                            (String) meta.getOrDefault("page_url", "")
-                    );
-                })
-                .distinct()
-                .collect(Collectors.toList());
+        LinkedHashMap<String, SourceReference> byPageId = new LinkedHashMap<>();
+
+        for (Document doc : docs) {
+            Map<String, Object> meta = doc.getMetadata();
+            String pageId = (String) meta.getOrDefault("page_id", "");
+
+            if (byPageId.containsKey(pageId)) continue;
+
+            String pageUrl = (String) meta.getOrDefault("page_url", "");
+            if (pageUrl.isBlank()) {
+                log.warn("Chunk for page_id={} is missing page_url metadata — citation URL will be empty", pageId);
+            }
+
+            String heading = (String) meta.getOrDefault("section_heading", "");
+            String anchorUrl = buildAnchorUrl(pageUrl, heading);
+
+            byPageId.put(pageId, new SourceReference(
+                    pageId,
+                    (String) meta.getOrDefault("title", "Unknown"),
+                    pageUrl,
+                    anchorUrl,
+                    (String) meta.getOrDefault("space_key", ""),
+                    doc.getScore()
+            ));
+        }
+
+        return new ArrayList<>(byPageId.values());
+    }
+
+    private String buildAnchorUrl(String pageUrl, String heading) {
+        if (pageUrl.isBlank() || heading.isBlank()) return pageUrl;
+        // Confluence Server generates anchor IDs from the heading text with spaces as hyphens
+        String anchor = heading.replace(" ", "-");
+        return pageUrl + "#" + anchor;
     }
 }

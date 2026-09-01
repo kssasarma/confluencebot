@@ -57,7 +57,9 @@ class ChatServiceTest {
         Document doc = new Document("Content about feature X", Map.of(
                 "page_id", "123",
                 "title", "Feature X Guide",
-                "page_url", "http://confluence/pages/123"
+                "page_url", "http://confluence/pages/123",
+                "space_key", "ENG",
+                "section_heading", "Configuration"
         ));
 
         when(vectorStore.similaritySearch(any(SearchRequest.class))).thenReturn(List.of(doc));
@@ -69,6 +71,11 @@ class ChatServiceTest {
 
         assertThat(response.answer()).isEqualTo("Feature X is configured by...");
         assertThat(response.sources()).hasSize(1);
-        assertThat(response.sources().get(0).title()).isEqualTo("Feature X Guide");
+
+        var source = response.sources().get(0);
+        assertThat(source.title()).isEqualTo("Feature X Guide");
+        assertThat(source.url()).isEqualTo("http://confluence/pages/123");
+        assertThat(source.anchorUrl()).isEqualTo("http://confluence/pages/123#Configuration");
+        assertThat(source.spaceKey()).isEqualTo("ENG");
     }
 }
