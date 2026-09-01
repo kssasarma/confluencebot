@@ -2,6 +2,7 @@ package com.kssasarma.confluencebot.ingestion;
 
 import com.kssasarma.confluencebot.confluence.ConfluenceClient;
 import com.kssasarma.confluencebot.confluence.dto.ConfluencePageDetail;
+import com.kssasarma.confluencebot.confluence.dto.SpaceMetadata;
 import com.kssasarma.confluencebot.confluence.parser.ParsedSection;
 import com.kssasarma.confluencebot.confluence.parser.StorageFormatParser;
 import com.kssasarma.confluencebot.config.ConfluenceProperties;
@@ -56,6 +57,12 @@ public class IngestionServiceImpl implements IngestionService {
         long startMs = System.currentTimeMillis();
         log.info("Starting ingestion for space: {}", spaceKey);
 
+        SpaceMetadata spaceMeta = confluenceClient.fetchSpaceMetadata(spaceKey);
+        log.info("Space metadata fetched — name: '{}', description present: {}, homepage: {}",
+                spaceMeta.name(), !spaceMeta.descriptionText().isBlank(), spaceMeta.homepageId());
+
+        ingestSpaceOverview(spaceMeta);
+
         List<ConfluencePageDetail> pages = confluenceClient.fetchAllPages(spaceKey);
 
         AtomicInteger processed = new AtomicInteger(0);
@@ -73,7 +80,7 @@ public class IngestionServiceImpl implements IngestionService {
                     continue;
                 }
 
-                int chunks = processPage(page, spaceKey);
+                int chunks = processPage(page, spaceKey, spaceMeta.name(), spaceMeta.homepageId());
                 totalChunks.addAndGet(chunks);
                 processed.incrementAndGet();
 
@@ -95,16 +102,53 @@ public class IngestionServiceImpl implements IngestionService {
     @Transactional
     public IngestionResult ingestPage(String pageId) {
         long startMs = System.currentTimeMillis();
+        SpaceMetadata spaceMeta = confluenceClient.fetchSpaceMetadata(props.spaceKey());
         ConfluencePageDetail page = confluenceClient.fetchPage(pageId);
-        int chunks = processPage(page, props.spaceKey());
+        int chunks = processPage(page, props.spaceKey(), spaceMeta.name(), spaceMeta.homepageId());
         long durationMs = System.currentTimeMillis() - startMs;
         return new IngestionResult(1, chunks, 0, durationMs);
     }
 
     /**
+     * Ingests the Confluence space description as a synthetic "space overview" document.
+     * This gives broad queries like "What does the ENG space do?" a direct match target.
+     * The old overview document (if any) is deleted first so re-ingestion is idempotent.
+     */
+    private void ingestSpaceOverview(SpaceMetadata spaceMeta) {
+        String syntheticPageId = "__space__" + spaceMeta.key();
+        deleteChunksForPage(syntheticPageId);
+
+        String description = spaceMeta.descriptionText();
+        if (description.isBlank()) {
+            log.info("Space {} has no description — skipping space overview document", spaceMeta.key());
+            return;
+        }
+
+        String content = "Space: %s (%s)\n\n%s".formatted(spaceMeta.name(), spaceMeta.key(), description);
+        if (!spaceMeta.homepageTitle().isBlank()) {
+            content += "\n\nHomepage: " + spaceMeta.homepageTitle();
+        }
+
+        Map<String, Object> metadata = new HashMap<>();
+        metadata.put("page_id", syntheticPageId);
+        metadata.put("space_key", spaceMeta.key());
+        metadata.put("space_name", spaceMeta.name());
+        metadata.put("title", spaceMeta.name() + " — Space Overview");
+        metadata.put("page_url", props.baseUrl() + "/display/" + spaceMeta.key());
+        metadata.put("document_type", "space_overview");
+        metadata.put("section_heading", "");
+        metadata.put("chunk_index", 0);
+        metadata.put("version", 0);
+
+        vectorStore.add(List.of(new Document(content, metadata)));
+        log.info("Space overview document ingested for space '{}'", spaceMeta.key());
+    }
+
+    /**
      * Template Method: fixed pipeline — delete → parse → chunk → embed → track.
      */
-    private int processPage(ConfluencePageDetail page, String spaceKey) {
+    private int processPage(ConfluencePageDetail page, String spaceKey,
+                             String spaceName, String homepageId) {
         log.info("Processing page: {} [{}]", page.title(), page.id());
 
         deleteChunksForPage(page.id());
@@ -122,7 +166,8 @@ public class IngestionServiceImpl implements IngestionService {
         }
 
         String pageUrl = buildPageUrl(page);
-        List<Document> documents = buildDocuments(sections, page, spaceKey, pageUrl);
+        boolean isHomepage = page.id().equals(homepageId);
+        List<Document> documents = buildDocuments(sections, page, spaceKey, spaceName, pageUrl, isHomepage);
 
         if (documents.isEmpty()) {
             log.warn("Page {} ({}) produced no chunks after chunking — skipping", page.title(), page.id());
@@ -155,7 +200,8 @@ public class IngestionServiceImpl implements IngestionService {
      * reconstruct a section-level anchor URL (page_url + "#" + section_heading).
      */
     private List<Document> buildDocuments(List<ParsedSection> sections, ConfluencePageDetail page,
-                                           String spaceKey, String pageUrl) {
+                                           String spaceKey, String spaceName,
+                                           String pageUrl, boolean isHomepage) {
         List<Document> docs = new ArrayList<>();
         int index = 0;
 
@@ -173,11 +219,13 @@ public class IngestionServiceImpl implements IngestionService {
                 Map<String, Object> metadata = new HashMap<>();
                 metadata.put("page_id", page.id());
                 metadata.put("space_key", spaceKey);
+                metadata.put("space_name", spaceName != null ? spaceName : "");
                 metadata.put("title", page.title());
                 metadata.put("page_url", pageUrl);
                 metadata.put("chunk_index", index++);
                 metadata.put("version", page.version().number());
                 metadata.put("section_heading", section.hasHeading() ? section.heading() : "");
+                metadata.put("is_homepage", String.valueOf(isHomepage));
 
                 docs.add(new Document(chunk, metadata));
             }

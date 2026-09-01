@@ -3,6 +3,7 @@ package com.kssasarma.confluencebot.confluence.parser;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
+import org.jsoup.nodes.TextNode;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -34,6 +35,7 @@ public class JsoupStorageFormatParser implements StorageFormatParser {
         }
 
         Document doc = Jsoup.parse(storageFormatXhtml);
+        preserveLinkText(doc);      // extract link display text before links are removed
         removeConfluenceMacros(doc);
 
         List<ParsedSection> sections = new ArrayList<>();
@@ -68,6 +70,42 @@ public class JsoupStorageFormatParser implements StorageFormatParser {
         if (!content.isBlank()) {
             sections.add(new ParsedSection(heading, content));
         }
+    }
+
+    /**
+     * Replaces each {@code <ac:link>} element with its display text so the link's
+     * semantic meaning survives into the embedded chunk.
+     * Priority: explicit link body text → referenced page title attribute.
+     * Called before {@link #removeConfluenceMacros} which strips {@code ac:link} entirely.
+     */
+    private void preserveLinkText(Document doc) {
+        for (Element link : doc.select("ac|link")) {
+            String text = extractLinkDisplayText(link);
+            if (!text.isBlank()) {
+                link.replaceWith(new TextNode(" " + text + " "));
+            } else {
+                link.remove();
+            }
+        }
+    }
+
+    private String extractLinkDisplayText(Element link) {
+        Element plainBody = link.selectFirst("ac|plain-text-link-body");
+        if (plainBody != null && !plainBody.text().isBlank()) {
+            return plainBody.text().strip();
+        }
+        Element richBody = link.selectFirst("ac|rich-text-link-body");
+        if (richBody != null && !richBody.text().isBlank()) {
+            return richBody.text().strip();
+        }
+        // Fall back to the referenced page title when no link body is set
+        Element riPage = link.selectFirst("ri|page");
+        if (riPage != null) {
+            String title = riPage.attr("ri:content-title");
+            if (title.isBlank()) title = riPage.attr("content-title");
+            return title.strip();
+        }
+        return "";
     }
 
     private void removeConfluenceMacros(Document doc) {
