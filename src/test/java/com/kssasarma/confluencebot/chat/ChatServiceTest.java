@@ -43,7 +43,10 @@ class ChatServiceTest {
 
     @Test
     void noRelevantDocs_returnsNoContextResponse() {
-        when(vectorStore.similaritySearch(any(SearchRequest.class))).thenReturn(List.of());
+        // Both the primary search and the overview search return nothing
+        when(vectorStore.similaritySearch(any(SearchRequest.class)))
+                .thenReturn(List.of())
+                .thenReturn(List.of());
 
         ChatApiResponse response = chatService.chat("How do I configure X?");
 
@@ -57,10 +60,15 @@ class ChatServiceTest {
         Document doc = new Document("Content about feature X", Map.of(
                 "page_id", "123",
                 "title", "Feature X Guide",
-                "page_url", "http://confluence/pages/123"
+                "page_url", "http://confluence/pages/123",
+                "space_key", "ENG",
+                "section_heading", "Configuration"
         ));
 
-        when(vectorStore.similaritySearch(any(SearchRequest.class))).thenReturn(List.of(doc));
+        // Primary search returns the page chunk; overview search returns nothing
+        when(vectorStore.similaritySearch(any(SearchRequest.class)))
+                .thenReturn(List.of(doc))
+                .thenReturn(List.of());
         when(chatClient.prompt(any(Prompt.class))).thenReturn(requestSpec);
         when(requestSpec.call()).thenReturn(callSpec);
         when(callSpec.content()).thenReturn("Feature X is configured by...");
@@ -69,6 +77,37 @@ class ChatServiceTest {
 
         assertThat(response.answer()).isEqualTo("Feature X is configured by...");
         assertThat(response.sources()).hasSize(1);
-        assertThat(response.sources().get(0).title()).isEqualTo("Feature X Guide");
+
+        var source = response.sources().get(0);
+        assertThat(source.title()).isEqualTo("Feature X Guide");
+        assertThat(source.url()).isEqualTo("http://confluence/pages/123");
+        assertThat(source.anchorUrl()).isEqualTo("http://confluence/pages/123#Configuration");
+        assertThat(source.spaceKey()).isEqualTo("ENG");
+    }
+
+    @Test
+    void withSpaceOverview_broadQueryIncludesOverviewInContextButNotSources() {
+        Document overviewDoc = new Document("Space: Engineering (ENG)\n\nThe ENG space contains...", Map.of(
+                "page_id", "__space__ENG",
+                "document_type", "space_overview",
+                "title", "Engineering — Space Overview",
+                "page_url", "http://confluence/display/ENG",
+                "space_key", "ENG",
+                "section_heading", ""
+        ));
+
+        // Primary search returns nothing; overview search returns the space overview
+        when(vectorStore.similaritySearch(any(SearchRequest.class)))
+                .thenReturn(List.of())
+                .thenReturn(List.of(overviewDoc));
+        when(chatClient.prompt(any(Prompt.class))).thenReturn(requestSpec);
+        when(requestSpec.call()).thenReturn(callSpec);
+        when(callSpec.content()).thenReturn("The ENG space manages engineering documentation.");
+
+        ChatApiResponse response = chatService.chat("What is the ENG space doing?");
+
+        assertThat(response.answer()).contains("ENG space");
+        // Overview doc is context-only — it must not appear in citations
+        assertThat(response.sources()).isEmpty();
     }
 }
