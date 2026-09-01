@@ -7,8 +7,8 @@ spring:
     username: ${DB_USERNAME:confluencebot}
     password: ${DB_PASSWORD:confluencebot}
     hikari:
-      maximum-pool-size: 10
-      minimum-idle: 2
+      maximum-pool-size: ${DB_POOL_MAX_SIZE:10}
+      minimum-idle: ${DB_POOL_MIN_IDLE:2}
       connection-timeout: 30000
       idle-timeout: 600000
 
@@ -28,38 +28,38 @@ spring:
 
   ai:
     openai:
-      base-url: ${LOCAL_AI_BASE_URL:http://localhost:11434/v1}
-      api-key: ${LOCAL_AI_API_KEY:dummy}
+      base-url: ${AI_BASE_URL:http://localhost:11434/v1}
+      api-key: ${AI_API_KEY:dummy}
       chat:
         options:
-          model: openai/llama-4-17b-maverick
-          temperature: 0.1
-          max-tokens: 2048
+          model: ${CHAT_MODEL:openai/llama-4-17b-maverick}
+          temperature: ${CHAT_TEMPERATURE:0.1}
+          max-tokens: ${CHAT_MAX_TOKENS:2048}
       embedding:
         options:
-          model: openai/snowflake-arctic
+          model: ${EMBED_MODEL:openai/snowflake-arctic}
     vectorstore:
       pgvector:
-        table-name: confluence_chunks    # custom table name; NOT the Spring AI default
+        table-name: confluence_chunks    # must match V2 migration
         schema-name: public
         initialize-schema: false         # Flyway manages all DDL
         index-type: HNSW
         distance-type: COSINE_DISTANCE
-        dimensions: 1024                 # snowflake-arctic-embed-l
+        dimensions: 1024                 # snowflake-arctic-embed-l produces 1024-dim vectors
 
 # Bound to ConfluenceProperties record
 confluence:
   base-url: ${CONFLUENCE_BASE_URL}
   pat: ${CONFLUENCE_PAT}
   space-key: ${CONFLUENCE_SPACE_KEY}
-  page-fetch-limit: 250
-  request-timeout-seconds: 30
+  page-fetch-limit: ${CONFLUENCE_PAGE_FETCH_LIMIT:250}
+  request-timeout-seconds: ${CONFLUENCE_REQUEST_TIMEOUT_SECONDS:30}
 
 # Bound to ChatRetrievalProperties record
 chat:
   retrieval:
-    top-k: 5
-    similarity-threshold: 0.70
+    top-k: ${CHAT_TOP_K:5}
+    similarity-threshold: ${CHAT_SIMILARITY_THRESHOLD:0.70}
 
 management:
   endpoints:
@@ -72,6 +72,6 @@ management:
 
 logging:
   level:
-    com.kssasarma.confluencebot: INFO
-    org.springframework.ai: WARN
-    org.flywaydb: INFO
+    com.kssasarma.confluencebot: ${LOG_LEVEL_APP:INFO}
+    org.springframework.ai: ${LOG_LEVEL_SPRING_AI:WARN}
+    org.flywaydb: ${LOG_LEVEL_FLYWAY:INFO}
