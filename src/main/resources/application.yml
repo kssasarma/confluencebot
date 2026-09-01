@@ -1,0 +1,77 @@
+spring:
+  application:
+    name: confluence-chatbot
+
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/confluencebot}
+    username: ${DB_USERNAME:confluencebot}
+    password: ${DB_PASSWORD:confluencebot}
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 30000
+      idle-timeout: 600000
+
+  jpa:
+    hibernate:
+      ddl-auto: validate           # Flyway owns schema; Hibernate only validates
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: false
+
+  ai:
+    openai:
+      base-url: ${LOCAL_AI_BASE_URL:http://localhost:11434/v1}
+      api-key: ${LOCAL_AI_API_KEY:dummy}
+      chat:
+        options:
+          model: openai/llama-4-17b-maverick
+          temperature: 0.1
+          max-tokens: 2048
+      embedding:
+        options:
+          model: openai/snowflake-arctic
+    vectorstore:
+      pgvector:
+        table-name: confluence_chunks    # custom table name; NOT the Spring AI default
+        schema-name: public
+        initialize-schema: false         # Flyway manages all DDL
+        index-type: HNSW
+        distance-type: COSINE_DISTANCE
+        dimensions: 1024                 # snowflake-arctic-embed-l
+
+# Bound to ConfluenceProperties record
+confluence:
+  base-url: ${CONFLUENCE_BASE_URL}
+  pat: ${CONFLUENCE_PAT}
+  space-key: ${CONFLUENCE_SPACE_KEY}
+  page-fetch-limit: 250
+  request-timeout-seconds: 30
+
+# Bound to ChatRetrievalProperties record
+chat:
+  retrieval:
+    top-k: 5
+    similarity-threshold: 0.70
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: when-authorized
+
+logging:
+  level:
+    com.kssasarma.confluencebot: INFO
+    org.springframework.ai: WARN
+    org.flywaydb: INFO
