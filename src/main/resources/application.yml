@@ -58,8 +58,30 @@ confluence:
 # Bound to ChatRetrievalProperties record
 chat:
   retrieval:
+    # Final number of chunks sent to the LLM
     top-k: ${CHAT_TOP_K:5}
+
+    # Minimum cosine similarity for confidence caveat (not a hard filter)
     similarity-threshold: ${CHAT_SIMILARITY_THRESHOLD:0.70}
+
+    # Candidate pool for hybrid search before RRF fusion + re-ranking
+    candidate-pool-size: ${CHAT_CANDIDATE_POOL_SIZE:25}
+
+    # Chunking parameters (roughly 4 chars/token)
+    chunk-size: ${CHAT_CHUNK_SIZE:800}
+    chunk-overlap: ${CHAT_CHUNK_OVERLAP:100}
+
+    # MMR re-ranking: lambda controls relevance vs diversity trade-off (1.0 = pure relevance)
+    rerank-mmr-lambda: ${CHAT_RERANK_MMR_LAMBDA:0.7}
+
+    # Blend weight: 0.5 = equal weight to RRF fusion score and dense cosine score in MMR
+    rerank-fusion-weight: ${CHAT_RERANK_FUSION_WEIGHT:0.5}
+
+    # Enable optional LLM re-rank pass (falls back to MMR order on failure)
+    rerank-llm-enabled: ${CHAT_RERANK_LLM_ENABLED:true}
+
+    # Cosine similarity below this value triggers a low-confidence caveat in the prompt
+    min-similarity-threshold: ${CHAT_MIN_SIMILARITY_THRESHOLD:0.4}
 
 springdoc:
   api-docs:
