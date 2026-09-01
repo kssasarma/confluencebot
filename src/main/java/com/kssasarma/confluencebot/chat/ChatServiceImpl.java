@@ -19,6 +19,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Stream;
 
 @Service
 public class ChatServiceImpl implements ChatService {
@@ -41,6 +42,10 @@ public class ChatServiceImpl implements ChatService {
         this.retrievalProps = retrievalProps;
     }
 
+    // Minimum score for the space overview to be included in context.
+    // Lower than the main threshold so broad space-level questions still surface it.
+    private static final double OVERVIEW_SIMILARITY_THRESHOLD = 0.3;
+
     @Override
     public ChatApiResponse chat(String query) {
         log.info("Chat query received: {}", query);
@@ -53,25 +58,55 @@ public class ChatServiceImpl implements ChatService {
                         .build()
         );
 
-        if (relevantDocs.isEmpty()) {
+        // Always search for the space overview document separately — it answers
+        // broad "what does this space do?" questions that may not match any page chunk.
+        // Results are prepended to context but excluded from citations (no page_id match).
+        List<Document> overviewDocs = fetchSpaceOverview(query);
+
+        if (relevantDocs.isEmpty() && overviewDocs.isEmpty()) {
             log.warn("No relevant documents found for query: {}", query);
             return ChatApiResponse.noContext();
         }
 
-        log.debug("Retrieved {} relevant chunks", relevantDocs.size());
+        log.debug("Retrieved {} relevant chunks, {} overview chunks", relevantDocs.size(), overviewDocs.size());
+
+        // Overview first so the LLM sees space-level context before specific content
+        List<Document> contextDocs = Stream.concat(overviewDocs.stream(), relevantDocs.stream()).toList();
 
         Prompt prompt = new Prompt(List.of(
                 new SystemMessage(promptBuilder.systemPrompt()),
-                new UserMessage(promptBuilder.userPrompt(query, relevantDocs))
+                new UserMessage(promptBuilder.userPrompt(query, contextDocs))
         ));
 
         String answer = chatClient.prompt(prompt)
                 .call()
                 .content();
 
+        // Citations come only from page-level chunks, not the synthetic overview doc
         List<SourceReference> sources = extractSources(relevantDocs);
 
         return new ChatApiResponse(answer, sources);
+    }
+
+    /**
+     * Fetches the synthetic space overview document if it exists and is semantically
+     * relevant to the query (score ≥ {@code OVERVIEW_SIMILARITY_THRESHOLD}).
+     * Returns an empty list when no overview was ingested or the query is too specific.
+     */
+    private List<Document> fetchSpaceOverview(String query) {
+        try {
+            return vectorStore.similaritySearch(
+                    SearchRequest.builder()
+                            .query(query)
+                            .topK(1)
+                            .filterExpression("document_type == 'space_overview'")
+                            .similarityThreshold(OVERVIEW_SIMILARITY_THRESHOLD)
+                            .build()
+            );
+        } catch (Exception ex) {
+            log.warn("Space overview search failed (filter expressions may not be supported): {}", ex.getMessage());
+            return List.of();
+        }
     }
 
     /**

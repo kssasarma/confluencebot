@@ -3,6 +3,7 @@ package com.kssasarma.confluencebot.confluence;
 import com.kssasarma.confluencebot.config.ConfluenceProperties;
 import com.kssasarma.confluencebot.confluence.dto.ConfluencePageDetail;
 import com.kssasarma.confluencebot.confluence.dto.PageSearchResult;
+import com.kssasarma.confluencebot.confluence.dto.SpaceMetadata;
 import com.kssasarma.confluencebot.exception.ConfluenceException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -85,6 +86,18 @@ public class ConfluenceClientImpl implements ConfluenceClient {
                     .body(ConfluencePageDetail.class);
         } catch (RestClientException ex) {
             throw new ConfluenceException("Failed to fetch page [" + pageId + "]", ex);
+        }
+    }
+
+    @Override
+    public SpaceMetadata fetchSpaceMetadata(String spaceKey) {
+        try {
+            return restClient.get()
+                    .uri("/rest/api/space/{spaceKey}?expand=description.plain,homepage", spaceKey)
+                    .retrieve()
+                    .body(SpaceMetadata.class);
+        } catch (RestClientException ex) {
+            throw new ConfluenceException("Failed to fetch space metadata for [" + spaceKey + "]", ex);
         }
     }
 }
