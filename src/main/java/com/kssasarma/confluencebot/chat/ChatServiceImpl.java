@@ -4,152 +4,183 @@ import com.kssasarma.confluencebot.api.dto.ChatApiResponse;
 import com.kssasarma.confluencebot.api.dto.SourceReference;
 import com.kssasarma.confluencebot.chat.prompt.ConfluencePromptBuilder;
 import com.kssasarma.confluencebot.config.ChatRetrievalProperties;
+import com.kssasarma.confluencebot.rag.model.RetrievedChunk;
+import com.kssasarma.confluencebot.rag.service.HybridSearchService;
+import io.github.resilience4j.bulkhead.Bulkhead;
+import io.github.resilience4j.bulkhead.BulkheadFullException;
+import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
+import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.chat.messages.SystemMessage;
-import org.springframework.ai.chat.messages.UserMessage;
-import org.springframework.ai.chat.prompt.Prompt;
-import org.springframework.ai.document.Document;
-import org.springframework.ai.vectorstore.SearchRequest;
-import org.springframework.ai.vectorstore.VectorStore;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
-import java.util.stream.Stream;
 
 @Service
 public class ChatServiceImpl implements ChatService {
 
     private static final Logger log = LoggerFactory.getLogger(ChatServiceImpl.class);
 
+    private static final String FOLLOW_UP_MARKER = "---FOLLOW-UP-QUESTIONS---";
+    private static final String LLM_UNAVAILABLE =
+        "The AI service is temporarily unavailable. Please try again in a moment.";
+
     private final ChatClient chatClient;
-    private final VectorStore vectorStore;
+    private final HybridSearchService hybridSearchService;
     private final ConfluencePromptBuilder promptBuilder;
     private final ChatRetrievalProperties retrievalProps;
+    private final CircuitBreaker circuitBreaker;
+    private final Bulkhead bulkhead;
+
+    @Value("${chat.retrieval.min-similarity-threshold:0.4}")
+    private double minSimilarityThreshold;
 
     public ChatServiceImpl(
             ChatClient.Builder chatClientBuilder,
-            VectorStore vectorStore,
+            HybridSearchService hybridSearchService,
             ConfluencePromptBuilder promptBuilder,
-            ChatRetrievalProperties retrievalProps) {
-        this.chatClient = chatClientBuilder.build();
-        this.vectorStore = vectorStore;
-        this.promptBuilder = promptBuilder;
-        this.retrievalProps = retrievalProps;
+            ChatRetrievalProperties retrievalProps,
+            @Qualifier("llmCircuitBreaker") CircuitBreaker circuitBreaker,
+            @Qualifier("llmBulkhead") Bulkhead bulkhead) {
+        this.chatClient          = chatClientBuilder.build();
+        this.hybridSearchService = hybridSearchService;
+        this.promptBuilder       = promptBuilder;
+        this.retrievalProps      = retrievalProps;
+        this.circuitBreaker      = circuitBreaker;
+        this.bulkhead            = bulkhead;
     }
-
-    // Minimum score for the space overview to be included in context.
-    // Lower than the main threshold so broad space-level questions still surface it.
-    private static final double OVERVIEW_SIMILARITY_THRESHOLD = 0.3;
 
     @Override
     public ChatApiResponse chat(String query) {
         log.info("Chat query received: {}", query);
 
-        List<Document> relevantDocs = vectorStore.similaritySearch(
-                SearchRequest.builder()
-                        .query(query)
-                        .topK(retrievalProps.topK())
-                        .similarityThreshold(retrievalProps.similarityThreshold())
-                        .build()
-        );
+        List<RetrievedChunk> chunks = hybridSearchService.search(query);
 
-        // Always search for the space overview document separately — it answers
-        // broad "what does this space do?" questions that may not match any page chunk.
-        // Results are prepended to context but excluded from citations (no page_id match).
-        List<Document> overviewDocs = fetchSpaceOverview(query);
-
-        if (relevantDocs.isEmpty() && overviewDocs.isEmpty()) {
+        if (chunks.isEmpty()) {
             log.warn("No relevant documents found for query: {}", query);
             return ChatApiResponse.noContext();
         }
 
-        log.debug("Retrieved {} relevant chunks, {} overview chunks", relevantDocs.size(), overviewDocs.size());
+        double maxSimilarity = chunks.stream()
+            .mapToDouble(RetrievedChunk::getSimilarity)
+            .max().orElse(0.0);
+        boolean lowConfidence = maxSimilarity < minSimilarityThreshold;
 
-        // Overview first so the LLM sees space-level context before specific content
-        List<Document> contextDocs = Stream.concat(overviewDocs.stream(), relevantDocs.stream()).toList();
-
-        Prompt prompt = new Prompt(List.of(
-                new SystemMessage(promptBuilder.systemPrompt()),
-                new UserMessage(promptBuilder.userPrompt(query, contextDocs))
-        ));
-
-        String answer = chatClient.prompt(prompt)
-                .call()
-                .content();
-
-        // Citations come only from page-level chunks, not the synthetic overview doc
-        List<SourceReference> sources = extractSources(relevantDocs);
-
-        return new ChatApiResponse(answer, sources);
-    }
-
-    /**
-     * Fetches the synthetic space overview document if it exists and is semantically
-     * relevant to the query (score ≥ {@code OVERVIEW_SIMILARITY_THRESHOLD}).
-     * Returns an empty list when no overview was ingested or the query is too specific.
-     */
-    private List<Document> fetchSpaceOverview(String query) {
-        try {
-            return vectorStore.similaritySearch(
-                    SearchRequest.builder()
-                            .query(query)
-                            .topK(1)
-                            .filterExpression("document_type == 'space_overview'")
-                            .similarityThreshold(OVERVIEW_SIMILARITY_THRESHOLD)
-                            .build()
-            );
-        } catch (Exception ex) {
-            log.warn("Space overview search failed (filter expressions may not be supported): {}", ex.getMessage());
-            return List.of();
+        if (lowConfidence) {
+            log.info("Max similarity {:.3f} below threshold {} — answering with confidence caveat",
+                maxSimilarity, minSimilarityThreshold);
         }
+
+        String prompt = promptBuilder.buildPrompt(query, chunks, lowConfidence);
+        String rawAnswer = callLlmWithResilience(prompt, query);
+
+        ParsedAnswer parsed = parseAnswer(rawAnswer);
+        List<SourceReference> sources = extractSources(chunks);
+
+        return new ChatApiResponse(parsed.answer(), sources, parsed.followUpQuestions());
     }
+
+    // ── LLM call with circuit-breaker + bulkhead ──────────────────────────────
+
+    private String callLlmWithResilience(String prompt, String query) {
+        int maxAttempts = 3;
+        Exception lastException = null;
+
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                return bulkhead.executeSupplier(
+                    () -> circuitBreaker.executeSupplier(
+                        () -> chatClient.prompt().user(prompt).call().content()
+                    )
+                );
+            } catch (CallNotPermittedException e) {
+                log.error("LLM circuit breaker OPEN for query: {}", query);
+                return LLM_UNAVAILABLE;
+            } catch (BulkheadFullException e) {
+                log.error("LLM bulkhead full for query: {}", query);
+                return LLM_UNAVAILABLE;
+            } catch (Exception e) {
+                lastException = e;
+                log.warn("LLM call attempt {}/{} failed: {}", attempt, maxAttempts, e.getMessage());
+                if (attempt < maxAttempts) sleepBackoff(attempt);
+            }
+        }
+
+        log.error("All LLM attempts failed for query: {}", query, lastException);
+        return LLM_UNAVAILABLE;
+    }
+
+    // ── Answer parsing ────────────────────────────────────────────────────────
+
+    private ParsedAnswer parseAnswer(String rawAnswer) {
+        if (rawAnswer == null || rawAnswer.isBlank()) {
+            return new ParsedAnswer(LLM_UNAVAILABLE, Collections.emptyList());
+        }
+
+        int markerIdx = rawAnswer.indexOf(FOLLOW_UP_MARKER);
+        if (markerIdx == -1) {
+            return new ParsedAnswer(rawAnswer.strip(), Collections.emptyList());
+        }
+
+        String answer       = rawAnswer.substring(0, markerIdx).strip();
+        String followUpSection = rawAnswer.substring(markerIdx + FOLLOW_UP_MARKER.length()).strip();
+
+        List<String> followUps = Arrays.stream(followUpSection.split("\n"))
+            .map(String::strip)
+            .filter(line -> !line.isBlank())
+            .limit(3)
+            .toList();
+
+        return new ParsedAnswer(answer, followUps);
+    }
+
+    private record ParsedAnswer(String answer, List<String> followUpQuestions) {}
+
+    // ── Source extraction ─────────────────────────────────────────────────────
 
     /**
      * Builds one SourceReference per unique page from the retrieved chunks.
-     * Docs arrive ordered by similarity score (highest first), so the first chunk
-     * seen for each page_id is the best match — subsequent chunks for the same page
-     * are skipped.  The section heading from that best chunk is used to construct
-     * an anchor URL pointing directly to the relevant section on the Confluence page.
+     * Chunks arrive in re-ranked order (most relevant first), so the first chunk seen
+     * for each page_id is the best match — subsequent chunks for the same page are skipped.
      */
-    private List<SourceReference> extractSources(List<Document> docs) {
+    private List<SourceReference> extractSources(List<RetrievedChunk> chunks) {
         LinkedHashMap<String, SourceReference> byPageId = new LinkedHashMap<>();
 
-        for (Document doc : docs) {
-            Map<String, Object> meta = doc.getMetadata();
-            String pageId = (String) meta.getOrDefault("page_id", "");
+        for (RetrievedChunk chunk : chunks) {
+            String pageId = chunk.getPageId();
+            if (pageId == null || pageId.isBlank() || byPageId.containsKey(pageId)) continue;
 
-            if (byPageId.containsKey(pageId)) continue;
-
-            String pageUrl = (String) meta.getOrDefault("page_url", "");
-            if (pageUrl.isBlank()) {
-                log.warn("Chunk for page_id={} is missing page_url metadata — citation URL will be empty", pageId);
-            }
-
-            String heading = (String) meta.getOrDefault("section_heading", "");
+            String pageUrl  = chunk.getPageUrl() != null ? chunk.getPageUrl() : "";
+            String heading  = chunk.getSectionHeading() != null ? chunk.getSectionHeading() : "";
             String anchorUrl = buildAnchorUrl(pageUrl, heading);
 
             byPageId.put(pageId, new SourceReference(
-                    pageId,
-                    (String) meta.getOrDefault("title", "Unknown"),
-                    pageUrl,
-                    anchorUrl,
-                    (String) meta.getOrDefault("space_key", ""),
-                    doc.getScore()
+                pageId,
+                chunk.getTitle(),
+                pageUrl,
+                anchorUrl,
+                chunk.getSpaceKey(),
+                chunk.getSimilarity()
             ));
         }
 
         return new ArrayList<>(byPageId.values());
     }
 
-    private String buildAnchorUrl(String pageUrl, String heading) {
+    private static String buildAnchorUrl(String pageUrl, String heading) {
         if (pageUrl.isBlank() || heading.isBlank()) return pageUrl;
-        // Confluence Server generates anchor IDs from the heading text with spaces as hyphens
-        String anchor = heading.replace(" ", "-");
-        return pageUrl + "#" + anchor;
+        return pageUrl + "#" + heading.replace(" ", "-");
+    }
+
+    private static void sleepBackoff(int attempt) {
+        try { Thread.sleep(500L * (1L << (attempt - 1))); }
+        catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
     }
 }
