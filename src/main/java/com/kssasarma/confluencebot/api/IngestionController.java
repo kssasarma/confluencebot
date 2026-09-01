@@ -2,11 +2,14 @@ package com.kssasarma.confluencebot.api;
 
 import com.kssasarma.confluencebot.api.dto.IngestRequest;
 import com.kssasarma.confluencebot.api.dto.IngestResponse;
+import com.kssasarma.confluencebot.api.dto.PageSummaryResponse;
 import com.kssasarma.confluencebot.config.ConfluenceProperties;
 import com.kssasarma.confluencebot.ingestion.IngestionResult;
 import com.kssasarma.confluencebot.ingestion.IngestionService;
+import com.kssasarma.confluencebot.repository.ConfluencePageRepository;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.ArraySchema;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.ExampleObject;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -18,6 +21,8 @@ import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
+
 @Tag(name = "Ingestion", description = "Trigger embedding and vector-store ingestion of Confluence content")
 @RestController
 @RequestMapping("/api/ingest")
@@ -25,10 +30,52 @@ public class IngestionController {
 
     private final IngestionService ingestionService;
     private final ConfluenceProperties props;
+    private final ConfluencePageRepository pageRepository;
 
-    public IngestionController(IngestionService ingestionService, ConfluenceProperties props) {
+    public IngestionController(IngestionService ingestionService, ConfluenceProperties props,
+                               ConfluencePageRepository pageRepository) {
         this.ingestionService = ingestionService;
         this.props = props;
+        this.pageRepository = pageRepository;
+    }
+
+    @Operation(
+            summary = "List ingested pages",
+            description = """
+                    Returns all Confluence pages currently recorded in the ingestion registry. \
+                    Pass `spaceKey` to filter to a single space. Use this to verify what has been \
+                    ingested, check version numbers, and inspect chunk counts without direct \
+                    database access.
+                    """)
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Registry entries returned",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            array = @ArraySchema(schema = @Schema(implementation = PageSummaryResponse.class)),
+                            examples = @ExampleObject(value = """
+                                    [
+                                      {
+                                        "pageId": "131073",
+                                        "spaceKey": "IT",
+                                        "title": "Password Reset Guide",
+                                        "url": "http://confluence.example.com/display/IT/Password+Reset+Guide",
+                                        "version": 5,
+                                        "chunkCount": 7,
+                                        "ingestedAt": "2026-09-01T18:22:00Z"
+                                      }
+                                    ]
+                                    """)))
+    })
+    @GetMapping("/pages")
+    public ResponseEntity<List<PageSummaryResponse>> listPages(
+            @Parameter(description = "Filter by Confluence space key. Omit to return all spaces.",
+                    example = "IT")
+            @RequestParam(required = false) String spaceKey) {
+
+        List<PageSummaryResponse> pages = (spaceKey != null && !spaceKey.isBlank())
+                ? pageRepository.findBySpaceKey(spaceKey).stream().map(PageSummaryResponse::from).toList()
+                : pageRepository.findAll().stream().map(PageSummaryResponse::from).toList();
+
+        return ResponseEntity.ok(pages);
     }
 
     @Operation(
