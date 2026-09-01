@@ -1,18 +1,28 @@
 package com.kssasarma.confluencebot.api.dto;
 
-/**
- * A single cited source page returned with every chat response.
- *
- * url      — the Confluence page URL (always present when ingested correctly).
- * anchorUrl — url + "#" + section heading anchor; links directly to the relevant section.
- *             Falls back to url when no section heading is available.
- * score    — cosine similarity score of the best-matching chunk from this page (0–1).
- */
+import io.swagger.v3.oas.annotations.media.Schema;
+
+@Schema(description = "A Confluence page cited as a source for the answer")
 public record SourceReference(
+        @Schema(description = "Confluence numeric page ID", example = "131073")
         String pageId,
+
+        @Schema(description = "Page title", example = "Password Reset Guide")
         String title,
+
+        @Schema(description = "Full URL to the Confluence page",
+                example = "http://confluence.example.com/display/IT/Password+Reset+Guide")
         String url,
+
+        @Schema(description = "Deep-link URL to the specific section within the page (page URL + heading anchor). "
+                + "Falls back to the page URL when no section heading is available.",
+                example = "http://confluence.example.com/display/IT/Password+Reset+Guide#Self-Service-Reset")
         String anchorUrl,
+
+        @Schema(description = "Confluence space key the page belongs to", example = "IT")
         String spaceKey,
+
+        @Schema(description = "Cosine similarity score of the best-matching chunk from this page (0–1). "
+                + "Higher means more relevant.", example = "0.87")
         Double score
 ) {}
