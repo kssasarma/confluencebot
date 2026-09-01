@@ -3,6 +3,7 @@ package com.kssasarma.confluencebot.confluence.parser;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
+import org.jsoup.nodes.TextNode;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -16,6 +17,7 @@ import java.util.Set;
  * - Strip all Confluence macros (ac:structured-macro, ri:*, ac:link etc.)
  * - Walk DOM; when a heading (h1–h4) is encountered, flush current section and start new one
  * - Collect text from meaningful content tags (p, li, td, th, blockquote, pre)
+ * - Each section tracks its heading separately to enable section anchor URL construction
  * - Skip empty sections
  */
 @Component
@@ -27,48 +29,83 @@ public class JsoupStorageFormatParser implements StorageFormatParser {
     );
 
     @Override
-    public List<String> parse(String storageFormatXhtml) {
+    public List<ParsedSection> parse(String storageFormatXhtml) {
         if (storageFormatXhtml == null || storageFormatXhtml.isBlank()) {
             return List.of();
         }
 
         Document doc = Jsoup.parse(storageFormatXhtml);
+        preserveLinkText(doc);      // extract link display text before links are removed
         removeConfluenceMacros(doc);
 
-        List<String> sections = new ArrayList<>();
-        StringBuilder current = new StringBuilder();
+        List<ParsedSection> sections = new ArrayList<>();
+        StringBuilder currentContent = new StringBuilder();
+        String currentHeading = "";
 
         for (Element element : doc.body().getAllElements()) {
             String tag = element.tagName().toLowerCase();
 
             if (HEADING_TAGS.contains(tag)) {
-                flushSection(current, sections);
-                current = new StringBuilder();
-                String headingText = element.text().strip();
-                if (!headingText.isBlank()) {
-                    current.append(headingText).append("\n");
-                }
+                flushSection(currentHeading, currentContent, sections);
+                currentHeading = element.text().strip();
+                currentContent = new StringBuilder();
             } else if (CONTENT_TAGS.contains(tag)) {
                 // Only process leaf-level elements to avoid duplicate text from parent containers
                 if (element.children().stream().noneMatch(c -> CONTENT_TAGS.contains(c.tagName()))) {
                     String text = element.text().strip();
                     if (!text.isBlank()) {
-                        current.append(text).append("\n");
+                        currentContent.append(text).append("\n");
                     }
                 }
             }
         }
 
-        flushSection(current, sections);
+        flushSection(currentHeading, currentContent, sections);
 
         return sections;
     }
 
-    private void flushSection(StringBuilder buffer, List<String> sections) {
-        String text = buffer.toString().strip();
-        if (!text.isBlank()) {
-            sections.add(text);
+    private void flushSection(String heading, StringBuilder contentBuffer, List<ParsedSection> sections) {
+        String content = contentBuffer.toString().strip();
+        if (!content.isBlank()) {
+            sections.add(new ParsedSection(heading, content));
         }
+    }
+
+    /**
+     * Replaces each {@code <ac:link>} element with its display text so the link's
+     * semantic meaning survives into the embedded chunk.
+     * Priority: explicit link body text → referenced page title attribute.
+     * Called before {@link #removeConfluenceMacros} which strips {@code ac:link} entirely.
+     */
+    private void preserveLinkText(Document doc) {
+        for (Element link : doc.select("ac|link")) {
+            String text = extractLinkDisplayText(link);
+            if (!text.isBlank()) {
+                link.replaceWith(new TextNode(" " + text + " "));
+            } else {
+                link.remove();
+            }
+        }
+    }
+
+    private String extractLinkDisplayText(Element link) {
+        Element plainBody = link.selectFirst("ac|plain-text-link-body");
+        if (plainBody != null && !plainBody.text().isBlank()) {
+            return plainBody.text().strip();
+        }
+        Element richBody = link.selectFirst("ac|rich-text-link-body");
+        if (richBody != null && !richBody.text().isBlank()) {
+            return richBody.text().strip();
+        }
+        // Fall back to the referenced page title when no link body is set
+        Element riPage = link.selectFirst("ri|page");
+        if (riPage != null) {
+            String title = riPage.attr("ri:content-title");
+            if (title.isBlank()) title = riPage.attr("content-title");
+            return title.strip();
+        }
+        return "";
     }
 
     private void removeConfluenceMacros(Document doc) {

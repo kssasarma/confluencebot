@@ -18,10 +18,8 @@ public class ConfluencePromptBuilder {
                Do not use any prior knowledge or make up information.
             2. If the answer is not present in the context, respond exactly with: \
                "I could not find information about this in the documentation."
-            3. At the end of every answer, list the source pages you used under \
-               a "Sources:" heading with their titles and URLs.
-            4. Keep answers accurate, concise, and well-structured.
-            5. Use bullet points or numbered lists when listing steps or multiple items.
+            3. Keep answers accurate, concise, and well-structured.
+            4. Use bullet points or numbered lists when listing steps or multiple items.
             """;
 
     public String systemPrompt() {

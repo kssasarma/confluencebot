@@ -61,6 +61,17 @@ chat:
     top-k: ${CHAT_TOP_K:5}
     similarity-threshold: ${CHAT_SIMILARITY_THRESHOLD:0.70}
 
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    try-it-out-enabled: true
+    filter: true
+    tags-sorter: alpha
+    operations-sorter: alpha
+  show-actuator: false
+
 management:
   endpoints:
     web:
