@@ -2,6 +2,7 @@ package com.kssasarma.confluencebot.ingestion;
 
 import com.kssasarma.confluencebot.confluence.ConfluenceClient;
 import com.kssasarma.confluencebot.confluence.dto.ConfluencePageDetail;
+import com.kssasarma.confluencebot.confluence.parser.ParsedSection;
 import com.kssasarma.confluencebot.confluence.parser.StorageFormatParser;
 import com.kssasarma.confluencebot.config.ConfluenceProperties;
 import com.kssasarma.confluencebot.domain.ConfluencePageEntity;
@@ -113,24 +114,27 @@ public class IngestionServiceImpl implements IngestionService {
                 .map(ConfluencePageDetail.Storage::value)
                 .orElse("");
 
-        List<String> sections = parser.parse(rawXhtml);
+        List<ParsedSection> sections = parser.parse(rawXhtml);
 
         if (sections.isEmpty()) {
             log.warn("Page {} ({}) produced no parseable content — skipping", page.title(), page.id());
             return 0;
         }
 
-        List<String> chunks = chunkingStrategy.chunk(sections, page.title());
-
         String pageUrl = buildPageUrl(page);
-        List<Document> documents = buildDocuments(chunks, page, spaceKey, pageUrl);
+        List<Document> documents = buildDocuments(sections, page, spaceKey, pageUrl);
+
+        if (documents.isEmpty()) {
+            log.warn("Page {} ({}) produced no chunks after chunking — skipping", page.title(), page.id());
+            return 0;
+        }
 
         vectorStore.add(documents);
 
-        upsertPageTracking(page, spaceKey, pageUrl, chunks.size());
+        upsertPageTracking(page, spaceKey, pageUrl, documents.size());
 
-        log.info("Ingested: {} [{}] → {} chunks", page.title(), page.id(), chunks.size());
-        return chunks.size();
+        log.info("Ingested: {} [{}] → {} chunks", page.title(), page.id(), documents.size());
+        return documents.size();
     }
 
     /**
@@ -145,21 +149,38 @@ public class IngestionServiceImpl implements IngestionService {
         log.debug("Deleted {} stale chunks for page {}", deleted, pageId);
     }
 
-    private List<Document> buildDocuments(List<String> chunks, ConfluencePageDetail page,
+    /**
+     * Processes each parsed section independently through the chunking strategy so that
+     * the section's heading is preserved in chunk metadata.  This lets callers later
+     * reconstruct a section-level anchor URL (page_url + "#" + section_heading).
+     */
+    private List<Document> buildDocuments(List<ParsedSection> sections, ConfluencePageDetail page,
                                            String spaceKey, String pageUrl) {
         List<Document> docs = new ArrayList<>();
         int index = 0;
 
-        for (String chunk : chunks) {
-            Map<String, Object> metadata = new HashMap<>();
-            metadata.put("page_id", page.id());
-            metadata.put("space_key", spaceKey);
-            metadata.put("title", page.title());
-            metadata.put("page_url", pageUrl);
-            metadata.put("chunk_index", index++);
-            metadata.put("version", page.version().number());
+        for (ParsedSection section : sections) {
+            if (!section.hasContent()) continue;
 
-            docs.add(new Document(chunk, metadata));
+            // Reconstruct the full section text (heading + body) that the chunker receives
+            String sectionText = section.hasHeading()
+                    ? section.heading() + "\n" + section.content()
+                    : section.content();
+
+            List<String> chunks = chunkingStrategy.chunk(List.of(sectionText), page.title());
+
+            for (String chunk : chunks) {
+                Map<String, Object> metadata = new HashMap<>();
+                metadata.put("page_id", page.id());
+                metadata.put("space_key", spaceKey);
+                metadata.put("title", page.title());
+                metadata.put("page_url", pageUrl);
+                metadata.put("chunk_index", index++);
+                metadata.put("version", page.version().number());
+                metadata.put("section_heading", section.hasHeading() ? section.heading() : "");
+
+                docs.add(new Document(chunk, metadata));
+            }
         }
 
         return docs;
