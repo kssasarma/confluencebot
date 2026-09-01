@@ -7,7 +7,8 @@ import com.kssasarma.confluencebot.confluence.parser.ParsedSection;
 import com.kssasarma.confluencebot.confluence.parser.StorageFormatParser;
 import com.kssasarma.confluencebot.config.ConfluenceProperties;
 import com.kssasarma.confluencebot.domain.ConfluencePageEntity;
-import com.kssasarma.confluencebot.ingestion.chunking.ChunkingStrategy;
+import com.kssasarma.confluencebot.ingestion.chunking.SemanticChunkingStrategy;
+import com.kssasarma.confluencebot.ingestion.chunking.SemanticChunkingStrategy.ChunkedContent;
 import com.kssasarma.confluencebot.repository.ConfluencePageRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -28,7 +29,7 @@ public class IngestionServiceImpl implements IngestionService {
 
     private final ConfluenceClient confluenceClient;
     private final StorageFormatParser parser;
-    private final ChunkingStrategy chunkingStrategy;
+    private final SemanticChunkingStrategy chunkingStrategy;
     private final VectorStore vectorStore;
     private final ConfluencePageRepository pageRepository;
     private final ConfluenceProperties props;
@@ -37,7 +38,7 @@ public class IngestionServiceImpl implements IngestionService {
     public IngestionServiceImpl(
             ConfluenceClient confluenceClient,
             StorageFormatParser parser,
-            ChunkingStrategy chunkingStrategy,
+            SemanticChunkingStrategy chunkingStrategy,
             VectorStore vectorStore,
             ConfluencePageRepository pageRepository,
             ConfluenceProperties props,
@@ -65,14 +66,13 @@ public class IngestionServiceImpl implements IngestionService {
 
         List<ConfluencePageDetail> pages = confluenceClient.fetchAllPages(spaceKey);
 
-        AtomicInteger processed = new AtomicInteger(0);
+        AtomicInteger processed   = new AtomicInteger(0);
         AtomicInteger totalChunks = new AtomicInteger(0);
-        AtomicInteger skipped = new AtomicInteger(0);
+        AtomicInteger skipped     = new AtomicInteger(0);
 
         for (ConfluencePageDetail page : pages) {
             try {
                 Integer existingVersion = pageRepository.findVersionByPageId(page.id());
-
                 if (existingVersion != null && existingVersion == page.version().number()) {
                     log.debug("Page {} ({}) unchanged at version {}, skipping",
                             page.title(), page.id(), existingVersion);
@@ -85,7 +85,6 @@ public class IngestionServiceImpl implements IngestionService {
                 processed.incrementAndGet();
 
             } catch (Exception ex) {
-                // A single failed page must NOT abort the entire space ingestion
                 log.error("Failed to ingest page {} ({}): {}",
                         page.id(), page.title(), ex.getMessage(), ex);
             }
@@ -109,11 +108,6 @@ public class IngestionServiceImpl implements IngestionService {
         return new IngestionResult(1, chunks, 0, durationMs);
     }
 
-    /**
-     * Ingests the Confluence space description as a synthetic "space overview" document.
-     * This gives broad queries like "What does the ENG space do?" a direct match target.
-     * The old overview document (if any) is deleted first so re-ingestion is idempotent.
-     */
     private void ingestSpaceOverview(SpaceMetadata spaceMeta) {
         String syntheticPageId = "__space__" + spaceMeta.key();
         deleteChunksForPage(syntheticPageId);
@@ -130,23 +124,21 @@ public class IngestionServiceImpl implements IngestionService {
         }
 
         Map<String, Object> metadata = new HashMap<>();
-        metadata.put("page_id", syntheticPageId);
-        metadata.put("space_key", spaceMeta.key());
-        metadata.put("space_name", spaceMeta.name());
-        metadata.put("title", spaceMeta.name() + " — Space Overview");
-        metadata.put("page_url", props.baseUrl() + "/display/" + spaceMeta.key());
+        metadata.put("page_id",       syntheticPageId);
+        metadata.put("space_key",     spaceMeta.key());
+        metadata.put("space_name",    spaceMeta.name());
+        metadata.put("title",         spaceMeta.name() + " — Space Overview");
+        metadata.put("page_url",      props.baseUrl() + "/display/" + spaceMeta.key());
         metadata.put("document_type", "space_overview");
         metadata.put("section_heading", "");
-        metadata.put("chunk_index", 0);
-        metadata.put("version", 0);
+        metadata.put("chunk_type",    "TEXT");
+        metadata.put("chunk_index",   0);
+        metadata.put("version",       0);
 
         vectorStore.add(List.of(new Document(content, metadata)));
         log.info("Space overview document ingested for space '{}'", spaceMeta.key());
     }
 
-    /**
-     * Template Method: fixed pipeline — delete → parse → chunk → embed → track.
-     */
     private int processPage(ConfluencePageDetail page, String spaceKey,
                              String spaceName, String homepageId) {
         log.info("Processing page: {} [{}]", page.title(), page.id());
@@ -165,39 +157,33 @@ public class IngestionServiceImpl implements IngestionService {
             return 0;
         }
 
-        String pageUrl = buildPageUrl(page);
+        String pageUrl   = buildPageUrl(page);
         boolean isHomepage = page.id().equals(homepageId);
         List<Document> documents = buildDocuments(sections, page, spaceKey, spaceName, pageUrl, isHomepage);
 
         if (documents.isEmpty()) {
-            log.warn("Page {} ({}) produced no chunks after chunking — skipping", page.title(), page.id());
+            log.warn("Page {} ({}) produced no chunks — skipping", page.title(), page.id());
             return 0;
         }
 
         vectorStore.add(documents);
-
         upsertPageTracking(page, spaceKey, pageUrl, documents.size());
 
-        log.info("Ingested: {} [{}] → {} chunks", page.title(), page.id(), documents.size());
+        log.info("Ingested: {} [{}] → {} chunks ({} sections)",
+                page.title(), page.id(), documents.size(), sections.size());
         return documents.size();
     }
 
-    /**
-     * Deletes all vector store chunks for a page using direct SQL.
-     * Uses the functional index on (metadata->>'page_id') for efficiency.
-     */
     private void deleteChunksForPage(String pageId) {
         int deleted = jdbcTemplate.update(
-                "DELETE FROM confluence_chunks WHERE metadata->>'page_id' = ?",
-                pageId
-        );
+                "DELETE FROM confluence_chunks WHERE metadata->>'page_id' = ?", pageId);
         log.debug("Deleted {} stale chunks for page {}", deleted, pageId);
     }
 
     /**
-     * Processes each parsed section independently through the chunking strategy so that
-     * the section's heading is preserved in chunk metadata.  This lets callers later
-     * reconstruct a section-level anchor URL (page_url + "#" + section_heading).
+     * Runs each ParsedSection through the SemanticChunkingStrategy, which handles TEXT/CODE/TABLE
+     * sections with appropriate budgets and overlap.  chunk_type is stored in metadata so hybrid
+     * search and prompt-building can use it downstream.
      */
     private List<Document> buildDocuments(List<ParsedSection> sections, ConfluencePageDetail page,
                                            String spaceKey, String spaceName,
@@ -208,26 +194,24 @@ public class IngestionServiceImpl implements IngestionService {
         for (ParsedSection section : sections) {
             if (!section.hasContent()) continue;
 
-            // Reconstruct the full section text (heading + body) that the chunker receives
-            String sectionText = section.hasHeading()
-                    ? section.heading() + "\n" + section.content()
-                    : section.content();
+            List<ChunkedContent> chunks = chunkingStrategy.chunk(section, page.title());
 
-            List<String> chunks = chunkingStrategy.chunk(List.of(sectionText), page.title());
+            for (ChunkedContent chunk : chunks) {
+                if (chunk.text() == null || chunk.text().isBlank()) continue;
 
-            for (String chunk : chunks) {
                 Map<String, Object> metadata = new HashMap<>();
-                metadata.put("page_id", page.id());
-                metadata.put("space_key", spaceKey);
-                metadata.put("space_name", spaceName != null ? spaceName : "");
-                metadata.put("title", page.title());
-                metadata.put("page_url", pageUrl);
-                metadata.put("chunk_index", index++);
-                metadata.put("version", page.version().number());
-                metadata.put("section_heading", section.hasHeading() ? section.heading() : "");
-                metadata.put("is_homepage", String.valueOf(isHomepage));
+                metadata.put("page_id",         page.id());
+                metadata.put("space_key",        spaceKey);
+                metadata.put("space_name",       spaceName != null ? spaceName : "");
+                metadata.put("title",            page.title());
+                metadata.put("page_url",         pageUrl);
+                metadata.put("chunk_index",      index++);
+                metadata.put("version",          page.version().number());
+                metadata.put("section_heading",  section.hasHeading() ? section.heading() : "");
+                metadata.put("is_homepage",      String.valueOf(isHomepage));
+                metadata.put("chunk_type",       chunk.chunkType());
 
-                docs.add(new Document(chunk, metadata));
+                docs.add(new Document(chunk.text(), metadata));
             }
         }
 
@@ -239,7 +223,6 @@ public class IngestionServiceImpl implements IngestionService {
         ConfluencePageEntity entity = pageRepository.findById(page.id())
                 .orElseGet(() -> ConfluencePageEntity.newPage(
                         page.id(), spaceKey, page.title(), pageUrl));
-
         entity.setVersion(page.version().number());
         entity.setChunkCount(chunkCount);
         entity.setIngestedAt(OffsetDateTime.now());

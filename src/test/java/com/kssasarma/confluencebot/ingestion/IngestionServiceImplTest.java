@@ -6,7 +6,8 @@ import com.kssasarma.confluencebot.confluence.dto.SpaceMetadata;
 import com.kssasarma.confluencebot.confluence.parser.ParsedSection;
 import com.kssasarma.confluencebot.confluence.parser.StorageFormatParser;
 import com.kssasarma.confluencebot.config.ConfluenceProperties;
-import com.kssasarma.confluencebot.ingestion.chunking.ChunkingStrategy;
+import com.kssasarma.confluencebot.ingestion.chunking.SemanticChunkingStrategy;
+import com.kssasarma.confluencebot.ingestion.chunking.SemanticChunkingStrategy.ChunkedContent;
 import com.kssasarma.confluencebot.repository.ConfluencePageRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -28,7 +29,7 @@ class IngestionServiceImplTest {
 
     @Mock private ConfluenceClient confluenceClient;
     @Mock private StorageFormatParser parser;
-    @Mock private ChunkingStrategy chunkingStrategy;
+    @Mock private SemanticChunkingStrategy chunkingStrategy;
     @Mock private VectorStore vectorStore;
     @Mock private ConfluencePageRepository pageRepository;
     @Mock private JdbcTemplate jdbcTemplate;
@@ -76,7 +77,8 @@ class IngestionServiceImplTest {
         when(pageRepository.findVersionByPageId("p2")).thenReturn(4);
         when(parser.parse(anyString()))
                 .thenReturn(List.of(new ParsedSection("Intro", "Some text")));
-        when(chunkingStrategy.chunk(any(), eq("Guide"))).thenReturn(List.of("chunk one"));
+        when(chunkingStrategy.chunk(any(), eq("Guide")))
+                .thenReturn(List.of(new ChunkedContent("chunk one", "TEXT")));
         when(pageRepository.findById("p2")).thenReturn(Optional.empty());
         when(pageRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
@@ -96,7 +98,8 @@ class IngestionServiceImplTest {
         when(parser.parse(anyString()))
                 .thenThrow(new RuntimeException("simulated parse failure"))
                 .thenReturn(List.of(new ParsedSection("", "Good content")));
-        when(chunkingStrategy.chunk(any(), eq("Good Page"))).thenReturn(List.of("chunk"));
+        when(chunkingStrategy.chunk(any(), eq("Good Page")))
+                .thenReturn(List.of(new ChunkedContent("chunk", "TEXT")));
         when(pageRepository.findById("good")).thenReturn(Optional.empty());
         when(pageRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
@@ -133,7 +136,8 @@ class IngestionServiceImplTest {
         when(confluenceClient.fetchPage("sp1")).thenReturn(page);
         when(parser.parse(anyString()))
                 .thenReturn(List.of(new ParsedSection("Sec", "Text")));
-        when(chunkingStrategy.chunk(any(), eq("Spec Page"))).thenReturn(List.of("chunk"));
+        when(chunkingStrategy.chunk(any(), eq("Spec Page")))
+                .thenReturn(List.of(new ChunkedContent("chunk", "TEXT")));
         when(pageRepository.findById("sp1")).thenReturn(Optional.empty());
         when(pageRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
