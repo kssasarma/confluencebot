@@ -64,12 +64,12 @@ public class ChatController {
                                       "type": "urn:confluencebot:error:validation",
                                       "title": "Validation Failed",
                                       "status": 400,
-                                      "detail": "query: Query must not be blank"
+                                      "detail": "question: Query must not be blank"
                                     }
                                     """)))
     })
     @PostMapping
     public ResponseEntity<ChatApiResponse> chat(@Valid @RequestBody ChatRequest request) {
-        return ResponseEntity.ok(chatService.chat(request.query()));
+        return ResponseEntity.ok(chatService.chat(request.question()));
     }
 }

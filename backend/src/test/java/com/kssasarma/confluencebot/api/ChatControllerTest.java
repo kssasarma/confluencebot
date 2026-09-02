@@ -42,7 +42,7 @@ class ChatControllerTest {
         mockMvc.perform(post("/api/chat")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"query": "How do I configure X?"}
+                                {"question": "How do I configure X?"}
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.answer").value("Configure X by..."))
@@ -54,7 +54,7 @@ class ChatControllerTest {
         mockMvc.perform(post("/api/chat")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"query": ""}
+                                {"question": ""}
                                 """))
                 .andExpect(status().isBadRequest());
     }
@@ -64,7 +64,7 @@ class ChatControllerTest {
         mockMvc.perform(post("/api/chat")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"query": "ab"}
+                                {"question": "ab"}
                                 """))
                 .andExpect(status().isBadRequest());
     }
@@ -75,7 +75,7 @@ class ChatControllerTest {
 
         mockMvc.perform(post("/api/chat")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"query\": \"" + longQuery + "\"}"))
+                        .content("{\"question\": \"" + longQuery + "\"}"))
                 .andExpect(status().isBadRequest());
     }
 
