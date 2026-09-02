@@ -18,12 +18,12 @@ spring:
       idle-timeout: 600000
 
   jpa:
+    open-in-view: false
     hibernate:
       ddl-auto: validate           # Flyway owns schema; Hibernate only validates
     show-sql: false
     properties:
       hibernate:
-        dialect: org.hibernate.dialect.PostgreSQLDialect
         format_sql: true
 
   flyway:
