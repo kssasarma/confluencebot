@@ -42,7 +42,7 @@ class IngestionControllerTest {
 
     @Test
     void ingestSpace_bodyWithSpaceKey_usesProvidedKey() throws Exception {
-        when(ingestionService.ingestSpace("MYSPACE"))
+        when(ingestionService.ingestSpace("MYSPACE", false))
                 .thenReturn(new IngestionResult(10, 50, 2, 1000L));
 
         mockMvc.perform(post("/api/ingest/space")
@@ -60,7 +60,7 @@ class IngestionControllerTest {
     @Test
     void ingestSpace_noBody_fallsBackToConfiguredSpaceKey() throws Exception {
         // props.spaceKey() returns "ENG" from the directly constructed ConfluenceProperties
-        when(ingestionService.ingestSpace("ENG"))
+        when(ingestionService.ingestSpace("ENG", false))
                 .thenReturn(new IngestionResult(5, 20, 0, 500L));
 
         mockMvc.perform(post("/api/ingest/space"))
