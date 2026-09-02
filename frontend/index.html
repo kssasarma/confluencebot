@@ -4,7 +4,41 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/logo.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <meta
+      name="description"
+      content="Ask questions about your Confluence documentation and get answers with citations."
+    />
     <title>Confluence Chatbot</title>
+
+    <script>
+      /*
+       * Apply the theme before the first paint.
+       *
+       * React can only set the class after it has mounted, by which point the browser has
+       * already painted a white page — so a dark-mode user gets a full-screen white flash on
+       * every load. This is the one place a blocking inline script earns its cost.
+       *
+       * It reads the same key the theme provider writes, and is deliberately total: any failure
+       * (storage blocked in a private window) falls through to the system preference.
+       */
+      (function () {
+        try {
+          var stored = localStorage.getItem('cb_theme')
+          var theme = stored ? JSON.parse(stored) : 'system'
+          var dark =
+            theme === 'dark' ||
+            (theme !== 'light' &&
+              window.matchMedia('(prefers-color-scheme: dark)').matches)
+          document.documentElement.classList.toggle('dark', dark)
+        } catch (error) {
+          document.documentElement.classList.toggle(
+            'dark',
+            window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+          )
+        }
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>

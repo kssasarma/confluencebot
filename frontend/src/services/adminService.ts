@@ -1,9 +1,18 @@
-import { API_BASE } from '../config/env'
+import { apiJson, jsonBody } from './http'
+
+/**
+ * Administration endpoints.
+ *
+ * These go through `apiJson` like everything else. The previous version hand-rolled its own
+ * `fetch` with the token threaded through every call site, which meant an expired token failed
+ * the request outright instead of being refreshed and replayed — the one thing the shared HTTP
+ * layer exists to do.
+ */
 
 export interface AdminUser {
   id: number
   email: string
-  role: string
+  role: 'ADMIN' | 'USER'
   enabled: boolean
   mustChangePassword: boolean
   createdAt: string
@@ -20,7 +29,7 @@ export interface IngestionJob {
   spaceKey: string | null
   pageId: string | null
   force: boolean
-  status: string
+  status: 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED' | string
   createdAt: string
   startedAt: string | null
   completedAt: string | null
@@ -30,60 +39,28 @@ export interface IngestionJob {
   errorMessage: string | null
 }
 
-async function authFetch<T>(path: string, token: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-      ...(options?.headers ?? {}),
-    },
-  })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    throw new Error(err.detail ?? err.message ?? `HTTP ${res.status}`)
-  }
-  return res.json() as Promise<T>
-}
+export const listUsers = (): Promise<AdminUser[]> => apiJson<AdminUser[]>('/admin/users')
 
-export async function listUsers(token: string): Promise<AdminUser[]> {
-  return authFetch('/admin/users', token)
-}
-
-export async function createUser(
-  token: string,
+export const createUser = (
   email: string,
   role: string,
   tempPassword?: string,
-): Promise<CreateUserResult> {
-  return authFetch('/admin/users', token, {
+): Promise<CreateUserResult> =>
+  apiJson<CreateUserResult>('/admin/users', {
     method: 'POST',
-    body: JSON.stringify({ email, role, tempPassword }),
+    ...jsonBody({ email, role, tempPassword }),
   })
-}
 
-export async function setUserEnabled(token: string, id: number, enabled: boolean): Promise<AdminUser> {
-  return authFetch(`/admin/users/${id}/enabled`, token, {
-    method: 'PATCH',
-    body: JSON.stringify({ enabled }),
-  })
-}
+export const setUserEnabled = (id: number, enabled: boolean): Promise<AdminUser> =>
+  apiJson<AdminUser>(`/admin/users/${id}/enabled`, { method: 'PATCH', ...jsonBody({ enabled }) })
 
-export async function ingestSpace(token: string, spaceKey: string, force = false): Promise<IngestionJob> {
-  return authFetch('/ingest/space', token, {
-    method: 'POST',
-    body: JSON.stringify({ spaceKey, force }),
-  })
-}
+export const ingestSpace = (spaceKey: string, force = false): Promise<IngestionJob> =>
+  apiJson<IngestionJob>('/ingest/space', { method: 'POST', ...jsonBody({ spaceKey, force }) })
 
-export async function ingestPage(token: string, pageId: string): Promise<IngestionJob> {
-  return authFetch(`/ingest/page/${pageId}`, token, { method: 'POST' })
-}
+export const ingestPage = (pageId: string): Promise<IngestionJob> =>
+  apiJson<IngestionJob>(`/ingest/page/${pageId}`, { method: 'POST' })
 
-export async function listJobs(token: string): Promise<IngestionJob[]> {
-  return authFetch('/ingest/jobs', token)
-}
+export const listJobs = (): Promise<IngestionJob[]> => apiJson<IngestionJob[]>('/ingest/jobs')
 
-export async function getJob(token: string, jobId: string): Promise<IngestionJob> {
-  return authFetch(`/ingest/jobs/${jobId}`, token)
-}
+export const getJob = (jobId: string): Promise<IngestionJob> =>
+  apiJson<IngestionJob>(`/ingest/jobs/${jobId}`)

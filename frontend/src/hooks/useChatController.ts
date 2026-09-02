@@ -1,163 +1,202 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { ChatSession, Message, Source } from '../types'
-import {
-  fetchSessions, fetchTranscript, streamChatMessage,
-  updateSession as apiUpdateSession, deleteSession as apiDeleteSession,
-} from '../services/chatService'
-
-const newId = (): string =>
-  typeof crypto !== 'undefined' && 'randomUUID' in crypto
-    ? crypto.randomUUID()
-    : `${Date.now()}-${Math.random().toString(16).slice(2)}`
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
+import type { Message, Source } from '../types'
+import { fetchTranscript, streamChatMessage, type StreamCompletion } from '../services/chatService'
+import { classifyError } from '../lib/errors'
+import { newLocalId } from '../lib/id'
+import { queryKeys } from '../services/queryKeys'
 
 export interface ChatController {
-  sessions: ChatSession[]
-  /** The conversation being typed into that does not exist on the server yet. */
-  draftChatId: string | null
-  activeChatId: string | null
-  activeSession: ChatSession | null
-  messages: Message[]
-  isLoadingMessages: boolean
+  /** Transcripts by conversation. Switching away from a streaming answer and back keeps it. */
+  messagesByChat: Record<string, Message[]>
+  loadingChatId: string | null
+  loadErrorByChat: Record<string, string>
   streamingChatId: string | null
-  isStreaming: boolean
-  /** True when "New chat" would do nothing, because an empty new chat is already open. */
-  isOnEmptyDraft: boolean
-  startNewChat: () => void
-  selectChat: (chatId: string) => void
-  sendMessage: (text: string) => Promise<void>
+
+  loadTranscript: (chatId: string) => void
+  sendMessage: (chatId: string, question: string) => Promise<void>
+  /** Re-asks the question that produced a failed answer, replacing it in place. */
+  retry: (chatId: string) => Promise<void>
   stopStreaming: () => void
-  renameChat: (chatId: string, title: string) => Promise<void>
-  togglePin: (chatId: string) => Promise<void>
-  removeChat: (chatId: string) => Promise<void>
+  discardChat: (chatId: string) => void
+}
+
+interface SessionRegistration {
+  chatId: string
+  title: string | null
+}
+
+interface ChatControllerOptions {
+  /** Called when the server has recorded a turn, so the sidebar can show the conversation. */
+  onSessionRecorded: (registration: SessionRegistration) => void
+  /** Called when a summarised title arrives after the answer. */
+  onTitleRefined: (registration: SessionRegistration) => void
 }
 
 /**
- * Owns every piece of conversation state: the list, the transcripts and the in-flight answer.
+ * Owns the in-flight answer and every transcript the user has opened.
  *
- * A new conversation starts as a draft that lives only in the browser and is created server-side
- * by the first question — clicking "New chat" ten times can no longer leave ten empty
- * conversations behind. Transcripts are kept per conversation, so switching away from a streaming
- * answer and back does not lose it.
+ * Transcripts are kept as `Record<chatId, Message[]>` rather than nested inside a session list:
+ * appending a token then costs one array copy of one conversation, not a clone of every
+ * conversation the user has ever opened.
  */
-export function useChatController(): ChatController {
-  const [sessions, setSessions] = useState<ChatSession[]>([])
+export function useChatController({
+  onSessionRecorded, onTitleRefined,
+}: ChatControllerOptions): ChatController {
+  const queryClient = useQueryClient()
+
   const [messagesByChat, setMessagesByChat] = useState<Record<string, Message[]>>({})
-  const [activeChatId, setActiveChatId] = useState<string | null>(null)
-  const [draftChatId, setDraftChatId] = useState<string | null>(null)
   const [loadingChatId, setLoadingChatId] = useState<string | null>(null)
+  const [loadErrorByChat, setLoadErrorByChat] = useState<Record<string, string>>({})
   const [streamingChatId, setStreamingChatId] = useState<string | null>(null)
+
   const abortRef = useRef<AbortController | null>(null)
 
-  useEffect(() => {
-    let cancelled = false
-    fetchSessions()
-      .then(loaded => { if (!cancelled) setSessions(sortSessions(loaded)) })
-      .catch(() => { /* the sidebar simply stays empty; the composer still works */ })
-    return () => { cancelled = true }
-  }, [])
-
-  const messages = useMemo(
-    () => (activeChatId ? messagesByChat[activeChatId] ?? [] : []),
-    [activeChatId, messagesByChat],
-  )
-
-  const patchMessage = useCallback((chatId: string, messageId: string, patch: Partial<Message>) => {
-    setMessagesByChat(prev => ({
-      ...prev,
-      [chatId]: (prev[chatId] ?? []).map(m => (m.id === messageId ? { ...m, ...patch } : m)),
-    }))
-  }, [])
-
-  const appendToken = useCallback((chatId: string, messageId: string, delta: string) => {
-    setMessagesByChat(prev => ({
-      ...prev,
-      [chatId]: (prev[chatId] ?? []).map(m =>
-        m.id === messageId ? { ...m, content: m.content + delta } : m),
-    }))
-  }, [])
-
-  /** Adds or refreshes the conversation in the sidebar once the server has recorded a turn. */
-  const registerSession = useCallback((chatId: string, title: string | null) => {
-    setSessions(prev => {
-      const existing = prev.find(s => s.chatId === chatId)
-      const updatedAt = new Date().toISOString()
-      const next = existing
-        ? prev.map(s => s.chatId === chatId
-            ? { ...s, title: title ?? s.title, messageCount: s.messageCount + 2, updatedAt }
-            : s)
-        : [{ chatId, title, pinned: false, messageCount: 2, updatedAt }, ...prev]
-      return sortSessions(next)
-    })
-    setDraftChatId(current => (current === chatId ? null : current))
-  }, [])
-
-  const isOnEmptyDraft =
-    activeChatId !== null && activeChatId === draftChatId && messages.length === 0
-
-  const startNewChat = useCallback(() => {
-    // Already sitting in an untouched new chat: keep it instead of opening another.
-    if (isOnEmptyDraft) return
-    const chatId = newId()
-    setDraftChatId(chatId)
-    setActiveChatId(chatId)
-    setMessagesByChat(prev => ({ ...prev, [chatId]: [] }))
-  }, [isOnEmptyDraft])
-
-  const selectChat = useCallback((chatId: string) => {
-    setActiveChatId(chatId)
-    if (messagesByChat[chatId]) return
-
-    setLoadingChatId(chatId)
-    fetchTranscript(chatId)
-      .then(loaded => setMessagesByChat(current => ({ ...current, [chatId]: loaded })))
-      .catch(() => setMessagesByChat(current => ({ ...current, [chatId]: [] })))
-      .finally(() => setLoadingChatId(current => (current === chatId ? null : current)))
-  }, [messagesByChat])
-
   /**
-   * Reports a failed answer without throwing away what already arrived: a stream that dies
-   * halfway keeps its partial text and gets the reason underneath it.
+   * The transcripts, readable without being a dependency.
+   *
+   * `retry` needs the current transcript to find the question behind a failed answer. Taking
+   * `messagesByChat` as a dependency would give it a new identity on every streamed token, which
+   * ripples through every consumer of the chat context and undoes the memoisation on the message
+   * rows. Assigning during render is safe here: it is a mirror of state, never a source of it.
    */
-  const reportFailure = useCallback((chatId: string, answerId: string, message: string) => {
-    setMessagesByChat(prev => {
-      const existing = prev[chatId] ?? []
-      const partial = existing.find(m => m.id === answerId)
-      if (!partial?.content) {
-        return {
-          ...prev,
-          [chatId]: existing.map(m =>
-            m.id === answerId ? { ...m, streaming: false, failed: true, content: message } : m),
-        }
-      }
-      return {
-        ...prev,
-        [chatId]: [
-          ...existing.map(m => (m.id === answerId ? { ...m, streaming: false } : m)),
-          { id: newId(), role: 'assistant' as const, content: message, failed: true },
-        ],
-      }
-    })
+  const messagesRef = useRef(messagesByChat)
+  messagesRef.current = messagesByChat
+
+  // ── Streaming buffer ──────────────────────────────────────────────────────
+  //
+  // Tokens arrive far faster than the screen refreshes. A `setState` per token re-renders the
+  // whole transcript dozens of times between paints, which is what makes a long answer stutter.
+  // Tokens accumulate here instead and are flushed at most once per animation frame.
+  const buffer = useRef<{ chatId: string; messageId: string; text: string } | null>(null)
+  const frame = useRef<number | null>(null)
+
+  // ── The settled guard ─────────────────────────────────────────────────────
+  //
+  // The final token delta and the `done` event routinely arrive in the same synchronous read of
+  // the stream, so the frame scheduled for that last flush is still pending when completion runs.
+  // Without this flag it fires on the next paint and re-opens a message the completion just
+  // closed — the symptom is a caret that blinks forever on a finished answer.
+  const settledMessages = useRef(new Set<string>())
+
+  const appendBuffered = useCallback(() => {
+    const buffered = buffer.current
+    buffer.current = null
+    if (!buffered || !buffered.text) return
+
+    setMessagesByChat(previous => ({
+      ...previous,
+      [buffered.chatId]: (previous[buffered.chatId] ?? []).map(message =>
+        message.id === buffered.messageId
+          ? { ...message, content: message.content + buffered.text }
+          : message),
+    }))
   }, [])
 
-  const sendMessage = useCallback(async (text: string) => {
-    const question = text.trim()
-    if (!question || streamingChatId) return
+  const flushNow = useCallback(() => {
+    if (frame.current !== null) {
+      cancelAnimationFrame(frame.current)
+      frame.current = null
+    }
+    appendBuffered()
+  }, [appendBuffered])
 
-    const chatId = activeChatId ?? newId()
-    if (chatId !== activeChatId) {
-      setDraftChatId(chatId)
-      setActiveChatId(chatId)
+  const queueToken = useCallback((chatId: string, messageId: string, delta: string) => {
+    if (!delta || settledMessages.current.has(messageId)) return
+
+    if (buffer.current?.messageId === messageId) buffer.current.text += delta
+    else {
+      // A token for a different message means the buffer holds someone else's text. Land it
+      // before starting a new one rather than discarding it.
+      appendBuffered()
+      buffer.current = { chatId, messageId, text: delta }
     }
 
-    const answerId = newId()
-    setMessagesByChat(prev => ({
-      ...prev,
-      [chatId]: [
-        ...(prev[chatId] ?? []),
-        { id: newId(), role: 'user', content: question },
-        { id: answerId, role: 'assistant', content: '', streaming: true },
-      ],
+    if (frame.current === null) {
+      frame.current = requestAnimationFrame(() => {
+        frame.current = null
+        appendBuffered()
+      })
+    }
+  }, [appendBuffered])
+
+  useEffect(() => () => {
+    if (frame.current !== null) cancelAnimationFrame(frame.current)
+    abortRef.current?.abort()
+  }, [])
+
+  // ── Transcript loading ────────────────────────────────────────────────────
+
+  const patchMessage = useCallback((chatId: string, messageId: string, patch: Partial<Message>) => {
+    setMessagesByChat(previous => ({
+      ...previous,
+      [chatId]: (previous[chatId] ?? []).map(message =>
+        message.id === messageId ? { ...message, ...patch } : message),
     }))
+  }, [])
+
+  const loadTranscript = useCallback((chatId: string) => {
+    setMessagesByChat(previous => (chatId in previous ? previous : { ...previous, [chatId]: [] }))
+    setLoadingChatId(chatId)
+
+    fetchTranscript(chatId)
+      .then(loaded => {
+        setMessagesByChat(previous => ({ ...previous, [chatId]: loaded }))
+        setLoadErrorByChat(({ [chatId]: _cleared, ...rest }) => rest)
+      })
+      .catch(error => {
+        // An outage must not look like "no messages yet" — that is the same lie in a different
+        // place, and the reader has no way to tell they are looking at a broken request.
+        setLoadErrorByChat(previous => ({ ...previous, [chatId]: classifyError(error).message }))
+      })
+      .finally(() => setLoadingChatId(current => (current === chatId ? null : current)))
+  }, [])
+
+  // ── Answering ─────────────────────────────────────────────────────────────
+
+  const completeAnswer = useCallback((
+    chatId: string, answerId: string, result: StreamCompletion,
+  ) => {
+    // Order matters: land every buffered token and cancel the pending frame *before* closing the
+    // message, or the frame that survives will append after the trim.
+    settledMessages.current.add(answerId)
+    flushNow()
+
+    setMessagesByChat(previous => ({
+      ...previous,
+      [chatId]: (previous[chatId] ?? []).map(message => message.id === answerId
+        ? {
+            ...message,
+            content: message.content.trimEnd(),
+            streaming: false,
+            error: undefined,
+            followUpQuestions: result.followUpQuestions,
+            citations: result.citations,
+            confidence: result.confidence,
+          }
+        : message),
+    }))
+
+    onSessionRecorded({ chatId: result.chatId ?? chatId, title: result.title })
+  }, [flushNow, onSessionRecorded])
+
+  const failAnswer = useCallback((chatId: string, answerId: string, error: unknown) => {
+    settledMessages.current.add(answerId)
+    flushNow()
+
+    const failure = classifyError(error)
+
+    // The failure is attached to the answer it belongs to rather than pushed as a second bubble.
+    // A stream that died halfway is one damaged answer, and appending a separate red message
+    // beneath the partial text reads as though a good answer were followed by a bad one.
+    patchMessage(chatId, answerId, failure.kind === 'aborted'
+      ? { streaming: false, stopped: true }
+      : { streaming: false, error: { message: failure.message, retryable: failure.retryable } })
+  }, [flushNow, patchMessage])
+
+  const runStream = useCallback(async (
+    chatId: string, question: string, answerId: string,
+  ) => {
     setStreamingChatId(chatId)
 
     const controller = new AbortController()
@@ -168,90 +207,86 @@ export function useChatController(): ChatController {
         { chatId, question },
         {
           onSources: (sources: Source[]) => patchMessage(chatId, answerId, { sources }),
-          onToken: (delta: string) => appendToken(chatId, answerId, delta),
-          onDone: ({ chatId: persistedId, title, followUpQuestions }) => {
-            setMessagesByChat(prev => ({
-              ...prev,
-              [chatId]: (prev[chatId] ?? []).map(m => m.id === answerId
-                ? { ...m, content: m.content.trimEnd(), streaming: false, followUpQuestions }
-                : m),
-            }))
-            registerSession(persistedId ?? chatId, title)
-          },
+          onToken: (delta: string) => queueToken(chatId, answerId, delta),
+          onDone: result => completeAnswer(chatId, answerId, result),
+          onTitle: (refinedChatId, title) => onTitleRefined({ chatId: refinedChatId, title }),
         },
         controller.signal,
       )
     } catch (error) {
-      if (controller.signal.aborted) {
-        patchMessage(chatId, answerId, { streaming: false, stopped: true })
-      } else {
-        reportFailure(chatId, answerId, error instanceof Error
-          ? error.message
-          : 'The answer could not be generated. Please try again.')
-      }
+      failAnswer(chatId, answerId, controller.signal.aborted
+        ? new DOMException('Aborted', 'AbortError')
+        : error)
     } finally {
-      setStreamingChatId(null)
+      setStreamingChatId(current => (current === chatId ? null : current))
       abortRef.current = null
+      settledMessages.current.delete(answerId)
+      // The transcript on the server now differs from the one in the cache.
+      queryClient.invalidateQueries({ queryKey: queryKeys.transcript(chatId), exact: true })
     }
-  }, [activeChatId, appendToken, patchMessage, registerSession, reportFailure, streamingChatId])
+  }, [completeAnswer, failAnswer, onTitleRefined, patchMessage, queryClient, queueToken])
+
+  const sendMessage = useCallback(async (chatId: string, text: string) => {
+    const question = text.trim()
+    if (!question || streamingChatId) return
+
+    const answerId = newLocalId()
+    setMessagesByChat(previous => ({
+      ...previous,
+      [chatId]: [
+        ...(previous[chatId] ?? []),
+        { id: newLocalId(), role: 'user', content: question, createdAt: new Date().toISOString() },
+        { id: answerId, role: 'assistant', content: '', streaming: true },
+      ],
+    }))
+
+    await runStream(chatId, question, answerId)
+  }, [runStream, streamingChatId])
+
+  /**
+   * Re-asks the question behind the last failed answer.
+   *
+   * The failed answer is replaced rather than appended to, so a retry cannot leave two attempts
+   * in the transcript — and the question is read back from the transcript rather than remembered
+   * in a ref, which keeps retry working after a reload or a chat switch.
+   */
+  const retry = useCallback(async (chatId: string) => {
+    if (streamingChatId) return
+
+    const transcript = messagesRef.current[chatId] ?? []
+    const answerIndex = transcript.findLastIndex(message => message.role === 'assistant')
+    if (answerIndex < 1) return
+
+    const question = transcript[answerIndex - 1]
+    if (question.role !== 'user') return
+
+    const answerId = newLocalId()
+    setMessagesByChat(previous => ({
+      ...previous,
+      [chatId]: (previous[chatId] ?? []).map((message, index) => index === answerIndex
+        ? { id: answerId, role: 'assistant', content: '', streaming: true }
+        : message),
+    }))
+
+    await runStream(chatId, question.content, answerId)
+  }, [runStream, streamingChatId])
 
   const stopStreaming = useCallback(() => abortRef.current?.abort(), [])
 
-  const renameChat = useCallback(async (chatId: string, title: string) => {
-    const trimmed = title.trim()
-    if (!trimmed) return
-    setSessions(prev => prev.map(s => (s.chatId === chatId ? { ...s, title: trimmed } : s)))
-    await apiUpdateSession(chatId, { title: trimmed })
+  const discardChat = useCallback((chatId: string) => {
+    setMessagesByChat(({ [chatId]: _removed, ...rest }) => rest)
+    setLoadErrorByChat(({ [chatId]: _clearedError, ...rest }) => rest)
   }, [])
-
-  const togglePin = useCallback(async (chatId: string) => {
-    const target = sessions.find(s => s.chatId === chatId)
-    if (!target) return
-    const pinned = !target.pinned
-    setSessions(prev => sortSessions(prev.map(s => (s.chatId === chatId ? { ...s, pinned } : s))))
-    await apiUpdateSession(chatId, { pinned })
-  }, [sessions])
-
-  const removeChat = useCallback(async (chatId: string) => {
-    setSessions(prev => prev.filter(s => s.chatId !== chatId))
-    setMessagesByChat(prev => {
-      const { [chatId]: _removed, ...rest } = prev
-      return rest
-    })
-    setDraftChatId(current => (current === chatId ? null : current))
-    setActiveChatId(current => (current === chatId ? null : current))
-    await apiDeleteSession(chatId).catch(() => { /* it is already gone from the user's view */ })
-  }, [])
-
-  const activeSession = useMemo(
-    () => sessions.find(s => s.chatId === activeChatId) ?? null,
-    [sessions, activeChatId],
-  )
 
   return {
-    sessions,
-    draftChatId,
-    activeChatId,
-    activeSession,
-    messages,
-    isLoadingMessages: loadingChatId !== null && loadingChatId === activeChatId,
+    messagesByChat,
+    loadingChatId,
+    loadErrorByChat,
     streamingChatId,
-    isStreaming: streamingChatId !== null && streamingChatId === activeChatId,
-    isOnEmptyDraft,
-    startNewChat,
-    selectChat,
+    loadTranscript,
     sendMessage,
+    retry,
     stopStreaming,
-    renameChat,
-    togglePin,
-    removeChat,
+    discardChat,
   }
-}
-
-/** Pinned conversations first, then most recently used. */
-function sortSessions(sessions: ChatSession[]): ChatSession[] {
-  return [...sessions].sort((a, b) => {
-    if (a.pinned !== b.pinned) return a.pinned ? -1 : 1
-    return (b.updatedAt ?? '').localeCompare(a.updatedAt ?? '')
-  })
 }

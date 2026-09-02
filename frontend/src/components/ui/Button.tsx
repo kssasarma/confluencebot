@@ -1,36 +1,63 @@
+import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from 'react'
+import { cva, type VariantProps } from 'class-variance-authority'
+import { Loader2 } from 'lucide-react'
 import { cn } from '../../lib/cn'
-import type { ButtonHTMLAttributes } from 'react'
 
-interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
-  variant?: 'primary' | 'secondary' | 'ghost' | 'danger'
-  size?: 'sm' | 'md' | 'lg'
+/**
+ * Variants live in `cva` rather than in a chain of template literals so that the variant names
+ * are part of the component's type: a typo in `variant="danger"` is a compile error, and adding a
+ * size means adding it in exactly one place.
+ */
+const button = cva(
+  'inline-flex items-center justify-center gap-2 rounded-lg font-medium ' +
+  'transition-colors duration-fast ease-out-expo ' +
+  'disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none',
+  {
+    variants: {
+      variant: {
+        primary: 'bg-primary text-primary-foreground hover:bg-primary-hover',
+        secondary: 'bg-surface border border-border text-foreground hover:bg-surface-hover',
+        ghost: 'text-foreground hover:bg-surface-hover',
+        danger: 'bg-danger text-danger-foreground hover:bg-danger-hover',
+        subtle: 'bg-muted text-foreground hover:bg-surface-hover',
+      },
+      size: {
+        sm: 'h-8 px-3 text-sm',
+        md: 'h-10 px-4 text-sm',
+        lg: 'h-11 px-6 text-base',
+      },
+      block: {
+        true: 'w-full',
+      },
+    },
+    defaultVariants: { variant: 'primary', size: 'md' },
+  },
+)
+
+export interface ButtonProps
+  extends ButtonHTMLAttributes<HTMLButtonElement>, VariantProps<typeof button> {
+  /** Shows a spinner and blocks further presses. The label stays, so the button keeps its width. */
   loading?: boolean
+  children?: ReactNode
 }
 
-export default function Button({ variant = 'primary', size = 'md', loading, className, children, disabled, ...props }: ButtonProps) {
+const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
+  { variant, size, block, loading, className, children, disabled, type = 'button', ...props },
+  ref,
+) {
   return (
     <button
+      ref={ref}
+      type={type}
       disabled={disabled || loading}
-      className={cn(
-        'inline-flex items-center justify-center gap-2 rounded-lg font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50 disabled:cursor-not-allowed',
-        size === 'sm' && 'h-8 px-3 text-sm',
-        size === 'md' && 'h-10 px-4 text-sm',
-        size === 'lg' && 'h-11 px-6 text-base',
-        variant === 'primary' && 'bg-primary text-primary-foreground hover:bg-primary-hover',
-        variant === 'secondary' && 'bg-surface border border-border text-foreground hover:bg-surface-hover',
-        variant === 'ghost' && 'text-foreground hover:bg-surface-hover',
-        variant === 'danger' && 'bg-danger text-white hover:bg-danger/90',
-        className,
-      )}
+      aria-busy={loading || undefined}
+      className={cn(button({ variant, size, block }), className)}
       {...props}
     >
-      {loading && (
-        <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
-          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
-        </svg>
-      )}
+      {loading && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
       {children}
     </button>
   )
-}
+})
+
+export default Button
