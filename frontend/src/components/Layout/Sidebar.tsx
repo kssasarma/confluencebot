@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { MessageSquare, Plus, Pin, Trash2, ChevronLeft, ChevronRight, Settings, LogOut } from 'lucide-react'
+import { MessageSquare, Plus, Pin, Trash2, ChevronLeft, ChevronRight, Settings, LogOut, ShieldCheck } from 'lucide-react'
 import { cn } from '../../lib/cn'
 import { useAuth } from '../../context/AuthContext'
 import type { ChatSession } from '../../types'
@@ -15,14 +15,15 @@ interface SidebarProps {
   isCollapsed: boolean
   onToggleCollapse: () => void
   onOpenSettings: () => void
+  onOpenAdmin: () => void
 }
 
 export default function Sidebar({
   sessions, activeSessionId, onCreateSession, onSelectSession,
   onDeleteSession, onPinSession, onRenameSession,
-  isCollapsed, onToggleCollapse, onOpenSettings,
+  isCollapsed, onToggleCollapse, onOpenSettings, onOpenAdmin,
 }: SidebarProps) {
-  const { user, logout } = useAuth()
+  const { user, logout, isAdmin } = useAuth()
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
 
@@ -98,6 +99,14 @@ export default function Sidebar({
       </div>
 
       <div className={cn('border-t border-border p-2 space-y-1', isCollapsed && 'items-center')}>
+        {isAdmin && (
+          <button onClick={onOpenAdmin}
+            className={cn('flex items-center gap-2 w-full rounded-lg p-2 text-sm hover:bg-surface-hover text-muted-foreground', isCollapsed && 'justify-center')}
+          >
+            <ShieldCheck size={16} />
+            {!isCollapsed && 'Admin'}
+          </button>
+        )}
         <button onClick={onOpenSettings}
           className={cn('flex items-center gap-2 w-full rounded-lg p-2 text-sm hover:bg-surface-hover text-muted-foreground', isCollapsed && 'justify-center')}
         >

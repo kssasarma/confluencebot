@@ -6,6 +6,7 @@ import Sidebar from './components/Layout/Sidebar'
 import ChatArea from './components/Chat/ChatArea'
 import UserPreferencesPage from './components/Settings/UserPreferencesPage'
 import ChatPreferencesPanel from './components/Settings/ChatPreferencesPanel'
+import AdminPage from './components/Admin/AdminPage'
 import Spinner from './components/ui/Spinner'
 import { useChatSessions } from './hooks/useChatSessions'
 import { updateSession } from './services/chatService'
@@ -35,6 +36,7 @@ function MainLayout() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [showChatPrefs, setShowChatPrefs] = useState(false)
+  const [showAdmin, setShowAdmin] = useState(false)
 
   async function handleRename(chatId: string, title: string) {
     await updateSession(chatId, { title })
@@ -67,6 +69,7 @@ function MainLayout() {
         isCollapsed={sidebarCollapsed}
         onToggleCollapse={() => setSidebarCollapsed(c => !c)}
         onOpenSettings={() => setShowSettings(true)}
+        onOpenAdmin={() => setShowAdmin(true)}
       />
 
       <main className="flex-1 flex flex-col min-w-0 relative">
@@ -84,6 +87,7 @@ function MainLayout() {
       </main>
 
       {showSettings && <UserPreferencesPage onClose={() => setShowSettings(false)} />}
+      {showAdmin && <AdminPage onClose={() => setShowAdmin(false)} />}
       {showChatPrefs && activeSession && (
         <ChatPreferencesPanel chatId={activeSession.chatId} onClose={() => setShowChatPrefs(false)} />
       )}
