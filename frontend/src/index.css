@@ -1,0 +1,48 @@
+@import '@fontsource-variable/inter';
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 98%;
+    --foreground: 222 20% 14%;
+    --surface: 0 0% 100%;
+    --surface-hover: 220 13% 95%;
+    --border: 220 13% 88%;
+    --primary: 221 83% 48%;
+    --primary-foreground: 0 0% 100%;
+    --primary-hover: 221 83% 42%;
+    --muted: 220 13% 91%;
+    --muted-foreground: 220 9% 46%;
+    --danger: 0 72% 51%;
+    --success: 142 71% 38%;
+  }
+
+  .dark {
+    --background: 222 20% 10%;
+    --foreground: 220 13% 93%;
+    --surface: 222 20% 13%;
+    --surface-hover: 222 20% 17%;
+    --border: 222 15% 22%;
+    --primary: 221 83% 58%;
+    --primary-foreground: 0 0% 100%;
+    --primary-hover: 221 83% 64%;
+    --muted: 222 15% 20%;
+    --muted-foreground: 220 9% 56%;
+    --danger: 0 72% 61%;
+    --success: 142 71% 48%;
+  }
+
+  * { box-sizing: border-box; }
+  body { @apply bg-background text-foreground font-sans antialiased; }
+
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { @apply bg-transparent; }
+  ::-webkit-scrollbar-thumb { @apply bg-border rounded-full; }
+}
+
+@layer utilities {
+  .scrollbar-none { scrollbar-width: none; }
+  .scrollbar-none::-webkit-scrollbar { display: none; }
+}

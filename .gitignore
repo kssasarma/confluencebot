@@ -1,8 +1,14 @@
+backend/target/
 target/
 *.class
 *.jar
 *.war
 *.ear
+
+frontend/node_modules/
+frontend/dist/
+frontend/dist-ssr/
+frontend/*.local
 
 .env
 *.env.local
