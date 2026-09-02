@@ -76,7 +76,9 @@ class JsoupStorageFormatParserTest {
     }
 
     @Test
-    void parse_confluenceMacro_isStrippedFromOutput() {
+    void parse_confluenceMacro_richTextBodyContentIsPreserved() {
+        // Info/note/warning panels use ac:rich-text-body — their content must survive
+        // so pages that rely heavily on macros are not silently emptied.
         String xhtml = """
                 <ac:structured-macro ac:name="info">
                   <ac:parameter ac:name="title">Note</ac:parameter>
@@ -90,7 +92,7 @@ class JsoupStorageFormatParserTest {
         assertThat(sections).hasSize(1);
         assertThat(sections.get(0).content())
                 .contains("Visible content")
-                .doesNotContain("Macro body text");
+                .contains("Macro body text");
     }
 
     @Test

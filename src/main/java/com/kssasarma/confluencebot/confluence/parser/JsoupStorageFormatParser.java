@@ -178,7 +178,26 @@ public class JsoupStorageFormatParser implements StorageFormatParser {
     }
 
     private void removeConfluenceMacros(Document doc) {
-        doc.select("ac|structured-macro, ac|parameter, ac|plain-text-body, ac|rich-text-body").remove();
+        // Convert code macro bodies to <pre> so they survive as CODE sections.
+        // ac:plain-text-body holds the raw code inside Confluence code blocks.
+        for (Element plainBody : doc.select("ac|plain-text-body")) {
+            String text = plainBody.wholeText().strip();
+            if (text.isBlank()) text = plainBody.text().strip();
+            if (!text.isBlank()) {
+                plainBody.replaceWith(new Element("pre").text(text));
+            } else {
+                plainBody.remove();
+            }
+        }
+
+        // Preserve content from info/note/warning/expand panels by unwrapping their bodies.
+        // ac:rich-text-body wraps the HTML children — unwrapping promotes them to the parent.
+        doc.select("ac|rich-text-body").unwrap();
+
+        // Strip parameter noise, then unwrap structured macros so the preserved content survives.
+        doc.select("ac|parameter").remove();
+        doc.select("ac|structured-macro").unwrap();
+
         doc.select("ac|link, ac|image, ac|emoticon").remove();
         doc.select("ri|user, ri|page, ri|attachment").remove();
         doc.select("[ac:name]").remove();
