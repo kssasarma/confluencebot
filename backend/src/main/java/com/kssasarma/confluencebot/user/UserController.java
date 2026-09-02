@@ -1,126 +1,107 @@
 package com.kssasarma.confluencebot.user;
 
+import com.kssasarma.confluencebot.user.dto.*;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
-import java.util.Map;
 
+/**
+ * Everything the signed-in user owns: their preferences, their conversations and the transcripts.
+ *
+ * The controller only adapts HTTP to the services — no entity ever leaves this layer, which is
+ * what keeps lazily-loaded associations from being serialized outside their transaction.
+ */
+@Tag(name = "User", description = "Preferences, conversations and transcripts of the signed-in user")
 @RestController
 @RequestMapping("/api/user")
 public class UserController {
 
-    private final UserPreferenceRepository prefRepo;
-    private final ChatSessionRepository sessionRepo;
-    private final ChatPreferenceRepository chatPrefRepo;
+    private final PreferenceService preferenceService;
+    private final ChatSessionService chatSessionService;
 
-    public UserController(UserPreferenceRepository prefRepo,
-                          ChatSessionRepository sessionRepo,
-                          ChatPreferenceRepository chatPrefRepo) {
-        this.prefRepo = prefRepo;
-        this.sessionRepo = sessionRepo;
-        this.chatPrefRepo = chatPrefRepo;
+    public UserController(PreferenceService preferenceService, ChatSessionService chatSessionService) {
+        this.preferenceService = preferenceService;
+        this.chatSessionService = chatSessionService;
     }
 
-    // ── User preferences ───────────────────────────────────────────────────
+    // ── Account-wide preferences ──────────────────────────────────────────────
 
+    @Operation(summary = "Read the account-wide preferences")
     @GetMapping("/preferences")
-    public ResponseEntity<UserPreference> getPreferences(@AuthenticationPrincipal User user) {
-        UserPreference pref = prefRepo.findByUserId(user.getId())
-                .orElseGet(() -> {
-                    UserPreference p = new UserPreference();
-                    p.setUser(user);
-                    return prefRepo.save(p);
-                });
-        return ResponseEntity.ok(pref);
+    public UserPreferenceResponse getPreferences(@AuthenticationPrincipal User user) {
+        return preferenceService.getUserPreferences(user);
     }
 
+    @Operation(summary = "Update the account-wide preferences (omitted fields stay unchanged)")
     @PatchMapping("/preferences")
-    public ResponseEntity<UserPreference> updatePreferences(@AuthenticationPrincipal User user,
-                                                            @RequestBody Map<String, Object> body) {
-        UserPreference pref = prefRepo.findByUserId(user.getId())
-                .orElseGet(() -> { UserPreference p = new UserPreference(); p.setUser(user); return p; });
-        if (body.containsKey("theme")) pref.setTheme((String) body.get("theme"));
-        if (body.containsKey("language")) pref.setLanguage((String) body.get("language"));
-        if (body.containsKey("responseStyle")) pref.setResponseStyle((String) body.get("responseStyle"));
-        if (body.containsKey("showSources")) pref.setShowSources((Boolean) body.get("showSources"));
-        if (body.containsKey("showConfidence")) pref.setShowConfidence((Boolean) body.get("showConfidence"));
-        return ResponseEntity.ok(prefRepo.save(pref));
+    public UserPreferenceResponse updatePreferences(@AuthenticationPrincipal User user,
+                                                    @Valid @RequestBody UserPreferenceUpdateRequest request) {
+        return preferenceService.updateUserPreferences(user, request);
     }
 
-    // ── Chat sessions ──────────────────────────────────────────────────────
+    // ── Conversations ─────────────────────────────────────────────────────────
 
+    @Operation(summary = "List the user's conversations, pinned first")
     @GetMapping("/chats")
-    public ResponseEntity<List<ChatSessionDto>> getSessions(@AuthenticationPrincipal User user) {
-        List<ChatSessionDto> sessions = sessionRepo
-                .findByUserIdOrderByPinnedDescUpdatedAtDesc(user.getId())
-                .stream().map(ChatSessionDto::from).toList();
-        return ResponseEntity.ok(sessions);
+    public List<ChatSessionResponse> listSessions(@AuthenticationPrincipal User user) {
+        return chatSessionService.listSessions(user);
     }
 
+    @Operation(summary = "Create a conversation",
+            description = "Idempotent: an untouched, untitled conversation is reused instead of "
+                    + "creating another empty one.")
     @PostMapping("/chats")
-    public ResponseEntity<ChatSessionDto> createSession(@AuthenticationPrincipal User user,
-                                                        @RequestBody(required = false) Map<String, Object> body) {
-        ChatSession s = new ChatSession();
-        s.setUser(user);
-        s.setChatId(java.util.UUID.randomUUID().toString());
-        if (body != null && body.containsKey("title")) s.setTitle((String) body.get("title"));
-        return ResponseEntity.ok(ChatSessionDto.from(sessionRepo.save(s)));
+    @ResponseStatus(HttpStatus.CREATED)
+    public ChatSessionResponse createSession(@AuthenticationPrincipal User user,
+                                             @Valid @RequestBody(required = false) CreateChatSessionRequest request) {
+        return chatSessionService.createSession(user, request == null ? null : request.title());
     }
 
+    @Operation(summary = "Rename or pin a conversation")
     @PatchMapping("/chats/{chatId}")
-    public ResponseEntity<ChatSessionDto> updateSession(@AuthenticationPrincipal User user,
-                                                        @PathVariable String chatId,
-                                                        @RequestBody Map<String, Object> body) {
-        ChatSession s = sessionRepo.findByChatIdAndUserId(chatId, user.getId())
-                .orElseThrow(() -> new IllegalArgumentException("Session not found"));
-        if (body.containsKey("title")) s.setTitle((String) body.get("title"));
-        if (body.containsKey("pinned")) s.setPinned((Boolean) body.get("pinned"));
-        return ResponseEntity.ok(ChatSessionDto.from(sessionRepo.save(s)));
+    public ChatSessionResponse updateSession(@AuthenticationPrincipal User user,
+                                             @PathVariable String chatId,
+                                             @Valid @RequestBody UpdateChatSessionRequest request) {
+        return chatSessionService.updateSession(user, chatId, request);
     }
 
+    @Operation(summary = "Delete a conversation and its transcript")
     @DeleteMapping("/chats/{chatId}")
     public ResponseEntity<Void> deleteSession(@AuthenticationPrincipal User user,
                                               @PathVariable String chatId) {
-        sessionRepo.deleteByChatIdAndUserId(chatId, user.getId());
+        chatSessionService.deleteSession(user, chatId);
         return ResponseEntity.noContent().build();
     }
 
-    // ── Per-chat preferences ───────────────────────────────────────────────
+    @Operation(summary = "Read the transcript of a conversation, oldest turn first")
+    @GetMapping("/chats/{chatId}/messages")
+    public List<ChatMessageResponse> transcript(@AuthenticationPrincipal User user,
+                                                @PathVariable String chatId) {
+        return chatSessionService.transcript(user, chatId);
+    }
 
+    // ── Per-conversation preference overrides ─────────────────────────────────
+
+    @Operation(summary = "Read the per-conversation overrides (null means inherited)")
     @GetMapping("/chats/{chatId}/preferences")
-    public ResponseEntity<ChatPreference> getChatPrefs(@AuthenticationPrincipal User user,
-                                                        @PathVariable String chatId) {
-        ChatPreference pref = chatPrefRepo.findByChatIdAndUserId(chatId, user.getId())
-                .orElseGet(() -> {
-                    ChatPreference p = new ChatPreference();
-                    p.setChatId(chatId);
-                    p.setUser(user);
-                    return chatPrefRepo.save(p);
-                });
-        return ResponseEntity.ok(pref);
+    public ChatPreferenceResponse getChatPreferences(@AuthenticationPrincipal User user,
+                                                     @PathVariable String chatId) {
+        return preferenceService.getChatPreferences(user, chatId);
     }
 
-    @PatchMapping("/chats/{chatId}/preferences")
-    public ResponseEntity<ChatPreference> updateChatPrefs(@AuthenticationPrincipal User user,
-                                                          @PathVariable String chatId,
-                                                          @RequestBody Map<String, Object> body) {
-        ChatPreference pref = chatPrefRepo.findByChatIdAndUserId(chatId, user.getId())
-                .orElseGet(() -> { ChatPreference p = new ChatPreference(); p.setChatId(chatId); p.setUser(user); return p; });
-        if (body.containsKey("responseStyle")) pref.setResponseStyle((String) body.get("responseStyle"));
-        if (body.containsKey("showSources")) pref.setShowSources((Boolean) body.get("showSources"));
-        if (body.containsKey("showConfidence")) pref.setShowConfidence((Boolean) body.get("showConfidence"));
-        if (body.containsKey("customPrompt")) pref.setCustomPrompt((String) body.get("customPrompt"));
-        return ResponseEntity.ok(chatPrefRepo.save(pref));
-    }
-
-    public record ChatSessionDto(String chatId, String title, boolean pinned,
-                                 java.time.Instant createdAt, java.time.Instant updatedAt) {
-        static ChatSessionDto from(ChatSession s) {
-            return new ChatSessionDto(s.getChatId(), s.getTitle(), s.isPinned(),
-                    s.getCreatedAt(), s.getUpdatedAt());
-        }
+    @Operation(summary = "Replace the per-conversation overrides",
+            description = "The body is the complete override set: a null field means the "
+                    + "conversation goes back to inheriting the account-wide value.")
+    @PutMapping("/chats/{chatId}/preferences")
+    public ChatPreferenceResponse replaceChatPreferences(@AuthenticationPrincipal User user,
+                                                         @PathVariable String chatId,
+                                                         @Valid @RequestBody ChatPreferenceRequest request) {
+        return preferenceService.replaceChatPreferences(user, chatId, request);
     }
 }

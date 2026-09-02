@@ -1,43 +1,46 @@
 import { API_BASE } from '../config/env'
+import { apiFetch, apiJson, jsonBody, toApiError } from './http'
 import type { AuthResponse } from '../types'
 
-async function post(path: string, body: unknown, token?: string): Promise<AuthResponse> {
-  const res = await fetch(`${API_BASE}${path}`, {
+/**
+ * Sign-in and token rotation.
+ *
+ * These endpoints are the only ones that must work without a valid access token, so they bypass
+ * the automatic refresh-and-retry in {@link apiFetch} rather than recursing through it.
+ */
+async function postUnauthenticated(path: string, body: unknown): Promise<AuthResponse> {
+  const response = await fetch(`${API_BASE}${path}`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
     body: JSON.stringify(body),
   })
-  if (res.status === 204) return {}
-  const data = await res.json()
-  if (!res.ok) return { error: data.message ?? data.error ?? 'Request failed' }
-  return data
+  if (!response.ok) throw await toApiError(response)
+  return response.json() as Promise<AuthResponse>
 }
 
-export async function login(email: string, password: string): Promise<AuthResponse> {
-  return post('/auth/login', { email, password })
-}
+export const login = (email: string, password: string): Promise<AuthResponse> =>
+  postUnauthenticated('/auth/login', { email, password })
 
-export async function refreshSession(refreshToken: string): Promise<AuthResponse> {
-  return post('/auth/refresh', { refreshToken })
-}
+export const refreshSession = (refreshToken: string): Promise<AuthResponse> =>
+  postUnauthenticated('/auth/refresh', { refreshToken })
 
 export async function revokeSession(refreshToken: string): Promise<void> {
-  await post('/auth/logout', { refreshToken }).catch(() => {})
+  try {
+    await apiFetch('/auth/logout', {
+      method: 'POST',
+      ...jsonBody({ refreshToken }),
+      skipAuthRetry: true,
+    })
+  } catch {
+    /* signing out locally matters more than reaching the server */
+  }
 }
 
-export async function getMe(token: string): Promise<AuthResponse> {
-  const res = await fetch(`${API_BASE}/auth/me`, {
-    headers: { Authorization: `Bearer ${token}` },
+export const getMe = (): Promise<AuthResponse> =>
+  apiJson<AuthResponse>('/auth/me', { skipAuthRetry: true })
+
+export const changePassword = (currentPassword: string, newPassword: string): Promise<AuthResponse> =>
+  apiJson<AuthResponse>('/auth/change-password', {
+    method: 'POST',
+    ...jsonBody({ currentPassword, newPassword }),
   })
-  if (!res.ok) return { error: 'Unauthorized' }
-  return res.json()
-}
-
-export async function changePassword(
-  token: string, currentPassword: string, newPassword: string
-): Promise<AuthResponse> {
-  return post('/auth/change-password', { currentPassword, newPassword }, token)
-}

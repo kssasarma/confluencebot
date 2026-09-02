@@ -9,20 +9,24 @@ const SUGGESTIONS = [
 
 interface HomeScreenProps {
   onSelectPrompt: (prompt: string) => void
+  /** True when an empty conversation is already open, so the copy stops saying "start one". */
+  isNewChat?: boolean
 }
 
-export default function HomeScreen({ onSelectPrompt }: HomeScreenProps) {
+export default function HomeScreen({ onSelectPrompt, isNewChat = false }: HomeScreenProps) {
   return (
-    <div className="flex flex-col items-center justify-center h-full px-4 py-12">
+    <div className="flex flex-col items-center justify-center min-h-[60vh] px-4 py-12">
       <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center mb-5">
         <svg className="w-6 h-6 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
             d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
         </svg>
       </div>
-      <h2 className="text-xl font-semibold text-foreground mb-1">Confluence Bot</h2>
+      <h2 className="text-xl font-semibold text-foreground mb-1">
+        {isNewChat ? 'New chat' : 'Confluence Bot'}
+      </h2>
       <p className="text-sm text-muted-foreground mb-8 text-center max-w-xs">
-        Ask questions about your Confluence workspace. I'll search the docs and give you a cited answer.
+        Ask a question about your Confluence workspace. I'll search the docs and answer with citations.
       </p>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full max-w-lg">
         {SUGGESTIONS.map(({ icon: Icon, text }) => (

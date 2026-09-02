@@ -2,7 +2,6 @@ package com.kssasarma.confluencebot.api.dto;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 
-import java.util.Collections;
 import java.util.List;
 
 @Schema(description = "Chat response containing the answer, source pages, and suggested follow-up questions")
@@ -17,18 +16,33 @@ public record ChatApiResponse(
 
         @Schema(description = "3 suggested follow-up questions the user might want to ask next. "
                 + "Empty when the LLM did not generate them.")
-        List<String> followUpQuestions
+        List<String> followUpQuestions,
+
+        @Schema(description = "Conversation this exchange was recorded in. Null when the caller did "
+                + "not supply one, in which case nothing was persisted.")
+        String chatId,
+
+        @Schema(description = "Conversation title after this exchange — set from the first question.")
+        String title
 ) {
     /** Backward-compatible constructor for callers that don't need follow-up questions. */
     public ChatApiResponse(String answer, List<SourceReference> sources) {
-        this(answer, sources, Collections.emptyList());
+        this(answer, sources, List.of(), null, null);
+    }
+
+    public ChatApiResponse(String answer, List<SourceReference> sources, List<String> followUpQuestions) {
+        this(answer, sources, followUpQuestions, null, null);
+    }
+
+    /** Same answer, tagged with the conversation it was recorded in. */
+    public ChatApiResponse inConversation(String chatId, String title) {
+        return new ChatApiResponse(answer, sources, followUpQuestions, chatId, title);
     }
 
     public static ChatApiResponse noContext() {
-        return new ChatApiResponse(
-                "I could not find relevant information in the Confluence documentation for your question.",
-                List.of(),
-                List.of()
-        );
+        return new ChatApiResponse(NO_CONTEXT_ANSWER, List.of(), List.of(), null, null);
     }
+
+    public static final String NO_CONTEXT_ANSWER =
+            "I could not find relevant information in the Confluence documentation for your question.";
 }
