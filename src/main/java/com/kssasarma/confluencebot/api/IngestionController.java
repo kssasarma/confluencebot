@@ -1,11 +1,11 @@
 package com.kssasarma.confluencebot.api;
 
 import com.kssasarma.confluencebot.api.dto.IngestRequest;
-import com.kssasarma.confluencebot.api.dto.IngestResponse;
+import com.kssasarma.confluencebot.api.dto.IngestionJobResponse;
 import com.kssasarma.confluencebot.api.dto.PageSummaryResponse;
 import com.kssasarma.confluencebot.config.ConfluenceProperties;
-import com.kssasarma.confluencebot.ingestion.IngestionResult;
-import com.kssasarma.confluencebot.ingestion.IngestionService;
+import com.kssasarma.confluencebot.domain.IngestionJobEntity;
+import com.kssasarma.confluencebot.ingestion.IngestionJobService;
 import com.kssasarma.confluencebot.repository.ConfluencePageRepository;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -22,19 +22,20 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.UUID;
 
 @Tag(name = "Ingestion", description = "Trigger embedding and vector-store ingestion of Confluence content")
 @RestController
 @RequestMapping("/api/ingest")
 public class IngestionController {
 
-    private final IngestionService ingestionService;
+    private final IngestionJobService jobService;
     private final ConfluenceProperties props;
     private final ConfluencePageRepository pageRepository;
 
-    public IngestionController(IngestionService ingestionService, ConfluenceProperties props,
+    public IngestionController(IngestionJobService jobService, ConfluenceProperties props,
                                ConfluencePageRepository pageRepository) {
-        this.ingestionService = ingestionService;
+        this.jobService = jobService;
         this.props = props;
         this.pageRepository = pageRepository;
     }
@@ -79,58 +80,75 @@ public class IngestionController {
     }
 
     @Operation(
-            summary = "Ingest a Confluence space",
+            summary = "Submit a space ingestion job",
             description = """
-                    Fetches all pages from the given space (or the configured default space when no \
-                    body is sent), chunks them by heading, embeds each chunk, and upserts the vectors \
-                    into the pgvector store. Pages whose Confluence version has not changed since the \
-                    last run are skipped. A synthetic space-overview document is also created from the \
-                    space description so broad questions about the space can be answered.
+                    Submits a background job to fetch all pages from the given space (or the \
+                    configured default space when no body is sent), chunk them, embed each chunk, \
+                    and upsert the vectors into the pgvector store. Returns immediately with a job \
+                    ID that can be polled via GET /api/ingest/jobs/{jobId}. Pages whose Confluence \
+                    version has not changed since the last run are skipped unless `force` is true.
                     """)
     @ApiResponses({
-            @ApiResponse(responseCode = "200", description = "Ingestion completed successfully",
+            @ApiResponse(responseCode = "202", description = "Job accepted and queued",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
-                            schema = @Schema(implementation = IngestResponse.class),
+                            schema = @Schema(implementation = IngestionJobResponse.class),
                             examples = @ExampleObject(value = """
                                     {
-                                      "status": "SUCCESS",
-                                      "pagesProcessed": 47,
-                                      "chunksStored": 312,
-                                      "pagesSkipped": 3,
-                                      "durationMs": 18420
+                                      "jobId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                                      "jobType": "SPACE",
+                                      "spaceKey": "IT",
+                                      "pageId": null,
+                                      "force": false,
+                                      "status": "PENDING",
+                                      "createdAt": "2026-09-02T10:00:00Z",
+                                      "startedAt": null,
+                                      "completedAt": null,
+                                      "pagesProcessed": null,
+                                      "chunksStored": null,
+                                      "pagesSkipped": null,
+                                      "errorMessage": null
                                     }
                                     """)))
     })
     @PostMapping("/space")
-    public ResponseEntity<IngestResponse> ingestSpace(
+    public ResponseEntity<IngestionJobResponse> ingestSpace(
             @RequestBody(required = false) IngestRequest request) {
 
         String spaceKey = (request != null && request.spaceKey() != null && !request.spaceKey().isBlank())
                 ? request.spaceKey()
                 : props.spaceKey();
+        boolean force = request != null && request.isForce();
 
-        IngestionResult result = ingestionService.ingestSpace(spaceKey, request != null && request.isForce());
-        return ResponseEntity.ok(toResponse(result));
+        IngestionJobEntity job = jobService.submitSpaceJob(spaceKey, force);
+        return ResponseEntity.accepted().body(IngestionJobResponse.from(job));
     }
 
     @Operation(
-            summary = "Re-ingest a single page",
+            summary = "Submit a single-page ingestion job",
             description = """
-                    Fetches a single Confluence page by its numeric page ID, re-chunks and re-embeds \
-                    it, and replaces the existing vectors in the store. Use this for targeted updates \
-                    when a specific page changes and a full space re-ingest is not needed.
+                    Submits a background job to re-chunk and re-embed a single Confluence page \
+                    by its numeric page ID, replacing the existing vectors in the store. Returns \
+                    immediately with a job ID. Use GET /api/ingest/jobs/{jobId} to poll the result.
                     """)
     @ApiResponses({
-            @ApiResponse(responseCode = "200", description = "Page re-ingested successfully",
+            @ApiResponse(responseCode = "202", description = "Job accepted and queued",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
-                            schema = @Schema(implementation = IngestResponse.class),
+                            schema = @Schema(implementation = IngestionJobResponse.class),
                             examples = @ExampleObject(value = """
                                     {
-                                      "status": "SUCCESS",
-                                      "pagesProcessed": 1,
-                                      "chunksStored": 7,
-                                      "pagesSkipped": 0,
-                                      "durationMs": 640
+                                      "jobId": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+                                      "jobType": "PAGE",
+                                      "spaceKey": null,
+                                      "pageId": "131073",
+                                      "force": false,
+                                      "status": "PENDING",
+                                      "createdAt": "2026-09-02T10:00:00Z",
+                                      "startedAt": null,
+                                      "completedAt": null,
+                                      "pagesProcessed": null,
+                                      "chunksStored": null,
+                                      "pagesSkipped": null,
+                                      "errorMessage": null
                                     }
                                     """))),
             @ApiResponse(responseCode = "404", description = "Page not found in Confluence",
@@ -146,20 +164,47 @@ public class IngestionController {
                                     """)))
     })
     @PostMapping("/page/{pageId}")
-    public ResponseEntity<IngestResponse> ingestPage(
+    public ResponseEntity<IngestionJobResponse> ingestPage(
             @Parameter(description = "Confluence numeric page ID", example = "131073")
             @PathVariable String pageId) {
-        IngestionResult result = ingestionService.ingestPage(pageId);
-        return ResponseEntity.ok(toResponse(result));
+
+        IngestionJobEntity job = jobService.submitPageJob(pageId);
+        return ResponseEntity.accepted().body(IngestionJobResponse.from(job));
     }
 
-    private IngestResponse toResponse(IngestionResult result) {
-        return new IngestResponse(
-                "SUCCESS",
-                result.pagesProcessed(),
-                result.chunksStored(),
-                result.pagesSkipped(),
-                result.durationMs()
-        );
+    @Operation(
+            summary = "Get ingestion job status",
+            description = "Returns the current status and result (once complete) of a background ingestion job.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Job found",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = IngestionJobResponse.class))),
+            @ApiResponse(responseCode = "404", description = "Job not found",
+                    content = @Content(mediaType = MediaType.APPLICATION_PROBLEM_JSON_VALUE,
+                            schema = @Schema(implementation = ProblemDetail.class)))
+    })
+    @GetMapping("/jobs/{jobId}")
+    public ResponseEntity<IngestionJobResponse> getJob(
+            @Parameter(description = "Job UUID returned by the submit endpoints")
+            @PathVariable UUID jobId) {
+
+        return jobService.findById(jobId)
+                .map(IngestionJobResponse::from)
+                .map(ResponseEntity::ok)
+                .orElseGet(() -> ResponseEntity.notFound().build());
+    }
+
+    @Operation(
+            summary = "List all ingestion jobs",
+            description = "Returns all ingestion jobs, newest first. Use this to monitor running jobs or review history.")
+    @ApiResponse(responseCode = "200", description = "Job list returned",
+            content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                    array = @ArraySchema(schema = @Schema(implementation = IngestionJobResponse.class))))
+    @GetMapping("/jobs")
+    public ResponseEntity<List<IngestionJobResponse>> listJobs() {
+        List<IngestionJobResponse> jobs = jobService.findAll().stream()
+                .map(IngestionJobResponse::from)
+                .toList();
+        return ResponseEntity.ok(jobs);
     }
 }
