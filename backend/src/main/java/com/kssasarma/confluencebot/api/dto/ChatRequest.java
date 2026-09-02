@@ -11,5 +11,5 @@ public record ChatRequest(
                 minLength = 3, maxLength = 1000)
         @NotBlank(message = "Query must not be blank")
         @Size(min = 3, max = 1000, message = "Query must be 3–1000 characters")
-        String query
+        String question
 ) {}
