@@ -109,7 +109,7 @@ public class IngestionController {
                 ? request.spaceKey()
                 : props.spaceKey();
 
-        IngestionResult result = ingestionService.ingestSpace(spaceKey);
+        IngestionResult result = ingestionService.ingestSpace(spaceKey, request != null && request.isForce());
         return ResponseEntity.ok(toResponse(result));
     }
 

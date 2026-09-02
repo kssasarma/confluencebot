@@ -53,10 +53,15 @@ public class IngestionServiceImpl implements IngestionService {
     }
 
     @Override
-    @Transactional
     public IngestionResult ingestSpace(String spaceKey) {
+        return ingestSpace(spaceKey, false);
+    }
+
+    @Override
+    @Transactional
+    public IngestionResult ingestSpace(String spaceKey, boolean force) {
         long startMs = System.currentTimeMillis();
-        log.info("Starting ingestion for space: {}", spaceKey);
+        log.info("Starting ingestion for space: {} (force={})", spaceKey, force);
 
         SpaceMetadata spaceMeta = confluenceClient.fetchSpaceMetadata(spaceKey);
         log.info("Space metadata fetched — name: '{}', description present: {}, homepage: {}",
@@ -73,7 +78,7 @@ public class IngestionServiceImpl implements IngestionService {
         for (ConfluencePageDetail page : pages) {
             try {
                 Integer existingVersion = pageRepository.findVersionByPageId(page.id());
-                if (existingVersion != null && existingVersion == page.version().number()) {
+                if (!force && existingVersion != null && existingVersion == page.version().number()) {
                     log.debug("Page {} ({}) unchanged at version {}, skipping",
                             page.title(), page.id(), existingVersion);
                     skipped.incrementAndGet();
