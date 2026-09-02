@@ -148,6 +148,9 @@ public class IngestionServiceImpl implements IngestionService {
                              String spaceName, String homepageId) {
         log.info("Processing page: {} [{}]", page.title(), page.id());
 
+        // Build pageUrl before early-return paths so tracking is always possible.
+        String pageUrl = buildPageUrl(page);
+
         deleteChunksForPage(page.id());
 
         String rawXhtml = Optional.ofNullable(page.body())
@@ -158,16 +161,19 @@ public class IngestionServiceImpl implements IngestionService {
         List<ParsedSection> sections = parser.parse(rawXhtml);
 
         if (sections.isEmpty()) {
-            log.warn("Page {} ({}) produced no parseable content — skipping", page.title(), page.id());
+            log.warn("Page {} ({}) produced no parseable content — recorded with 0 chunks",
+                    page.title(), page.id());
+            upsertPageTracking(page, spaceKey, pageUrl, 0);
             return 0;
         }
 
-        String pageUrl   = buildPageUrl(page);
         boolean isHomepage = page.id().equals(homepageId);
         List<Document> documents = buildDocuments(sections, page, spaceKey, spaceName, pageUrl, isHomepage);
 
         if (documents.isEmpty()) {
-            log.warn("Page {} ({}) produced no chunks — skipping", page.title(), page.id());
+            log.warn("Page {} ({}) produced no chunks — recorded with 0 chunks",
+                    page.title(), page.id());
+            upsertPageTracking(page, spaceKey, pageUrl, 0);
             return 0;
         }
 

@@ -37,44 +37,60 @@ public class ConfluenceClientImpl implements ConfluenceClient {
         log.info("Fetching all pages from Confluence space: {}", spaceKey);
         List<ConfluencePageDetail> allPages = new ArrayList<>();
         int start = 0;
+        int batch = 0;
 
         try {
             while (true) {
-                final int currentStart = start;
-                PageSearchResult result = restClient.get()
-                        .uri(uriBuilder -> uriBuilder
-                                .path(CONTENT_API)
-                                .queryParam("spaceKey", spaceKey)
-                                .queryParam("type", "page")
-                                .queryParam("status", "current")
-                                .queryParam("expand", EXPAND_FIELDS)
-                                .queryParam("limit", props.pageFetchLimit())
-                                .queryParam("start", currentStart)
-                                .build())
-                        .retrieve()
-                        .body(PageSearchResult.class);
+                batch++;
+                PageSearchResult result = fetchBatch(spaceKey, start);
 
                 if (result == null || result.results() == null || result.results().isEmpty()) {
+                    log.debug("Empty batch at start={}, stopping", start);
                     break;
                 }
 
+                int batchSize = result.results().size();
                 allPages.addAll(result.results());
-                log.debug("Fetched batch: {} pages, running total: {}", result.results().size(), allPages.size());
+                log.info("Batch {}: start={}, fetched={}, running total={}",
+                        batch, start, batchSize, allPages.size());
 
-                boolean isLastPage = result.results().size() < props.pageFetchLimit()
-                        || result._links() == null
-                        || result._links().next() == null;
+                // Advance by actual returned count — Confluence Cloud caps at 100 per request
+                // regardless of the configured limit, so using pageFetchLimit() here skips pages.
+                start += batchSize;
 
-                if (isLastPage) break;
-
-                start += props.pageFetchLimit();
+                // _links.next is the authoritative "more pages" signal.
+                // A partial batch (size < limit) is NOT a reliable last-page indicator
+                // because Confluence enforces its own per-request cap.
+                if (!hasNextPage(result)) break;
             }
         } catch (RestClientException ex) {
-            throw new ConfluenceException("Failed to fetch pages from space [" + spaceKey + "]", ex);
+            throw new ConfluenceException(
+                    "Failed to fetch pages from space [" + spaceKey + "] at start=" + start, ex);
         }
 
-        log.info("Completed fetch for space {}. Total pages: {}", spaceKey, allPages.size());
+        log.info("Completed fetch for space '{}': {} pages across {} batches",
+                spaceKey, allPages.size(), batch);
         return allPages;
+    }
+
+    private PageSearchResult fetchBatch(String spaceKey, int start) {
+        final int currentStart = start;
+        return restClient.get()
+                .uri(uriBuilder -> uriBuilder
+                        .path(CONTENT_API)
+                        .queryParam("spaceKey", spaceKey)
+                        .queryParam("type", "page")
+                        .queryParam("status", "current")
+                        .queryParam("expand", EXPAND_FIELDS)
+                        .queryParam("limit", props.pageFetchLimit())
+                        .queryParam("start", currentStart)
+                        .build())
+                .retrieve()
+                .body(PageSearchResult.class);
+    }
+
+    private boolean hasNextPage(PageSearchResult result) {
+        return result._links() != null && result._links().next() != null;
     }
 
     @Override
