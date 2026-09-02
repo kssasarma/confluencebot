@@ -116,10 +116,12 @@ public class HybridSearchService {
     }
 
     static String toVectorString(float[] values) {
+        // pgvector does not accept Java's scientific notation (e.g. "1.0E-5").
+        // Use fixed-point formatting so every component is a plain decimal.
         StringBuilder sb = new StringBuilder("[");
         for (int i = 0; i < values.length; i++) {
             if (i > 0) sb.append(",");
-            sb.append(values[i]);
+            sb.append(String.format("%.8f", (double) values[i]));
         }
         return sb.append("]").toString();
     }
