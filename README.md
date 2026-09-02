@@ -8,17 +8,18 @@ A production-quality Retrieval-Augmented Generation (RAG) chatbot that embeds yo
 User Query
     │
     ▼
-POST /api/chat
+POST /api/chat  ·  POST /api/chat/stream
     │
     ▼
 ChatService
-    ├── VectorStore.similaritySearch(query, topK)
-    │       └── snowflake-arctic-embed-l embeds the query → HNSW cosine search
-    ├── buildPrompt(context chunks + query)
-    └── ChatClient → llama-4-17b-maverick → answer + citations
+    ├── HybridSearchService            — dense (HNSW cosine) + lexical, fused and re-ranked
+    ├── PreferenceService.resolve()    — per-chat overrides on top of the account defaults
+    ├── ConfluencePromptBuilder        — system rules + retrieved excerpts
+    ├── LlmGateway                     — bulkhead + circuit breaker + retry around the model
+    └── ChatSessionService.recordTurn()— question and answer persisted together, on success only
     │
     ▼
-{ "answer": "...", "sources": [...] }
+{ "answer": "...", "sources": [...], "followUpQuestions": [...] }   or a token stream
 
 ───────────────────────────────────────────────
 
@@ -111,11 +112,22 @@ curl -X POST http://localhost:8080/api/ingest/page/98765
 
 ### 5. Ask a question
 
+Sign in first — every chat endpoint is authenticated:
+
 ```bash
-curl -X POST http://localhost:8080/api/chat \
+TOKEN=$(curl -sX POST http://localhost:8080/api/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"query": "How do I reset my password?"}'
+  -d '{"email": "admin@confluencebot.local", "password": "Admin@1234"}' \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
+
+curl -X POST http://localhost:8080/api/chat \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"question": "How do I reset my password?"}'
 ```
+
+Add `"chatId": "<uuid>"` to record the exchange in a conversation, or stream it token by token
+from `POST /api/chat/stream` (see **API Reference**).
 
 Sample response:
 
@@ -126,9 +138,17 @@ Sample response:
     {
       "pageId": "131073",
       "title": "Password Reset Guide",
-      "url": "http://confluence.example.com/display/IT/Password+Reset+Guide"
+      "url": "http://confluence.example.com/display/IT/Password+Reset+Guide",
+      "anchorUrl": "http://confluence.example.com/display/IT/Password+Reset+Guide#Self-Service-Reset",
+      "spaceKey": "IT",
+      "score": 0.91
     }
-  ]
+  ],
+  "followUpQuestions": [
+    "How do I enable two-factor authentication?"
+  ],
+  "chatId": null,
+  "title": null
 }
 ```
 
@@ -247,25 +267,101 @@ Use the numeric page ID from the Confluence URL (`?pageId=98765`). Always re-emb
 
 ### Chat
 
+All chat and user endpoints require `Authorization: Bearer <access token>` (see **Authentication**).
+
 ```
 POST /api/chat
 Content-Type: application/json
 
-{ "query": "How do I configure the authentication module?" }
+{
+  "question": "How do I configure the authentication module?",
+  "chatId": "0f2a5f1e-9c1c-4f1f-9a2b-6f0d5f4a1b2c"
+}
 ```
 
 Response:
 
 ```json
 {
-  "answer": "The authentication module is configured via...\n\nSources:\n- Authentication Setup",
+  "answer": "The authentication module is configured via...",
   "sources": [
-    { "pageId": "12345", "title": "Authentication Setup", "url": "http://confluence/..." }
-  ]
+    {
+      "pageId": "12345",
+      "title": "Authentication Setup",
+      "url": "http://confluence/...",
+      "anchorUrl": "http://confluence/...#Configuration",
+      "spaceKey": "ENG",
+      "score": 0.87
+    }
+  ],
+  "followUpQuestions": ["How do I rotate the signing key?"],
+  "chatId": "0f2a5f1e-9c1c-4f1f-9a2b-6f0d5f4a1b2c",
+  "title": "How do I configure the authentication module?"
 }
 ```
 
-**Validation:** `query` must be 3–1000 characters and not blank.
+**Validation:** `question` must be 3–1000 characters and not blank. `chatId` is optional and must be
+a UUID; supply one to have the exchange recorded in the caller's transcript. The conversation is
+created by the first question, so a chat the user opens and abandons never reaches the database.
+
+### Chat (streamed)
+
+```
+POST /api/chat/stream
+Accept: text/event-stream
+Content-Type: application/json
+
+{ "question": "How do I deploy?", "chatId": "0f2a5f1e-9c1c-4f1f-9a2b-6f0d5f4a1b2c" }
+```
+
+The same pipeline, delivered as server-sent events so the answer appears while it is being written.
+Each event carries a JSON payload; the stream ends with the literal `[DONE]`. Disconnecting cancels
+generation.
+
+```
+data:{"type":"sources","sources":[{"pageId":"12345","title":"Deployment Guide", ...}]}
+
+data:{"type":"token","delta":"Deploy by running "}
+
+data:{"type":"done","chatId":"0f2a…","title":"How do I deploy?","followUpQuestions":["…"]}
+
+data:[DONE]
+```
+
+A `{"type":"error","message":"…"}` payload replaces `done` when the answer cannot be produced.
+
+> Reverse proxies must not buffer this endpoint. The bundled nginx config already sets
+> `proxy_buffering off` for `/api/`.
+
+### Conversations
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/api/user/chats` | List the caller's conversations, pinned first |
+| `POST` | `/api/user/chats` | Create one — idempotent: an untouched, untitled conversation is reused |
+| `PATCH` | `/api/user/chats/{chatId}` | Rename or pin |
+| `DELETE` | `/api/user/chats/{chatId}` | Delete the conversation and its transcript |
+| `GET` | `/api/user/chats/{chatId}/messages` | Read the transcript, oldest turn first |
+| `GET` | `/api/user/chats/{chatId}/preferences` | Per-conversation overrides (`null` = inherited) |
+| `PUT` | `/api/user/chats/{chatId}/preferences` | Replace the overrides; `null` drops one |
+| `GET` | `/api/user/preferences` | Account-wide preferences |
+| `PATCH` | `/api/user/preferences` | Update them; omitted fields stay unchanged |
+
+Untitled conversations that never received a message are cleaned up once they are older than
+`CHAT_ABANDONED_SESSION_TTL` (1 hour by default).
+
+### Authentication
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/api/auth/login` | Exchange credentials for an access/refresh token pair |
+| `POST` | `/api/auth/refresh` | Rotate the pair; the presented refresh token is revoked |
+| `POST` | `/api/auth/logout` | Revoke a refresh token |
+| `GET` | `/api/auth/me` | Describe the signed-in user |
+| `POST` | `/api/auth/change-password` | Change the password and re-issue tokens |
+
+Failures are ProblemDetail responses, not 200s with an error field: bad credentials and expired
+refresh tokens both return `401`.
 
 ### Health check
 
@@ -289,6 +385,11 @@ Error types:
 | Type URN | HTTP status | Cause |
 |---|---|---|
 | `urn:confluencebot:error:validation` | 400 | Request body fails validation |
+| `urn:confluencebot:error:invalid-request` | 400 | A well-formed request the server cannot accept |
+| `urn:confluencebot:error:authentication` | 401 | Bad credentials, or an expired/revoked refresh token |
+| `urn:confluencebot:error:access-denied` | 403 | Authenticated, but not allowed |
+| `urn:confluencebot:error:not-found` | 404 | Unknown resource, or one owned by somebody else |
+| `urn:confluencebot:error:llm-unavailable` | 503 | The model is unreachable, or the circuit breaker is open |
 | `urn:confluencebot:error:confluence` | 502 | Confluence API unreachable or returned an error |
 | `urn:confluencebot:error:ingestion` | 500 | Unrecoverable ingestion pipeline failure |
 | `urn:confluencebot:error:internal` | 500 | Unexpected server error |
@@ -334,6 +435,10 @@ Re-run ingestion after switching — vectors cannot be copied between stores, bu
 | **Repository** | `ConfluencePageRepository` — decouples data access from business logic |
 | **Facade** | `IngestionService`, `ChatService` interfaces — single entry point hides pipeline complexity |
 | **Builder** | `SearchRequest.builder()`, `ConfluencePageEntity.newPage()` |
+| **Adapter** | `SpringAiLlmGateway` — the only class that knows which model library is in use |
+| **Decorator** | `ResilientLlmGateway` — wraps the gateway in the bulkhead, circuit breaker and retry policy |
+| **Observer** | `ChatStreamListener` — the pipeline pushes tokens without knowing they become server-sent events |
+| **DTO / Assembler** | `*Response` records — no JPA entity is ever serialized, so nothing is lazily loaded outside its transaction |
 | **Dependency Injection** | Constructor injection throughout — no field `@Autowired` |
 
 ---
@@ -350,12 +455,21 @@ src/main/java/com/kssasarma/confluencebot/
 ├── domain/                     ConfluencePageEntity (JPA)
 ├── exception/                  Exception types + GlobalExceptionHandler
 ├── ingestion/                  Ingestion pipeline + chunking strategy
-└── repository/                 Spring Data JPA repository
+├── rag/                        Hybrid search, rank fusion, re-ranking
+├── repository/                 Spring Data JPA repositories
+├── security/                   JWT filter, security config, user details
+└── user/                       Users, conversations, transcripts, preferences (+ dto/)
 
 src/main/resources/
 ├── application.yml
 └── db/migration/
     ├── V1__create_vector_extension.sql
     ├── V2__create_confluence_chunks.sql   (HNSW index, functional index on page_id)
-    └── V3__create_confluence_pages.sql    (version-tracking table)
+    ├── V3__create_confluence_pages.sql    (version-tracking table)
+    ├── V4__add_fulltext_index.sql         (lexical half of hybrid search)
+    ├── V5__create_ingestion_jobs.sql
+    ├── V6__create_users.sql               (users, refresh tokens, default admin)
+    ├── V7__create_user_preferences.sql    (preferences, chat sessions)
+    ├── V8__fix_admin_password_hash.sql
+    └── V9__create_chat_messages.sql       (transcripts + chat_preferences FK)
 ```

@@ -8,8 +8,7 @@ import UserPreferencesPage from './components/Settings/UserPreferencesPage'
 import ChatPreferencesPanel from './components/Settings/ChatPreferencesPanel'
 import AdminPage from './components/Admin/AdminPage'
 import Spinner from './components/ui/Spinner'
-import { useChatSessions } from './hooks/useChatSessions'
-import { updateSession } from './services/chatService'
+import { useChatController } from './hooks/useChatController'
 
 export default function App() {
   const { user, isLoading } = useAuth()
@@ -28,52 +27,50 @@ export default function App() {
 }
 
 function MainLayout() {
-  const {
-    sessions, activeSessionId, activeSession,
-    createSession, deleteSession, selectSession, updateSessionLocal,
-  } = useChatSessions()
+  const chat = useChatController()
 
+  const [draft, setDraft] = useState('')
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [showChatPrefs, setShowChatPrefs] = useState(false)
   const [showAdmin, setShowAdmin] = useState(false)
 
-  async function handleRename(chatId: string, title: string) {
-    await updateSession(chatId, { title })
-    updateSessionLocal(chatId, { title })
+  function handleSend() {
+    const question = draft.trim()
+    if (!question || chat.isStreaming) return
+    setDraft('')
+    void chat.sendMessage(question)
   }
 
-  async function handlePin(chatId: string) {
-    const s = sessions.find(x => x.chatId === chatId)
-    if (!s) return
-    const pinned = !s.pinned
-    await updateSession(chatId, { pinned })
-    updateSessionLocal(chatId, { pinned })
+  function handleAsk(question: string) {
+    if (chat.isStreaming) return
+    setDraft('')
+    void chat.sendMessage(question)
   }
 
-  function handleFirstMessage(sessionId: string, firstMsg: string) {
-    const title = firstMsg.slice(0, 50) + (firstMsg.length > 50 ? '…' : '')
-    handleRename(sessionId, title)
-  }
+  // Per-conversation settings only exist once the conversation does.
+  const canConfigureChat = chat.activeSession !== null
 
   return (
     <div className="flex h-screen bg-background overflow-hidden">
       <Sidebar
-        sessions={sessions}
-        activeSessionId={activeSessionId}
-        onCreateSession={createSession}
-        onSelectSession={selectSession}
-        onDeleteSession={deleteSession}
-        onPinSession={handlePin}
-        onRenameSession={handleRename}
+        sessions={chat.sessions}
+        activeChatId={chat.activeChatId}
+        draftChatId={chat.draftChatId}
+        isOnEmptyDraft={chat.isOnEmptyDraft}
+        onCreateSession={chat.startNewChat}
+        onSelectSession={chat.selectChat}
+        onDeleteSession={chatId => void chat.removeChat(chatId)}
+        onPinSession={chatId => void chat.togglePin(chatId)}
+        onRenameSession={(chatId, title) => void chat.renameChat(chatId, title)}
         isCollapsed={sidebarCollapsed}
-        onToggleCollapse={() => setSidebarCollapsed(c => !c)}
+        onToggleCollapse={() => setSidebarCollapsed(collapsed => !collapsed)}
         onOpenSettings={() => setShowSettings(true)}
         onOpenAdmin={() => setShowAdmin(true)}
       />
 
       <main className="flex-1 flex flex-col min-w-0 relative">
-        {activeSession && (
+        {canConfigureChat && (
           <div className="absolute top-3 right-3 z-10">
             <button
               onClick={() => setShowChatPrefs(true)}
@@ -83,13 +80,26 @@ function MainLayout() {
             </button>
           </div>
         )}
-        <ChatArea session={activeSession ?? null} onFirstMessage={handleFirstMessage} />
+        <ChatArea
+          chatId={chat.activeChatId}
+          messages={chat.messages}
+          isLoading={chat.isLoadingMessages}
+          isStreaming={chat.isStreaming}
+          draft={draft}
+          onDraftChange={setDraft}
+          onSend={handleSend}
+          onStop={chat.stopStreaming}
+          onAsk={handleAsk}
+        />
       </main>
 
       {showSettings && <UserPreferencesPage onClose={() => setShowSettings(false)} />}
       {showAdmin && <AdminPage onClose={() => setShowAdmin(false)} />}
-      {showChatPrefs && activeSession && (
-        <ChatPreferencesPanel chatId={activeSession.chatId} onClose={() => setShowChatPrefs(false)} />
+      {showChatPrefs && chat.activeSession && (
+        <ChatPreferencesPanel
+          chatId={chat.activeSession.chatId}
+          onClose={() => setShowChatPrefs(false)}
+        />
       )}
     </div>
   )

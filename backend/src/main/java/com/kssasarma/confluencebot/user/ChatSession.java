@@ -31,6 +31,9 @@ public class ChatSession {
 
     @PreUpdate void onUpdate() { this.updatedAt = Instant.now(); }
 
+    /** Marks the conversation as active so it sorts to the top of the sidebar. */
+    public void touch() { this.updatedAt = Instant.now(); }
+
     public Long getId() { return id; }
     public String getChatId() { return chatId; }
     public User getUser() { return user; }

@@ -28,4 +28,29 @@ public class AsyncConfig {
         executor.initialize();
         return executor;
     }
+
+    /**
+     * Carries streamed answers off the servlet threads.
+     *
+     * The queue is deliberately shallow and the pool refuses work it cannot start: a caller
+     * waiting behind a long queue for an answer that streams token by token would sit staring at
+     * a blank bubble, so it is better to say "busy, try again" straight away. The bulkhead around
+     * the model keeps the real concurrency limit in one place.
+     */
+    @Bean(name = "chatStreamExecutor")
+    public Executor chatStreamExecutor(
+            @Value("${chat.stream.core-pool-size:4}") int corePoolSize,
+            @Value("${chat.stream.max-pool-size:16}") int maxPoolSize,
+            @Value("${chat.stream.queue-capacity:16}") int queueCapacity) {
+
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(corePoolSize);
+        executor.setMaxPoolSize(maxPoolSize);
+        executor.setQueueCapacity(queueCapacity);
+        executor.setThreadNamePrefix("chat-stream-");
+        executor.setWaitForTasksToCompleteOnShutdown(true);
+        executor.setAwaitTerminationSeconds(30);
+        executor.initialize();
+        return executor;
+    }
 }

@@ -1,6 +1,10 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
 import type { AuthUser, AuthResponse } from '../types'
-import { login as apiLogin, getMe, changePassword as apiChangePassword, refreshSession, revokeSession } from '../services/authService'
+import {
+  login as apiLogin, getMe, changePassword as apiChangePassword,
+  refreshSession, revokeSession,
+} from '../services/authService'
+import { clearSession, getRefreshToken, getToken, onSessionChange, storeSession } from '../lib/token'
 
 interface AuthContextValue {
   user: AuthUser | null
@@ -15,8 +19,7 @@ interface AuthContextValue {
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
-const TOKEN_KEY = 'cb_token'
-const REFRESH_KEY = 'cb_refresh'
+
 const RENEW_BEFORE_MS = 60_000
 const MIN_DELAY_MS = 5_000
 
@@ -42,87 +45,93 @@ function toAuthUser(data: AuthResponse, token: string): AuthUser {
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null)
-  const [token, setToken] = useState<string | null>(() => localStorage.getItem(TOKEN_KEY))
+  const [token, setToken] = useState<string | null>(() => getToken() || null)
   const [isLoading, setIsLoading] = useState(true)
   const renewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const inFlightRef = useRef<Promise<boolean> | null>(null)
 
-  function clearSession() {
-    if (renewTimerRef.current) { clearTimeout(renewTimerRef.current); renewTimerRef.current = null }
-    localStorage.removeItem(TOKEN_KEY)
-    localStorage.removeItem(REFRESH_KEY)
-    setToken(null)
-    setUser(null)
-  }
+  const cancelRenewal = useCallback(() => {
+    if (renewTimerRef.current) {
+      clearTimeout(renewTimerRef.current)
+      renewTimerRef.current = null
+    }
+  }, [])
 
-  function scheduleRenewal(accessToken: string) {
-    if (renewTimerRef.current) clearTimeout(renewTimerRef.current)
+  /** Renews shortly before expiry so an idle tab does not need a failed request to notice. */
+  const scheduleRenewal = useCallback((accessToken: string) => {
+    cancelRenewal()
     const { exp } = decodeJwt(accessToken)
     if (!exp) return
     const delay = Math.max(exp * 1000 - Date.now() - RENEW_BEFORE_MS, MIN_DELAY_MS)
-    renewTimerRef.current = setTimeout(() => { performRefresh() }, delay)
-  }
+    renewTimerRef.current = setTimeout(() => {
+      const refreshToken = getRefreshToken()
+      if (!refreshToken) return
+      refreshSession(refreshToken)
+        .then(data => { if (data.token) storeSession(data) })
+        .catch(() => clearSession())
+    }, delay)
+  }, [cancelRenewal])
 
-  function applySessionInternal(data: AuthResponse) {
-    if (!data.token) return
-    localStorage.setItem(TOKEN_KEY, data.token)
-    if (data.refreshToken) localStorage.setItem(REFRESH_KEY, data.refreshToken)
-    setToken(data.token)
-    setUser(toAuthUser(data, data.token))
-    scheduleRenewal(data.token)
-  }
-
-  function performRefresh(): Promise<boolean> {
-    if (inFlightRef.current) return inFlightRef.current
-    const attempt = (async () => {
-      const rt = localStorage.getItem(REFRESH_KEY)
-      if (!rt) return false
-      try {
-        const data = await refreshSession(rt)
-        if (data.error || !data.token) return false
-        applySessionInternal(data)
-        return true
-      } catch { return false }
-      finally { inFlightRef.current = null }
-    })()
-    inFlightRef.current = attempt
-    return attempt
-  }
+  // The HTTP layer rotates tokens on its own when a request meets a 401; mirror whatever it stored.
+  useEffect(() => onSessionChange(nextToken => {
+    setToken(nextToken)
+    if (!nextToken) {
+      cancelRenewal()
+      setUser(null)
+      return
+    }
+    scheduleRenewal(nextToken)
+    const { mustChangePassword } = decodeJwt(nextToken)
+    setUser(current => (current ? { ...current, mustChangePassword } : current))
+  }), [cancelRenewal, scheduleRenewal])
 
   useEffect(() => {
-    const stored = localStorage.getItem(TOKEN_KEY)
-    if (!stored) { setIsLoading(false); return }
-    getMe(stored).then(data => {
-      if (data.userId && data.role) {
-        setUser(toAuthUser(data, stored))
-        setToken(stored)
-        scheduleRenewal(stored)
-      } else clearSession()
-    }).catch(async () => {
-      const renewed = await performRefresh()
-      if (!renewed) clearSession()
-    }).finally(() => setIsLoading(false))
+    const stored = getToken()
+    if (!stored) {
+      setIsLoading(false)
+      return
+    }
+    getMe()
+      .then(data => {
+        setUser(toAuthUser(data, getToken()))
+        setToken(getToken())
+        scheduleRenewal(getToken())
+      })
+      .catch(async () => {
+        const refreshToken = getRefreshToken()
+        if (!refreshToken) return clearSession()
+        try {
+          const data = await refreshSession(refreshToken)
+          storeSession(data)
+          const me = await getMe()
+          setUser(toAuthUser(me, getToken()))
+        } catch {
+          clearSession()
+        }
+      })
+      .finally(() => setIsLoading(false))
+    // Runs once on mount: the stored token is read directly rather than tracked as a dependency.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const login = useCallback(async (email: string, password: string) => {
-    const data = await apiLogin(email, password)
-    if (data.error || !data.token) throw new Error(data.error ?? 'Login failed')
-    applySessionInternal(data)
+  useEffect(() => cancelRenewal, [cancelRenewal])
+
+  const applySession = useCallback((data: AuthResponse) => {
+    if (!data.token) return
+    storeSession(data)
+    setUser(toAuthUser(data, data.token))
   }, [])
 
-  const applySession = useCallback((data: AuthResponse) => { applySessionInternal(data) }, [])
+  const login = useCallback(async (email: string, password: string) => {
+    applySession(await apiLogin(email, password))
+  }, [applySession])
 
   const changePassword = useCallback(async (currentPassword: string, newPassword: string) => {
-    if (!token) throw new Error('Not authenticated')
-    const data = await apiChangePassword(token, currentPassword, newPassword)
-    if (data.error || !data.token) throw new Error(data.error ?? 'Password change failed')
-    applySessionInternal(data)
-  }, [token])
+    applySession(await apiChangePassword(currentPassword, newPassword))
+  }, [applySession])
 
   const logout = useCallback(() => {
-    const rt = localStorage.getItem(REFRESH_KEY)
-    if (rt) revokeSession(rt)
+    const refreshToken = getRefreshToken()
+    if (refreshToken) revokeSession(refreshToken)
     clearSession()
   }, [])
 

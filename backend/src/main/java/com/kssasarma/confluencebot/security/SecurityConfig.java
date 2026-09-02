@@ -9,6 +9,7 @@ import org.springframework.security.config.annotation.authentication.configurati
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import com.kssasarma.confluencebot.config.WebConfig;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.core.userdetails.UserDetailsService;
@@ -29,10 +30,13 @@ public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtFilter;
     private final UserDetailsService userDetailsService;
+    private final WebConfig corsProperties;
 
-    public SecurityConfig(JwtAuthenticationFilter jwtFilter, UserDetailsService userDetailsService) {
+    public SecurityConfig(JwtAuthenticationFilter jwtFilter, UserDetailsService userDetailsService,
+                          WebConfig corsProperties) {
         this.jwtFilter = jwtFilter;
         this.userDetailsService = userDetailsService;
+        this.corsProperties = corsProperties;
     }
 
     @Bean
@@ -60,7 +64,7 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
-        config.setAllowedOriginPatterns(List.of("*"));
+        config.setAllowedOriginPatterns(corsProperties.getAllowedOrigins());
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
         config.setAllowCredentials(true);

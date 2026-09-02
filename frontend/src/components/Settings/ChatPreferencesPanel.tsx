@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { fetchChatPreferences, updateChatPreferences } from '../../services/userPreferenceService'
+import { fetchChatPreferences, saveChatPreferences } from '../../services/userPreferenceService'
 import type { ChatPreferences } from '../../types'
 import Button from '../ui/Button'
 
@@ -23,7 +23,7 @@ export default function ChatPreferencesPanel({ chatId, onClose }: ChatPreference
     if (!prefs) return
     setSaving(true)
     try {
-      const updated = await updateChatPreferences(chatId, prefs)
+      const updated = await saveChatPreferences(chatId, prefs)
       setPrefs(updated)
       setSaved(true)
       setTimeout(() => setSaved(false), 2000)
