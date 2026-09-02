@@ -71,12 +71,12 @@ export default function ChatPreferencesPanel({ chatId, onClose }: ChatPreference
             <div className="space-y-3">
               <TriToggle
                 label="Show sources"
-                value={prefs.showSources}
+                value={prefs.showSources ?? null}
                 onChange={v => setPrefs({ ...prefs, showSources: v })}
               />
               <TriToggle
                 label="Show confidence"
-                value={prefs.showConfidence}
+                value={prefs.showConfidence ?? null}
                 onChange={v => setPrefs({ ...prefs, showConfidence: v })}
               />
             </div>

@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react'
 import type { ChatSession } from '../types'
-import { fetchSessions, createSession as apiCreate, updateSession as apiUpdate, deleteSession as apiDelete } from '../services/chatService'
+import { fetchSessions, createSession as apiCreate, deleteSession as apiDelete } from '../services/chatService'
 
 export function useChatSessions() {
   const [sessions, setSessions] = useState<ChatSession[]>([])
