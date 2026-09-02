@@ -24,5 +24,22 @@ public record SourceReference(
 
         @Schema(description = "Cosine similarity score of the best-matching chunk from this page (0–1). "
                 + "Higher means more relevant.", example = "0.87")
-        Double score
-) {}
+        Double score,
+
+        @Schema(description = "Heading of the section the matching chunk came from. Carried separately "
+                + "from anchorUrl so a client can show the breadcrumb without parsing a URL fragment.",
+                example = "Self-Service Reset")
+        String sectionHeading,
+
+        @Schema(description = "Short extract of the matching chunk, so a reader can judge the citation "
+                + "without opening Confluence. Truncated on a word boundary.",
+                example = "Navigate to the login page and choose Forgot password. A reset link is sent…")
+        String excerpt
+) {
+
+    /** The shape before section headings and excerpts were carried; kept for callers that have neither. */
+    public SourceReference(String pageId, String title, String url, String anchorUrl,
+                           String spaceKey, Double score) {
+        this(pageId, title, url, anchorUrl, spaceKey, score, null, null);
+    }
+}

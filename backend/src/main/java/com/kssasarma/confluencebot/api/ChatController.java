@@ -31,6 +31,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.time.Duration;
 import java.util.concurrent.Executor;
+import java.util.concurrent.ScheduledExecutorService;
 
 @Tag(name = "Chat", description = "Ask questions and receive answers grounded in Confluence documentation")
 @RestController
@@ -41,14 +42,23 @@ public class ChatController {
 
     private final ChatService chatService;
     private final Executor streamExecutor;
+    private final ScheduledExecutorService streamScheduler;
     private final Duration streamTimeout;
+    private final Duration heartbeatInterval;
+    private final Duration lingerGrace;
 
     public ChatController(ChatService chatService,
                           @Qualifier("chatStreamExecutor") Executor streamExecutor,
-                          @Value("${chat.stream.timeout:PT3M}") Duration streamTimeout) {
+                          @Qualifier("sseHeartbeatScheduler") ScheduledExecutorService streamScheduler,
+                          @Value("${chat.stream.timeout:PT3M}") Duration streamTimeout,
+                          @Value("${chat.stream.heartbeat-interval:PT15S}") Duration heartbeatInterval,
+                          @Value("${chat.stream.linger-grace:PT2S}") Duration lingerGrace) {
         this.chatService = chatService;
         this.streamExecutor = streamExecutor;
+        this.streamScheduler = streamScheduler;
         this.streamTimeout = streamTimeout;
+        this.heartbeatInterval = heartbeatInterval;
+        this.lingerGrace = lingerGrace;
     }
 
     @Operation(
@@ -101,8 +111,9 @@ public class ChatController {
             description = """
                     Same pipeline as POST /api/chat, delivered as server-sent events so the answer \
                     appears while it is being written. Each event carries a JSON payload with a \
-                    `type` of `sources`, `token`, `done` or `error`; the stream ends with the \
-                    literal `[DONE]`. Disconnecting cancels generation.
+                    `type` of `sources`, `token`, `title`, `done` or `error`; the stream ends with \
+                    the literal `[DONE]`. Comment frames are sent periodically as keep-alives and \
+                    carry no data. Disconnecting cancels generation.
                     """)
     @ApiResponse(responseCode = "200", description = "Answer stream opened",
             content = @Content(mediaType = MediaType.TEXT_EVENT_STREAM_VALUE,
@@ -111,7 +122,8 @@ public class ChatController {
     public SseEmitter streamChat(@AuthenticationPrincipal User user,
                                  @Valid @RequestBody ChatRequest request) {
         SseEmitter emitter = new SseEmitter(streamTimeout.toMillis());
-        SseChatStreamAdapter adapter = new SseChatStreamAdapter(emitter);
+        SseChatStreamAdapter adapter =
+                new SseChatStreamAdapter(emitter, streamScheduler, heartbeatInterval, lingerGrace);
         ChatQuery query = new ChatQuery(request.question(), request.chatId(), user);
 
         try {

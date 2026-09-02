@@ -112,6 +112,50 @@ chat:
     max-pool-size: ${CHAT_STREAM_MAX_POOL_SIZE:16}
     queue-capacity: ${CHAT_STREAM_QUEUE_CAPACITY:16}
 
+    # Comment frame cadence. Proxies and load balancers close connections they believe are idle,
+    # and retrieval alone can run longer than a default 30s idle timeout. Must stay comfortably
+    # below the shortest idle timeout on the path to the browser.
+    heartbeat-interval: ${CHAT_STREAM_HEARTBEAT_INTERVAL:PT15S}
+
+    # How long a finished stream stays open for late metadata (a refined title). Only ever paid
+    # on the first turn of a conversation; every other turn closes immediately.
+    linger-grace: ${CHAT_STREAM_LINGER_GRACE:PT2S}
+
+    # Timer threads driving keep-alives and lingers across all open streams.
+    scheduler-pool-size: ${CHAT_STREAM_SCHEDULER_POOL_SIZE:2}
+
+  # Retrieval confidence reported with every answer. Weights are relative and are normalised by
+  # their total, so raising one does not require rebalancing the rest.
+  confidence:
+    top-similarity-weight: ${CHAT_CONFIDENCE_TOP_WEIGHT:0.35}
+    mean-similarity-weight: ${CHAT_CONFIDENCE_MEAN_WEIGHT:0.25}
+    page-agreement-weight: ${CHAT_CONFIDENCE_PAGE_WEIGHT:0.15}
+    citation-weight: ${CHAT_CONFIDENCE_CITATION_WEIGHT:0.25}
+
+    # Similarity at or below which a chunk contributes nothing to the score.
+    similarity-floor: ${CHAT_CONFIDENCE_SIMILARITY_FLOOR:0.30}
+
+    # Distinct agreeing pages treated as full corroboration.
+    page-agreement-target: ${CHAT_CONFIDENCE_PAGE_TARGET:3}
+
+    # Cited excerpts treated as full citation coverage.
+    sufficient-citations: ${CHAT_CONFIDENCE_SUFFICIENT_CITATIONS:2}
+
+  # Conversation titles are summarised by a cheap model call after the first exchange. The clipped
+  # question is shown immediately and replaced only if the summary arrives and the user has not
+  # renamed the conversation in the meantime.
+  title:
+    enabled: ${CHAT_TITLE_ENABLED:true}
+    timeout: ${CHAT_TITLE_TIMEOUT:PT4S}
+    core-pool-size: ${CHAT_TITLE_CORE_POOL_SIZE:1}
+    max-pool-size: ${CHAT_TITLE_MAX_POOL_SIZE:4}
+    queue-capacity: ${CHAT_TITLE_QUEUE_CAPACITY:32}
+
+  # Presentation of the cited pages.
+  source:
+    # Characters of the matching passage shown under a citation, truncated on a word boundary.
+    excerpt-max-length: ${CHAT_SOURCE_EXCERPT_MAX_LENGTH:240}
+
   session:
     # Untitled conversations with no messages are cleaned up once they are older than this
     abandoned-ttl: ${CHAT_ABANDONED_SESSION_TTL:PT1H}

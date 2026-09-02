@@ -192,10 +192,11 @@ class ChatSessionServiceImplTest {
         ChatSession abandoned = session("11111111-1111-1111-1111-111111111111", null);
         ChatSession real = session(CHAT_ID, "Keys");
         when(sessionRepository.findAbandonedSessions(eq(1L), any())).thenReturn(List.of(abandoned));
-        when(sessionRepository.findByUserIdOrderByPinnedDescUpdatedAtDesc(1L)).thenReturn(List.of(real));
+        when(sessionRepository.findPage(eq(1L), isNull(), isNull(), isNull(), anyInt()))
+                .thenReturn(List.of(real));
         when(messageRepository.countsBySessionIds(any())).thenReturn(new HashMap<>());
 
-        List<ChatSessionResponse> sessions = service.listSessions(user);
+        List<ChatSessionResponse> sessions = service.listSessions(user, null, null, 0).items();
 
         verify(sessionRepository).deleteAll(List.of(abandoned));
         assertThat(sessions).extracting(ChatSessionResponse::chatId).containsExactly(CHAT_ID);

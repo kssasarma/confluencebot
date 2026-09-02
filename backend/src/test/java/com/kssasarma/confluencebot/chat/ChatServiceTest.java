@@ -2,7 +2,12 @@ package com.kssasarma.confluencebot.chat;
 
 import com.kssasarma.confluencebot.api.dto.ChatApiResponse;
 import com.kssasarma.confluencebot.api.dto.SourceReference;
+import com.kssasarma.confluencebot.chat.confidence.ConfidenceScorer;
+import com.kssasarma.confluencebot.chat.confidence.WeightedSignalConfidenceScorer;
 import com.kssasarma.confluencebot.chat.prompt.ConfluencePromptBuilder;
+import com.kssasarma.confluencebot.chat.source.SourceReferenceFactory;
+import com.kssasarma.confluencebot.chat.title.ChatTitleRefiner;
+import com.kssasarma.confluencebot.config.ChatConfidenceProperties;
 import com.kssasarma.confluencebot.exception.LlmUnavailableException;
 import com.kssasarma.confluencebot.rag.model.RetrievedChunk;
 import com.kssasarma.confluencebot.rag.service.HybridSearchService;
@@ -25,6 +30,8 @@ import reactor.core.publisher.Flux;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -44,15 +51,24 @@ class ChatServiceTest {
     @Mock private ChatSessionService chatSessionService;
     @Mock private User user;
 
+    @Mock private ChatTitleRefiner titleRefiner;
+
     private final ConfluencePromptBuilder promptBuilder = new ConfluencePromptBuilder();
+    private final SourceReferenceFactory sourceReferenceFactory = new SourceReferenceFactory(240);
+    private final ConfidenceScorer confidenceScorer =
+            new WeightedSignalConfidenceScorer(new ChatConfidenceProperties(
+                    0.35, 0.25, 0.15, 0.25, 0.30, 3, 2));
 
     private ChatServiceImpl chatService;
 
     @BeforeEach
     void setUp() {
         chatService = new ChatServiceImpl(hybridSearchService, promptBuilder, llmGateway,
-                preferenceService, chatSessionService, 0.4);
+                preferenceService, chatSessionService, sourceReferenceFactory, confidenceScorer,
+                titleRefiner, 0.4);
         when(preferenceService.resolve(any(), any())).thenReturn(EffectiveChatPreferences.defaults());
+        when(titleRefiner.refine(any()))
+                .thenReturn(CompletableFuture.completedFuture(Optional.empty()));
     }
 
     @Test
@@ -195,7 +211,8 @@ class ChatServiceTest {
     }
 
     private static ChatSessionResponse session(String title) {
-        return new ChatSessionResponse(CHAT_ID, title, false, 2, Instant.now(), Instant.now());
+        return new ChatSessionResponse(CHAT_ID, title, false, 2, Instant.now(), Instant.now(),
+                true, null);
     }
 
     private static final class RecordingListener implements ChatStreamListener {

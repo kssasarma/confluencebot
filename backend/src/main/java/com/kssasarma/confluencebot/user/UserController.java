@@ -47,10 +47,19 @@ public class UserController {
 
     // ── Conversations ─────────────────────────────────────────────────────────
 
-    @Operation(summary = "List the user's conversations, pinned first")
+    @Operation(summary = "List or search the user's conversations",
+            description = """
+                    Returns one page, pinned conversations first and then most recently used. \
+                    Supply `q` to filter by a phrase in the title or anywhere in a transcript; \
+                    matching results carry the passage that matched. Follow `nextCursor` for the \
+                    next page and stop when it is null — page size is capped server-side.
+                    """)
     @GetMapping("/chats")
-    public List<ChatSessionResponse> listSessions(@AuthenticationPrincipal User user) {
-        return chatSessionService.listSessions(user);
+    public ChatSessionPage listSessions(@AuthenticationPrincipal User user,
+                                        @RequestParam(required = false) String q,
+                                        @RequestParam(required = false) String cursor,
+                                        @RequestParam(required = false, defaultValue = "0") int limit) {
+        return chatSessionService.listSessions(user, q, cursor, limit);
     }
 
     @Operation(summary = "Create a conversation",

@@ -39,6 +39,16 @@ public class ChatMessage {
     @Column(name = "follow_ups_json", columnDefinition = "TEXT")
     private String followUpsJson;
 
+    @Column(name = "citations_json", columnDefinition = "TEXT")
+    private String citationsJson;
+
+    /**
+     * How well retrieval matched the question, 0-1, or null for turns recorded before the score
+     * existed. Null and zero mean different things, so the column stays nullable.
+     */
+    @Column(name = "confidence")
+    private Double confidence;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt = Instant.now();
 
@@ -49,6 +59,8 @@ public class ChatMessage {
     public String getContent() { return content; }
     public String getSourcesJson() { return sourcesJson; }
     public String getFollowUpsJson() { return followUpsJson; }
+    public String getCitationsJson() { return citationsJson; }
+    public Double getConfidence() { return confidence; }
     public Instant getCreatedAt() { return createdAt; }
 
     public void setSession(ChatSession session) { this.session = session; }
@@ -57,4 +69,6 @@ public class ChatMessage {
     public void setContent(String content) { this.content = content; }
     public void setSourcesJson(String sourcesJson) { this.sourcesJson = sourcesJson; }
     public void setFollowUpsJson(String followUpsJson) { this.followUpsJson = followUpsJson; }
+    public void setCitationsJson(String citationsJson) { this.citationsJson = citationsJson; }
+    public void setConfidence(Double confidence) { this.confidence = confidence; }
 }

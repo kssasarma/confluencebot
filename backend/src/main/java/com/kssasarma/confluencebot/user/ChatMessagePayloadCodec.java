@@ -2,6 +2,7 @@ package com.kssasarma.confluencebot.user;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.kssasarma.confluencebot.api.dto.Citation;
 import com.kssasarma.confluencebot.api.dto.SourceReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -24,6 +25,7 @@ public class ChatMessagePayloadCodec {
 
     private static final TypeReference<List<SourceReference>> SOURCES = new TypeReference<>() {};
     private static final TypeReference<List<String>> STRINGS = new TypeReference<>() {};
+    private static final TypeReference<List<Citation>> CITATIONS = new TypeReference<>() {};
 
     private final ObjectMapper objectMapper;
 
@@ -47,6 +49,10 @@ public class ChatMessagePayloadCodec {
 
     public List<String> readStrings(String json) {
         return read(json, STRINGS);
+    }
+
+    public List<Citation> readCitations(String json) {
+        return read(json, CITATIONS);
     }
 
     private <T> List<T> read(String json, TypeReference<List<T>> type) {
