@@ -45,14 +45,30 @@ spring:
 
   ai:
     openai:
+      # Shared connection. Each role below reaches its own endpoint with its own key and model;
+      # whatever a role is not given falls back to these two, so a single-server deployment sets
+      # AI_BASE_URL and AI_API_KEY and nothing else.
       base-url: ${AI_BASE_URL:http://localhost:11434/v1}
       api-key: ${AI_API_KEY:dummy}
+
+      # Writing the answer.
       chat:
+        base-url: ${CHAT_BASE_URL:${spring.ai.openai.base-url}}
+        # Spelt out rather than left empty: Spring AI reads an explicitly empty key as "this
+        # endpoint needs no auth" and stops inheriting, so an unset CHAT_API_KEY must resolve to
+        # the shared key here rather than to "".
+        api-key: ${CHAT_API_KEY:${spring.ai.openai.api-key}}
         options:
           model: ${CHAT_MODEL:openai/llama-4-17b-maverick}
           temperature: ${CHAT_TEMPERATURE:0.1}
           max-tokens: ${CHAT_MAX_TOKENS:2048}
+
+      # Turning text into vectors, both at ingestion and at query time. Moving this to another
+      # model or another server invalidates everything already stored: vectors from two models are
+      # not comparable, and the dimensions must still match the pgvector column below.
       embedding:
+        base-url: ${EMBED_BASE_URL:${spring.ai.openai.base-url}}
+        api-key: ${EMBED_API_KEY:${spring.ai.openai.api-key}}
         options:
           model: ${EMBED_MODEL:openai/snowflake-arctic}
     vectorstore:
@@ -94,11 +110,25 @@ chat:
     # Blend weight: 0.5 = equal weight to RRF fusion score and dense cosine score in MMR
     rerank-fusion-weight: ${CHAT_RERANK_FUSION_WEIGHT:0.5}
 
-    # Enable optional LLM re-rank pass (falls back to MMR order on failure)
-    rerank-llm-enabled: ${CHAT_RERANK_LLM_ENABLED:true}
-
     # Cosine similarity below this value triggers a low-confidence caveat in the prompt
     min-similarity-threshold: ${CHAT_MIN_SIMILARITY_THRESHOLD:0.4}
+
+  # The optional LLM pass that orders the excerpts MMR selected. Its own endpoint, key and model:
+  # this call emits a permutation rather than prose, runs before a single token of the answer is
+  # streamed, and is rarely worth the model that writes the answer. Anything left unset is
+  # inherited from the chat model above, which is what this pass used before it was configurable.
+  rerank:
+    enabled: ${CHAT_RERANK_LLM_ENABLED:true}
+    base-url: ${RERANK_BASE_URL:}
+    api-key: ${RERANK_API_KEY:}
+    model: ${RERANK_MODEL:}
+
+    # Ranking is a decision, not a composition — the same excerpts should order the same way twice.
+    temperature: ${RERANK_TEMPERATURE:0.0}
+
+    # A permutation of top-k numbers needs a handful of tokens. Raise it for a model that thinks
+    # aloud: a reply cut off mid-thought parses to nothing and falls back to the MMR order.
+    max-tokens: ${RERANK_MAX_TOKENS:64}
 
   llm:
     # Retry policy for a single (non-streamed) completion call

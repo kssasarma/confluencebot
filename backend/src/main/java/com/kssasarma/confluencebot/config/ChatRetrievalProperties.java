@@ -27,14 +27,12 @@ public record ChatRetrievalProperties(
         /** Overlap between adjacent text chunks in tokens. */
         @Positive int chunkOverlap,
 
-        /** MMR lambda: 1.0 = pure relevance, 0.0 = pure diversity. */
+        /** MMR lambda: 1.0 = pure relevance, 0.0 = pure diversity.  The LLM pass that runs after
+         *  MMR is configured separately — see {@link ChatRerankProperties}. */
         @DecimalMin("0.0") @DecimalMax("1.0") double rerankMmrLambda,
 
         /** Blend weight between RRF fusion score (1.0) and dense cosine score (0.0) in MMR. */
         @DecimalMin("0.0") @DecimalMax("1.0") double rerankFusionWeight,
-
-        /** Enable the optional LLM re-rank pass after MMR.  Falls back to MMR order on failure. */
-        boolean rerankLlmEnabled,
 
         /** Cosine similarity below this triggers a low-confidence caveat in the prompt. */
         @DecimalMin("0.0") @DecimalMax("1.0") double minSimilarityThreshold

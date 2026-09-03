@@ -1,5 +1,6 @@
 package com.kssasarma.confluencebot.rag.service;
 
+import com.kssasarma.confluencebot.config.ChatRerankProperties;
 import com.kssasarma.confluencebot.rag.model.CosineSimilarity;
 import com.kssasarma.confluencebot.rag.model.RetrievedChunk;
 import io.github.resilience4j.bulkhead.Bulkhead;
@@ -32,6 +33,10 @@ import java.util.Set;
  * 2. LLM relevance re-rank — optional (config-gated). One extra LLM call that judges the
  *    MMR-selected set directly against the question and reorders it. Best-effort: any failure
  *    falls back to the MMR order unchanged rather than blocking the answer.
+ *
+ * The model this pass calls is configured separately from the one that writes answers — see
+ * {@link ChatRerankProperties}. It is handed in already built so this class never has to know
+ * whether it is talking to the answer endpoint or somewhere else entirely.
  */
 @Service
 public class ReRankingService {
@@ -41,6 +46,7 @@ public class ReRankingService {
     private final ChatClient chatClient;
     private final CircuitBreaker circuitBreaker;
     private final Bulkhead bulkhead;
+    private final boolean llmRerankEnabled;
 
     @Value("${chat.retrieval.rerank-mmr-lambda:0.7}")
     private double mmrLambda;
@@ -48,13 +54,12 @@ public class ReRankingService {
     @Value("${chat.retrieval.rerank-fusion-weight:0.5}")
     private double fusionWeight;
 
-    @Value("${chat.retrieval.rerank-llm-enabled:true}")
-    private boolean llmRerankEnabled;
-
-    public ReRankingService(ChatClient.Builder chatClientBuilder,
+    public ReRankingService(@Qualifier("rerankChatClient") ChatClient rerankChatClient,
+                             ChatRerankProperties rerankProperties,
                              @Qualifier("rerankCircuitBreaker") CircuitBreaker circuitBreaker,
                              @Qualifier("rerankBulkhead") Bulkhead bulkhead) {
-        this.chatClient = chatClientBuilder.build();
+        this.chatClient = rerankChatClient;
+        this.llmRerankEnabled = rerankProperties.enabled();
         this.circuitBreaker = circuitBreaker;
         this.bulkhead = bulkhead;
     }
@@ -144,7 +149,14 @@ public class ReRankingService {
                     () -> chatClient.prompt().user(prompt).call().content()
                 )
             );
-            return applyOrder(candidates, parseOrder(response, candidates.size()));
+            List<Integer> order = parseOrder(response, candidates.size());
+            if (order.isEmpty()) {
+                // Costs a call per question and changes nothing, so it is worth being able to see:
+                // usually a model that explains itself, or one whose reply hit the token ceiling.
+                log.debug("LLM re-rank reply was not an order, keeping MMR order: {}",
+                        truncate(response, 200));
+            }
+            return applyOrder(candidates, order);
         } catch (CallNotPermittedException e) {
             log.warn("LLM re-rank skipped — circuit breaker open: {}", e.getMessage());
             return candidates;
