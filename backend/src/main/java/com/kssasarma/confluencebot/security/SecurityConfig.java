@@ -2,6 +2,8 @@ package com.kssasarma.confluencebot.security;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.AuthenticationProvider;
 import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
@@ -39,7 +41,16 @@ public class SecurityConfig {
         this.corsProperties = corsProperties;
     }
 
+    /**
+     * The application's chain, and deliberately the last one consulted.
+     *
+     * <p>Single sign-on registers a chain ahead of this one for the two OAuth URLs it needs a
+     * session on (see {@code SsoSecurityConfig}); everything else lands here and is authenticated
+     * by bearer token with no session at all. Spelling the order out rather than leaning on the
+     * default keeps that relationship readable from either end.
+     */
     @Bean
+    @Order(Ordered.LOWEST_PRECEDENCE)
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         return http
                 .csrf(AbstractHttpConfigurer::disable)
@@ -47,6 +58,9 @@ public class SecurityConfig {
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(
+                                // Includes /api/auth/sso, which a signed-out visitor asks whether
+                                // there is a directory to sign in through, and /api/auth/sso/
+                                // exchange, which redeems the code the directory sent them back with.
                                 "/api/auth/**",
                                 "/actuator/health",
                                 "/v3/api-docs/**",

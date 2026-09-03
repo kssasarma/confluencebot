@@ -52,7 +52,8 @@ IngestionService
 | Embedding model | `snowflake-arctic-embed-l` (1024 dimensions) |
 | LLM | `llama-4-17b-maverick` (via OpenAI-compatible endpoint) |
 | Confluence | Server 7.19+ — REST API v1, Storage Format |
-| Auth | Personal Access Token (PAT) |
+| Confluence auth | Personal Access Token (PAT) |
+| User auth | JWT access/refresh pair; optional OpenID Connect SSO via OpenText Directory Services |
 
 ## Prerequisites
 
@@ -278,6 +279,192 @@ and the answer is unaffected.
 | `LOG_LEVEL_APP` | | `INFO` | Log level for `com.kssasarma.confluencebot` |
 | `LOG_LEVEL_SPRING_AI` | | `WARN` | Log level for Spring AI |
 | `LOG_LEVEL_FLYWAY` | | `INFO` | Log level for Flyway |
+| `FORWARD_HEADERS_STRATEGY` | | `framework` | Trust `X-Forwarded-*` from the proxy; `none` if exposed directly |
+
+---
+
+## Single Sign-On with OpenText Directory Services
+
+Off by default. Switched on, the sign-in screen grows a **Continue with OpenText** button and the
+password form stays exactly where it is — which is how you get back in when the directory is
+unreachable, and the only way in for the bootstrap administrator, who exists in no directory.
+
+**This is authentication only.** Everyone who signs in through OTDS is seated as
+`SSO_DEFAULT_ROLE`. Directory groups are not read and do not grant anything; roles are changed
+from the admin screen, as they were before.
+
+### How it works
+
+```
+Browser                     This service                     OTDS
+   │  click "Continue with OpenText"
+   ├──────────────────────────►│
+   │                           │  redirect to OTDS with state + PKCE
+   │◄──────────────────────────┤
+   ├───────────────────────────────────────────────────────────►│
+   │                     the person signs in, OTDS redirects back
+   │◄───────────────────────────────────────────────────────────┤
+   ├──────────────────────────►│  GET /api/login/oauth2/code/otds?code=…
+   │                           ├──── exchange code for tokens ──►│
+   │                           │◄──── ID token + access token ───┤
+   │                           │  find or create the local account
+   │◄──────────────────────────┤  redirect to /sso/callback#sso_code=…
+   ├──────────────────────────►│  POST /api/auth/sso/exchange
+   │◄──────────────────────────┤  the same JWT + refresh pair a password login issues
+```
+
+Three things are worth pulling out of that diagram.
+
+**Nothing downstream changes.** The handshake ends by minting the ordinary token pair, so every
+other endpoint, the refresh rotation and the JWT filter are untouched. Adding a directory did not
+add a second kind of session to reason about.
+
+**The token pair never travels in a URL.** The redirect carries a random, single-use, one-minute
+code instead, which the landing page redeems over a POST. A 30-day refresh token in a URL would
+outlive the sign-in in browser history and leak through the `Referer` of the next request the page
+makes. Only the SHA-256 of the code is stored, so a database dump is not a set of usable sign-ins.
+
+**Identity is keyed on the OTDS subject, not the address.** Directories rename mailboxes and
+reassign them; an account keyed on the address alone follows both, and following the second means
+seating a new employee in a departed one's conversations.
+
+### Setting it up
+
+**1. Register an OAuth client in the OTDS administration console.** It needs the authorization
+code grant and this redirect URL:
+
+```
+https://your-host/api/login/oauth2/code/otds
+```
+
+Under `/api` on purpose — the bundled nginx already proxies `/api` and nothing else, so SSO needs
+no new proxy rule. OTDS compares the URL exactly, so scheme, host, port and path all have to match
+what the browser will actually use.
+
+**2. Point this application at OTDS**, one of two ways.
+
+*Discovery* — the shorter configuration, and the one that survives an OTDS upgrade moving a path:
+
+```dotenv
+SSO_ENABLED=true
+OTDS_ISSUER_URI=https://otds.example.com/otdsws/oauth2
+OTDS_CLIENT_ID=confluence-chatbot
+OTDS_CLIENT_SECRET=the-secret-otds-generated
+```
+
+The endpoints, the JWKS location and the signing algorithms are read from
+`{issuer}/.well-known/openid-configuration` at startup. A mistyped issuer or an unreachable
+directory therefore fails the deployment rather than the first person who tries to sign in.
+
+*Explicit endpoints* — for an OTDS release that does not publish a discovery document, or when the
+browser and this service reach OTDS under different host names. Nothing is fetched:
+
+```dotenv
+SSO_ENABLED=true
+OTDS_CLIENT_ID=confluence-chatbot
+OTDS_CLIENT_SECRET=the-secret-otds-generated
+OTDS_AUTHORIZATION_URI=https://otds.example.com/otdsws/oauth2/auth
+OTDS_TOKEN_URI=https://otds.example.com/otdsws/oauth2/token
+OTDS_JWK_SET_URI=https://otds.example.com/otdsws/oauth2/jwks
+```
+
+> Endpoint paths differ between OTDS releases and between on-premises and the OpenText cloud, so
+> read them off your own server rather than copying them from here. Try
+> `{OTDS_BASE}/otdsws/oauth2/.well-known/openid-configuration` first; if it answers, use discovery
+> and skip this block entirely.
+
+**3. Restart.** `docker compose up -d --build backend`, then load the UI: the button appears when
+`GET /api/auth/sso` reports `enabled: true`.
+
+### All the settings
+
+| Variable | Default | Description |
+|---|---|---|
+| `SSO_ENABLED` | `false` | Master switch. Off, none of the below is read and no OAuth beans exist |
+| `SSO_PROVIDER_NAME` | `OpenText` | What the sign-in button calls the provider |
+| `OTDS_ISSUER_URI` | | Issuer to discover the endpoints from. Alone, this is the whole configuration |
+| `OTDS_CLIENT_ID` | | The OAuth client registered in OTDS. Required |
+| `OTDS_CLIENT_SECRET` | | Its secret. Empty marks the client public and forces `none` |
+| `OTDS_SCOPES` | `openid,profile,email` | `openid` is required, or OTDS returns no ID token |
+| `OTDS_REDIRECT_URI` | built from the request | Must match what is registered in OTDS, exactly |
+| `OTDS_CLIENT_AUTHENTICATION_METHOD` | `client_secret_basic` | Or `client_secret_post`, `none` |
+| `OTDS_AUTHORIZATION_URI` | | Explicit endpoint; set with `OTDS_TOKEN_URI` to skip discovery |
+| `OTDS_TOKEN_URI` | | Explicit endpoint |
+| `OTDS_JWK_SET_URI` | | Where ID token signatures are verified against |
+| `OTDS_USER_INFO_URI` | | Alternative to the JWKS URL when reading identity from OTDS directly |
+| `OTDS_USER_NAME_ATTRIBUTE` | `sub` | The claim an account is keyed on |
+| `OTDS_EMAIL_CLAIMS` | `email,mail,upn,preferred_username` | Searched in order for the address |
+| `SSO_DEFAULT_ROLE` | `USER` | Role for an account created on first sign-in |
+| `SSO_LOGIN_SUCCESS_URI` | `/sso/callback` | Where the browser lands afterwards — see the note below |
+| `SSO_CODE_TTL` | `PT1M` | Life of the single-use hand-off code |
+| `OTDS_LOGOUT_URI` | | OTDS end-session endpoint; set it to make signing out reach OTDS |
+
+`SSO_LOGIN_SUCCESS_URI` is where the browser is dropped with its one-time code, so it has to be a
+URL the UI is actually served from. Relative resolves against this service, which is what the
+bundled nginx wants. Two cases need it set explicitly:
+
+```dotenv
+# UI on its own origin — a Vite dev server, say
+SSO_LOGIN_SUCCESS_URI=http://localhost:5173/sso/callback
+
+# UI published under a sub-path (VITE_BASE_PATH=/ot-confluence-bot/)
+SSO_LOGIN_SUCCESS_URI=/ot-confluence-bot/sso/callback
+```
+
+### Behind a reverse proxy
+
+This service builds its own OAuth redirect URI from the incoming request. Behind a
+TLS-terminating proxy that means it needs `X-Forwarded-Proto`, or it will build an `http://` URI
+that OTDS rejects for not matching what is registered. The bundled `nginx.conf` sets those headers
+and `FORWARD_HEADERS_STRATEGY` defaults to `framework`, so the shipped setup is already correct.
+For any other proxy, either forward `X-Forwarded-Proto` / `X-Forwarded-Host`, or side-step the
+question by pinning the URL:
+
+```dotenv
+OTDS_REDIRECT_URI=https://bot.example.com/api/login/oauth2/code/otds
+```
+
+One scaling note: the authorization-code flow keeps `state` and the PKCE verifier in a server-side
+session for the few seconds of the round trip, so a load balancer must keep one sign-in on one
+instance. Everything after sign-in is bearer-token authenticated and does not care.
+
+### Accounts
+
+| Situation | What happens |
+|---|---|
+| Nobody here has this OTDS subject or address | An account is created: `SSO_DEFAULT_ROLE`, no password, enabled |
+| An account already exists with that address | It is linked to the subject and keeps its role **and its password** |
+| The address is already linked to a different subject | Refused — the address was reassigned, and the old account is not the new person's |
+| The subject is known but the address changed | The address follows the subject |
+| The account is disabled here | Refused, with a message saying so, even though OTDS let them through |
+
+An account created from OTDS has a null password rather than an unusable placeholder, so a
+password sign-in against one fails as bad credentials and `/api/auth/change-password` says plainly
+that there is nothing to change.
+
+### Signing out
+
+Signing out revokes the refresh token and clears the browser's session — but not the OTDS session,
+so signing straight back in returns the same person with nothing asked of them. Set the OTDS
+end-session endpoint to end both:
+
+```dotenv
+OTDS_LOGOUT_URI=https://otds.example.com/otdsws/logout
+```
+
+### When it does not work
+
+| Symptom | Cause |
+|---|---|
+| App will not start, `Could not read OpenID provider metadata` | The issuer is wrong or unreachable from the container. Curl it from inside, or switch to explicit endpoints |
+| App will not start, `app.sso.client-id must be set` | `SSO_ENABLED=true` with nothing else configured |
+| OTDS shows an invalid redirect URI | What is registered and what this service built differ. Pin `OTDS_REDIRECT_URI` and compare them character for character |
+| `Sign-in with OpenText failed (invalid_client)` | Wrong client secret, or OTDS expects `client_secret_post` — set `OTDS_CLIENT_AUTHENTICATION_METHOD` |
+| `The identity provider returned no email address` | Your OTDS releases the address under a claim not in the list. Add it to `OTDS_EMAIL_CLAIMS` |
+| `This sign-in link is no longer valid` | The one-time code was already redeemed or older than `SSO_CODE_TTL` — usually a reloaded callback page. Sign in again |
+
+Raise `LOG_LEVEL_APP=DEBUG` to see the provisioning decisions; the OAuth handshake itself logs
+under `org.springframework.security.oauth2`.
 
 ---
 
@@ -491,9 +678,15 @@ Untitled conversations that never received a message are cleaned up once they ar
 | `POST` | `/api/auth/logout` | Revoke a refresh token |
 | `GET` | `/api/auth/me` | Describe the signed-in user |
 | `POST` | `/api/auth/change-password` | Change the password and re-issue tokens |
+| `GET` | `/api/auth/sso` | Whether a directory sign-in is offered, and where it starts (public) |
+| `POST` | `/api/auth/sso/exchange` | Redeem the one-time code from a completed SSO sign-in (public) |
 
 Failures are ProblemDetail responses, not 200s with an error field: bad credentials and expired
 refresh tokens both return `401`.
+
+Two more paths exist only when SSO is enabled, and are visited by the browser rather than called
+by the app: `/api/oauth2/authorization/otds` starts the handshake and
+`/api/login/oauth2/code/otds` is where the provider sends the browser back.
 
 ### Health check
 
@@ -591,6 +784,7 @@ src/main/java/com/kssasarma/confluencebot/
 ├── rag/                        Hybrid search, rank fusion, re-ranking
 ├── repository/                 Spring Data JPA repositories
 ├── security/                   JWT filter, security config, user details
+│   └── sso/                    OTDS client registration, provisioning, OAuth filter chain
 └── user/                       Users, conversations, transcripts, preferences (+ dto/)
 
 src/main/resources/
@@ -604,5 +798,7 @@ src/main/resources/
     ├── V6__create_users.sql               (users, refresh tokens, default admin)
     ├── V7__create_user_preferences.sql    (preferences, chat sessions)
     ├── V8__fix_admin_password_hash.sql
-    └── V9__create_chat_messages.sql       (transcripts + chat_preferences FK)
+    ├── V9__create_chat_messages.sql       (transcripts + chat_preferences FK)
+    ├── V10__chat_grounding_and_search.sql
+    └── V11__sso_accounts.sql              (nullable password, OTDS link, hand-off codes)
 ```

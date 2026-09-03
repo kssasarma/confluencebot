@@ -18,6 +18,10 @@ export interface AdminUser {
   enabled: boolean
   mustChangePassword: boolean
   createdAt: string
+  /** Where the account came from. An OTDS account has no password here to reset. */
+  authProvider: 'LOCAL' | 'OTDS'
+  /** True once the account can sign in through the directory, however it was created. */
+  ssoLinked: boolean
 }
 
 export interface CreateUserResult {

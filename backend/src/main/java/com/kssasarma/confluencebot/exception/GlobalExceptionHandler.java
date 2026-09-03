@@ -72,6 +72,13 @@ public class GlobalExceptionHandler {
                 ex.getMessage());
     }
 
+    @ExceptionHandler(InvalidSsoCodeException.class)
+    public ProblemDetail handleInvalidSsoCode(InvalidSsoCodeException ex) {
+        log.debug("Single sign-on hand-off rejected: {}", ex.getMessage());
+        return problem(HttpStatus.UNAUTHORIZED, "Authentication Failed", "authentication",
+                ex.getMessage());
+    }
+
     @ExceptionHandler(AccessDeniedException.class)
     public ProblemDetail handleAccessDenied(AccessDeniedException ex) {
         log.debug("Access denied: {}", ex.getMessage());

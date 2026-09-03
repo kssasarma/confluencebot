@@ -14,9 +14,11 @@ import org.springframework.web.bind.annotation.*;
 public class AuthController {
 
     private final AuthService authService;
+    private final SsoService ssoService;
 
-    public AuthController(AuthService authService) {
+    public AuthController(AuthService authService, SsoService ssoService) {
         this.authService = authService;
+        this.ssoService = ssoService;
     }
 
     @Operation(summary = "Sign in and receive an access/refresh token pair")
@@ -43,6 +45,23 @@ public class AuthController {
     public UserInfoResponse me(@AuthenticationPrincipal User user) {
         return new UserInfoResponse(user.getId(), user.getEmail(), user.getRole().name(),
                 user.isMustChangePassword());
+    }
+
+    @Operation(summary = "Describe the single sign-on provider, if one is configured",
+            description = "Read by the sign-in screen before anyone has authenticated, to decide "
+                    + "whether to offer a directory sign-in and where to send the browser.")
+    @GetMapping("/sso")
+    public SsoStatusResponse sso() {
+        return ssoService.describe();
+    }
+
+    @Operation(summary = "Redeem the one-time code from a completed single sign-on",
+            description = "The provider hands the browser a short-lived, single-use code rather "
+                    + "than a token pair, so that no long-lived credential is ever written into a "
+                    + "URL. This exchanges it, once, for the same tokens a password sign-in issues.")
+    @PostMapping("/sso/exchange")
+    public AuthResponse exchangeSso(@Valid @RequestBody SsoExchangeRequest request) {
+        return ssoService.exchangeLoginCode(request.code());
     }
 
     @Operation(summary = "Change the password and re-issue tokens")

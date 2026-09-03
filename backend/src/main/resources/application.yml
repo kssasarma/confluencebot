@@ -9,6 +9,65 @@ app:
     # so this only matters when the UI is served from somewhere else.
     allowed-origins: ${CORS_ALLOWED_ORIGINS:*}
 
+  # ── Single sign-on: OpenText Directory Services ───────────────────────────
+  #
+  # OTDS is an OAuth 2.0 / OpenID Connect authorization server, so it is configured here as a
+  # standard OIDC provider rather than through anything OpenText-specific. Off by default: nothing
+  # below is read, no OAuth beans are created, and the only way in stays a password.
+  #
+  # Describe the provider one of two ways:
+  #   Discovery       — set issuer-uri alone. The authorization, token, userinfo and JWKS
+  #                     endpoints are read from {issuer}/.well-known/openid-configuration at
+  #                     startup, so an OTDS upgrade that moves a path costs no config change.
+  #   Explicit        — set authorization-uri and token-uri (plus jwk-set-uri or user-info-uri).
+  #                     Nothing is fetched. Use this for an OTDS release that does not serve a
+  #                     discovery document, or when the browser and this service reach OTDS under
+  #                     different host names.
+  #
+  # Whichever you choose, the redirect URI below must be registered against the OAuth client in
+  # the OTDS administration console, character for character.
+  sso:
+    enabled: ${SSO_ENABLED:false}
+    provider-name: ${SSO_PROVIDER_NAME:OpenText}
+
+    issuer-uri: ${OTDS_ISSUER_URI:}
+    client-id: ${OTDS_CLIENT_ID:}
+    client-secret: ${OTDS_CLIENT_SECRET:}
+    scopes: ${OTDS_SCOPES:openid,profile,email}
+
+    # {baseUrl} expands to this service's own scheme, host and port — correct behind a proxy only
+    # if forward-headers-strategy below is on. Pin it to a literal URL if in any doubt; OTDS
+    # compares it exactly.
+    redirect-uri: ${OTDS_REDIRECT_URI:{baseUrl}/api/login/oauth2/code/{registrationId}}
+    client-authentication-method: ${OTDS_CLIENT_AUTHENTICATION_METHOD:client_secret_basic}
+
+    # Only needed when not using discovery.
+    authorization-uri: ${OTDS_AUTHORIZATION_URI:}
+    token-uri: ${OTDS_TOKEN_URI:}
+    user-info-uri: ${OTDS_USER_INFO_URI:}
+    jwk-set-uri: ${OTDS_JWK_SET_URI:}
+
+    # The claim that identifies the person, and the claims searched in order for their address.
+    # An OTDS attribute mapping can put the address under any of these, so the second is a list.
+    user-name-attribute: ${OTDS_USER_NAME_ATTRIBUTE:sub}
+    email-claims: ${OTDS_EMAIL_CLAIMS:email,mail,upn,preferred_username}
+
+    # Role given to an account created on first sign-in. Reading roles out of directory groups is
+    # authorization, which this build does not do — promote from the admin screen.
+    default-role: ${SSO_DEFAULT_ROLE:USER}
+
+    # Where the browser lands afterwards. Relative resolves against this service, which is right
+    # when nginx serves the UI and the API on one origin; give an absolute URL when it does not.
+    login-success-uri: ${SSO_LOGIN_SUCCESS_URI:/sso/callback}
+
+    # OTDS end-session endpoint. Set it and signing out ends the OTDS session too, so the next
+    # sign-in asks for credentials instead of silently returning the same person.
+    logout-uri: ${OTDS_LOGOUT_URI:}
+
+    # Lifetime of the single-use code the browser carries back from OTDS. It is redeemed by the
+    # page it lands on, immediately.
+    code-ttl: ${SSO_CODE_TTL:PT1M}
+
 spring:
   application:
     name: confluence-chatbot
@@ -225,6 +284,14 @@ ingestion:
     core-pool-size: ${INGESTION_CORE_POOL_SIZE:2}
     max-pool-size: ${INGESTION_MAX_POOL_SIZE:4}
     queue-capacity: ${INGESTION_QUEUE_CAPACITY:10}
+
+server:
+  # Trust X-Forwarded-* from the reverse proxy, so URLs this service builds for itself carry the
+  # scheme and host the browser actually used. Single sign-on is what makes this load-bearing: a
+  # TLS-terminating proxy in front of an http backend otherwise yields an http:// OAuth redirect
+  # URI, which OTDS rejects outright. Set FORWARD_HEADERS_STRATEGY=none when this service is
+  # exposed directly with no proxy in front of it.
+  forward-headers-strategy: ${FORWARD_HEADERS_STRATEGY:framework}
 
 springdoc:
   api-docs:
