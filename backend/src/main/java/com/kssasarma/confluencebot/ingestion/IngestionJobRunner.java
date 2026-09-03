@@ -13,6 +13,10 @@ import java.util.UUID;
  * Executes ingestion jobs asynchronously on the ingestionTaskExecutor thread pool.
  * Kept as a separate bean from IngestionJobService so that @Async proxying works
  * correctly (avoids the self-invocation bypass problem).
+ *
+ * <p>Both methods take a job id and read the row back on the pool thread, in a transaction
+ * that has nothing to do with the caller's. Callers must therefore have committed the row
+ * before they get here — see IngestionJobService.dispatchAfterCommit.
  */
 @Component
 public class IngestionJobRunner {
@@ -29,7 +33,7 @@ public class IngestionJobRunner {
 
     @Async("ingestionTaskExecutor")
     public void runSpaceJob(UUID jobId, String spaceKey, boolean force) {
-        IngestionJobEntity job = jobRepo.findById(jobId).orElseThrow();
+        IngestionJobEntity job = jobRepo.findById(jobId).orElseThrow(() -> missingJob(jobId));
         job.markRunning();
         jobRepo.save(job);
         log.info("Background ingestion started — jobId={}, space={}, force={}", jobId, spaceKey, force);
@@ -49,7 +53,7 @@ public class IngestionJobRunner {
 
     @Async("ingestionTaskExecutor")
     public void runPageJob(UUID jobId, String pageId) {
-        IngestionJobEntity job = jobRepo.findById(jobId).orElseThrow();
+        IngestionJobEntity job = jobRepo.findById(jobId).orElseThrow(() -> missingJob(jobId));
         job.markRunning();
         jobRepo.save(job);
         log.info("Background ingestion started — jobId={}, pageId={}", jobId, pageId);
@@ -65,5 +69,14 @@ public class IngestionJobRunner {
             jobRepo.save(job);
             log.error("Background ingestion failed — jobId={}, pageId={}: {}", jobId, pageId, ex.getMessage(), ex);
         }
+    }
+
+    /**
+     * Named so the log says which job vanished. The bare Optional.orElseThrow() this replaces
+     * reported only "No value present", which named neither the job nor the reason.
+     */
+    private static IllegalStateException missingJob(UUID jobId) {
+        return new IllegalStateException(
+                "Ingestion job " + jobId + " is not in the database — it was dispatched before its row was committed");
     }
 }
