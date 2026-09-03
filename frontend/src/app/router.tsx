@@ -32,18 +32,24 @@ function ChatLayout() {
   )
 }
 
-export const router = createBrowserRouter([
-  {
-    element: <ChatLayout />,
-    children: [
-      { index: true, element: <NewChatRedirect /> },
-      { path: 'chat/:chatId', element: <ChatRoute /> },
-      { path: 'settings', element: <SettingsRoute /> },
-      {
-        element: <RequireAdmin />,
-        children: [{ path: 'admin', element: <AdminRoute /> }],
-      },
-      { path: '*', element: <NotFoundRoute /> },
-    ],
-  },
-])
+export const router = createBrowserRouter(
+  [
+    {
+      element: <ChatLayout />,
+      children: [
+        { index: true, element: <NewChatRedirect /> },
+        { path: 'chat/:chatId', element: <ChatRoute /> },
+        { path: 'settings', element: <SettingsRoute /> },
+        {
+          element: <RequireAdmin />,
+          children: [{ path: 'admin', element: <AdminRoute /> }],
+        },
+        { path: '*', element: <NotFoundRoute /> },
+      ],
+    },
+  ],
+  // Lets the app be served from a sub-path (e.g. a project site on a static host) without any
+  // hardcoded prefix — `BASE_URL` is resolved from the VITE_BASE_PATH env var at build time (see
+  // vite.config.ts), and defaults to '/' for root deployments (Docker/nginx).
+  { basename: import.meta.env.BASE_URL },
+)
