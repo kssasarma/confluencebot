@@ -15,6 +15,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.PreparedStatementSetter;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -71,6 +72,12 @@ public class IngestionServiceImpl implements IngestionService {
 
         List<ConfluencePageDetail> pages = confluenceClient.fetchAllPages(spaceKey);
 
+        Set<String> fetchedPageIds = new HashSet<>();
+        for (ConfluencePageDetail page : pages) {
+            fetchedPageIds.add(page.id());
+        }
+        int removed = deleteRemovedPages(spaceKey, fetchedPageIds);
+
         AtomicInteger processed   = new AtomicInteger(0);
         AtomicInteger totalChunks = new AtomicInteger(0);
         AtomicInteger skipped     = new AtomicInteger(0);
@@ -96,10 +103,48 @@ public class IngestionServiceImpl implements IngestionService {
         }
 
         long durationMs = System.currentTimeMillis() - startMs;
-        log.info("Ingestion complete — space: {}, processed: {}, chunks: {}, skipped: {}, time: {}ms",
-                spaceKey, processed.get(), totalChunks.get(), skipped.get(), durationMs);
+        log.info("Ingestion complete — space: {}, processed: {}, chunks: {}, skipped: {}, removed: {}, time: {}ms",
+                spaceKey, processed.get(), totalChunks.get(), skipped.get(), removed, durationMs);
 
         return new IngestionResult(processed.get(), totalChunks.get(), skipped.get(), durationMs);
+    }
+
+    /**
+     * Pages tracked for this space that Confluence no longer returned are gone (deleted, moved,
+     * or made inaccessible) — their stale chunks and tracking row are removed regardless of the
+     * force flag, since this is about the fetched set going stale, not about re-embedding cost.
+     *
+     * <p>The diff-and-delete runs as a single atomic statement in the database (DELETE ... RETURNING)
+     * rather than a SELECT followed by per-row {@code deleteById} calls: nothing here pulls the
+     * space's full tracked-page list into the JVM (bounded by pages actually removed, not space
+     * size), and there's no read-then-delete window for a concurrent ingest run on the same space
+     * to race — a second run hitting an already-deleted row here would otherwise throw and roll
+     * back its whole transaction. The chunk cleanup is similarly a single array delete rather than
+     * one round trip per removed page.
+     */
+    private int deleteRemovedPages(String spaceKey, Set<String> currentPageIds) {
+        String[] fetchedIds = currentPageIds.toArray(new String[0]);
+
+        PreparedStatementSetter deletePagesPss = ps -> {
+            ps.setString(1, spaceKey);
+            ps.setArray(2, ps.getConnection().createArrayOf("varchar", fetchedIds));
+        };
+        List<String> removedIds = jdbcTemplate.query(
+                "DELETE FROM confluence_pages WHERE space_key = ? AND page_id <> ALL (?) RETURNING page_id",
+                deletePagesPss,
+                (rs, rowNum) -> rs.getString("page_id"));
+
+        if (removedIds.isEmpty()) {
+            return 0;
+        }
+
+        String[] removedIdsArray = removedIds.toArray(new String[0]);
+        PreparedStatementSetter deleteChunksPss = ps ->
+                ps.setArray(1, ps.getConnection().createArrayOf("varchar", removedIdsArray));
+        jdbcTemplate.update("DELETE FROM confluence_chunks WHERE metadata->>'page_id' = ANY (?)", deleteChunksPss);
+
+        log.info("Removed {} page(s) no longer present in space {}: {}", removedIds.size(), spaceKey, removedIds);
+        return removedIds.size();
     }
 
     @Override

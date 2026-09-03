@@ -16,6 +16,8 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.PreparedStatementSetter;
+import org.springframework.jdbc.core.RowMapper;
 
 import java.util.List;
 import java.util.Optional;
@@ -127,6 +129,54 @@ class IngestionServiceImplTest {
 
         verify(vectorStore).add(argThat(docs -> docs.stream()
                 .anyMatch(d -> "space_overview".equals(d.getMetadata().get("document_type")))));
+    }
+
+    @Test
+    void ingestSpace_trackedPageNoLongerInConfluence_isDeletedFromChunksAndTracking() {
+        when(confluenceClient.fetchSpaceMetadata("ENG")).thenReturn(SPACE_WITH_DESC);
+        when(confluenceClient.fetchAllPages("ENG")).thenReturn(List.of());
+        when(jdbcTemplate.query(eq("DELETE FROM confluence_pages WHERE space_key = ? AND page_id <> ALL (?) RETURNING page_id"),
+                any(PreparedStatementSetter.class), any(RowMapper.class)))
+                .thenReturn(List.of("stale1"));
+
+        service.ingestSpace("ENG");
+
+        verify(jdbcTemplate).update(
+                eq("DELETE FROM confluence_chunks WHERE metadata->>'page_id' = ANY (?)"),
+                any(PreparedStatementSetter.class));
+        verify(pageRepository, never()).deleteById(anyString());
+    }
+
+    @Test
+    void ingestSpace_forcedRun_stillRemovesPageNoLongerInConfluence() {
+        when(confluenceClient.fetchSpaceMetadata("ENG")).thenReturn(SPACE_WITH_DESC);
+        when(confluenceClient.fetchAllPages("ENG")).thenReturn(List.of());
+        when(jdbcTemplate.query(eq("DELETE FROM confluence_pages WHERE space_key = ? AND page_id <> ALL (?) RETURNING page_id"),
+                any(PreparedStatementSetter.class), any(RowMapper.class)))
+                .thenReturn(List.of("stale2"));
+
+        service.ingestSpace("ENG", true);
+
+        verify(jdbcTemplate).update(
+                eq("DELETE FROM confluence_chunks WHERE metadata->>'page_id' = ANY (?)"),
+                any(PreparedStatementSetter.class));
+    }
+
+    @Test
+    void ingestSpace_noPagesRemoved_chunkCleanupNotCalled() {
+        ConfluencePageDetail page = page("p3", "Guide", 1);
+        when(confluenceClient.fetchSpaceMetadata("ENG")).thenReturn(SPACE_WITH_DESC);
+        when(confluenceClient.fetchAllPages("ENG")).thenReturn(List.of(page));
+        when(jdbcTemplate.query(eq("DELETE FROM confluence_pages WHERE space_key = ? AND page_id <> ALL (?) RETURNING page_id"),
+                any(PreparedStatementSetter.class), any(RowMapper.class)))
+                .thenReturn(List.of());
+        when(pageRepository.findVersionByPageId("p3")).thenReturn(1);
+
+        service.ingestSpace("ENG");
+
+        verify(jdbcTemplate, never()).update(
+                eq("DELETE FROM confluence_chunks WHERE metadata->>'page_id' = ANY (?)"),
+                any(PreparedStatementSetter.class));
     }
 
     @Test
