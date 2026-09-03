@@ -2,9 +2,27 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import type { Message, Source } from '../types'
 import { fetchTranscript, streamChatMessage, type StreamCompletion } from '../services/chatService'
+import { ApiError } from '../services/http'
 import { classifyError } from '../lib/errors'
 import { newLocalId } from '../lib/id'
 import { queryKeys } from '../services/queryKeys'
+
+/**
+ * What reading a transcript established about a conversation.
+ *
+ *  - `loaded`   — the server returned its messages.
+ *  - `unsaved`  — the server has never heard of it, because no question has been asked in it yet.
+ *  - `failed`   — the request itself broke, and the reader must be told.
+ */
+export type TranscriptOutcome = 'loaded' | 'unsaved' | 'failed'
+
+/**
+ * How long buffered tokens may wait when no animation frame arrives.
+ *
+ * Long enough that a painting tab always flushes on its frame first, short enough that a throttled
+ * one still reads as live rather than as stalled.
+ */
+const FLUSH_BACKSTOP_MS = 100
 
 export interface ChatController {
   /** Transcripts by conversation. Switching away from a streaming answer and back keeps it. */
@@ -13,7 +31,8 @@ export interface ChatController {
   loadErrorByChat: Record<string, string>
   streamingChatId: string | null
 
-  loadTranscript: (chatId: string) => void
+  /** Reads a conversation's transcript. Resolves with what the server turned out to hold. */
+  loadTranscript: (chatId: string) => Promise<TranscriptOutcome>
   sendMessage: (chatId: string, question: string) => Promise<void>
   /** Re-asks the question that produced a failed answer, replacing it in place. */
   retry: (chatId: string) => Promise<void>
@@ -68,8 +87,16 @@ export function useChatController({
   // Tokens arrive far faster than the screen refreshes. A `setState` per token re-renders the
   // whole transcript dozens of times between paints, which is what makes a long answer stutter.
   // Tokens accumulate here instead and are flushed at most once per animation frame.
+  //
+  // A timer runs alongside the frame as a backstop, because `requestAnimationFrame` is not a
+  // clock: a background tab, a minimised window or a browser that decides the page is not worth
+  // painting stops delivering frames altogether. The buffer then holds the whole answer until the
+  // stream completes, and the reader watches an empty bubble for the entire generation. Whichever
+  // of the two fires first flushes and cancels the other, so a visible tab still paints on the
+  // frame and pays nothing for the timer.
   const buffer = useRef<{ chatId: string; messageId: string; text: string } | null>(null)
   const frame = useRef<number | null>(null)
+  const backstop = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // ── The settled guard ─────────────────────────────────────────────────────
   //
@@ -93,13 +120,21 @@ export function useChatController({
     }))
   }, [])
 
-  const flushNow = useCallback(() => {
+  const cancelFlush = useCallback(() => {
     if (frame.current !== null) {
       cancelAnimationFrame(frame.current)
       frame.current = null
     }
+    if (backstop.current !== null) {
+      clearTimeout(backstop.current)
+      backstop.current = null
+    }
+  }, [])
+
+  const flushNow = useCallback(() => {
+    cancelFlush()
     appendBuffered()
-  }, [appendBuffered])
+  }, [appendBuffered, cancelFlush])
 
   const queueToken = useCallback((chatId: string, messageId: string, delta: string) => {
     if (!delta || settledMessages.current.has(messageId)) return
@@ -112,18 +147,16 @@ export function useChatController({
       buffer.current = { chatId, messageId, text: delta }
     }
 
-    if (frame.current === null) {
-      frame.current = requestAnimationFrame(() => {
-        frame.current = null
-        appendBuffered()
-      })
+    if (frame.current === null && backstop.current === null) {
+      frame.current = requestAnimationFrame(flushNow)
+      backstop.current = setTimeout(flushNow, FLUSH_BACKSTOP_MS)
     }
-  }, [appendBuffered])
+  }, [appendBuffered, flushNow])
 
   useEffect(() => () => {
-    if (frame.current !== null) cancelAnimationFrame(frame.current)
+    cancelFlush()
     abortRef.current?.abort()
-  }, [])
+  }, [cancelFlush])
 
   // ── Transcript loading ────────────────────────────────────────────────────
 
@@ -135,22 +168,48 @@ export function useChatController({
     }))
   }, [])
 
-  const loadTranscript = useCallback((chatId: string) => {
+  const clearLoadError = useCallback((chatId: string) => {
+    setLoadErrorByChat(previous => {
+      if (!(chatId in previous)) return previous
+      const { [chatId]: _cleared, ...rest } = previous
+      return rest
+    })
+  }, [])
+
+  const loadTranscript = useCallback(async (chatId: string): Promise<TranscriptOutcome> => {
     setMessagesByChat(previous => (chatId in previous ? previous : { ...previous, [chatId]: [] }))
     setLoadingChatId(chatId)
 
-    fetchTranscript(chatId)
-      .then(loaded => {
-        setMessagesByChat(previous => ({ ...previous, [chatId]: loaded }))
-        setLoadErrorByChat(({ [chatId]: _cleared, ...rest }) => rest)
-      })
-      .catch(error => {
-        // An outage must not look like "no messages yet" — that is the same lie in a different
-        // place, and the reader has no way to tell they are looking at a broken request.
-        setLoadErrorByChat(previous => ({ ...previous, [chatId]: classifyError(error).message }))
-      })
-      .finally(() => setLoadingChatId(current => (current === chatId ? null : current)))
-  }, [])
+    // What the transcript held when the request went out. A reader who asks a question before it
+    // comes back has already put their turn in here, and overwriting that with the server's copy
+    // — which predates the question — deletes the question and the answer arriving under it.
+    const askedBefore = messagesRef.current[chatId]?.length ?? 0
+    const untouched = () => (messagesRef.current[chatId]?.length ?? 0) === askedBefore
+
+    try {
+      const loaded = await fetchTranscript(chatId)
+      if (untouched()) setMessagesByChat(previous => ({ ...previous, [chatId]: loaded }))
+      clearLoadError(chatId)
+      return 'loaded'
+    } catch (error) {
+      // A conversation reaches the database only when it carries its first answer, so a 404 here
+      // is not a failure: it is a conversation nobody has asked anything in yet. Reporting it as
+      // an error is what turned every reload of a fresh chat — and every first visit to one —
+      // into a dead end with a working composer underneath it. The empty transcript is already in
+      // place from the top of this function; there is nothing further to write.
+      if (error instanceof ApiError && error.status === 404) {
+        clearLoadError(chatId)
+        return 'unsaved'
+      }
+
+      // An outage must not look like "no messages yet" — that is the same lie in a different
+      // place, and the reader has no way to tell they are looking at a broken request.
+      setLoadErrorByChat(previous => ({ ...previous, [chatId]: classifyError(error).message }))
+      return 'failed'
+    } finally {
+      setLoadingChatId(current => (current === chatId ? null : current))
+    }
+  }, [clearLoadError])
 
   // ── Answering ─────────────────────────────────────────────────────────────
 
@@ -230,6 +289,10 @@ export function useChatController({
     const question = text.trim()
     if (!question || streamingChatId) return
 
+    // Whatever went wrong reading this conversation is now beside the point: there is a question
+    // in it, and the answer to that question is what the reader needs to see.
+    clearLoadError(chatId)
+
     const answerId = newLocalId()
     setMessagesByChat(previous => ({
       ...previous,
@@ -241,7 +304,7 @@ export function useChatController({
     }))
 
     await runStream(chatId, question, answerId)
-  }, [runStream, streamingChatId])
+  }, [clearLoadError, runStream, streamingChatId])
 
   /**
    * Re-asks the question behind the last failed answer.
@@ -252,6 +315,8 @@ export function useChatController({
    */
   const retry = useCallback(async (chatId: string) => {
     if (streamingChatId) return
+
+    clearLoadError(chatId)
 
     const transcript = messagesRef.current[chatId] ?? []
     const answerIndex = transcript.findLastIndex(message => message.role === 'assistant')
@@ -269,7 +334,7 @@ export function useChatController({
     }))
 
     await runStream(chatId, question.content, answerId)
-  }, [runStream, streamingChatId])
+  }, [clearLoadError, runStream, streamingChatId])
 
   const stopStreaming = useCallback(() => abortRef.current?.abort(), [])
 

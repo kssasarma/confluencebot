@@ -35,15 +35,28 @@ export default function ChatRoute() {
   const session = chat.sessionFor(chatId)
   const isDraft = chat.isDraft(chatId)
   const isStreaming = chat.isStreaming(chatId)
+  const isLoading = chat.isLoadingTranscript(chatId)
   const loadError = chat.transcriptError(chatId)
 
-  const { showSources, showConfidence } = useEffectiveDisplayPreferences(isDraft ? null : chatId)
+  /**
+   * Whether the server holds this conversation yet.
+   *
+   * Per-conversation settings only exist once it does — reading or writing them any earlier is a
+   * request the backend answers with a 404, because a conversation reaches the database on its
+   * first answer and not before.
+   */
+  const isSaved = !isDraft && messages.length > 0
+
+  const { showSources, showConfidence } = useEffectiveDisplayPreferences(isSaved ? chatId : null)
 
   useDocumentTitle(session?.title ?? (messages.length > 0 ? 'Conversation' : 'New chat'))
 
+  // Depends on the conversation, not on the whole context: the context value changes on every
+  // streamed token, and taking it as a dependency re-runs this on each one.
+  const openTranscript = useEventCallback(chat.openTranscript)
   useEffect(() => {
-    if (chatId) chat.openTranscript(chatId)
-  }, [chat, chatId])
+    if (chatId) openTranscript(chatId)
+  }, [chatId, openTranscript])
 
   // Warm the renderer while the reader is still typing, so the first answer never waits on it.
   useEffect(prefetchMarkdown, [])
@@ -61,7 +74,7 @@ export default function ChatRoute() {
         titleGenerated={session?.titleGenerated ?? false}
         onRename={title => chat.rename(chatId, title)}
         actions={
-          !isDraft && (
+          isSaved && (
             <IconButton
               label="Chat settings"
               icon={<SlidersHorizontal size={16} />}
@@ -75,13 +88,28 @@ export default function ChatRoute() {
         Keyed by conversation so a crash in one does not persist after switching away. Without the
         key React keeps the boundary's error state across the switch and every other conversation
         looks broken too.
+
+        Inside it, the transcript outranks the failure. A read that broke says nothing about the
+        question the reader has just asked, and the answer to it streams into this conversation
+        whether or not the earlier request worked — so a failure that replaced the transcript
+        wholesale left them typing into a composer whose answers they could not see until they
+        reloaded the page.
       */}
       <ErrorBoundary key={chatId} title="This conversation could not be displayed">
-        {chat.isLoadingTranscript(chatId) ? (
+        {isLoading && messages.length === 0 ? (
           <div className="mx-auto w-full max-w-3xl flex-1 px-4 py-6" aria-busy="true">
             <SkeletonText lines={4} className="mb-8" />
             <SkeletonText lines={6} />
           </div>
+        ) : messages.length > 0 ? (
+          <MessageList
+            messages={messages}
+            showSources={showSources}
+            showConfidence={showConfidence}
+            isStreaming={isStreaming}
+            onAsk={ask}
+            onRetry={retry}
+          />
         ) : loadError ? (
           <div className="flex flex-1 items-center justify-center">
             <EmptyState
@@ -99,19 +127,10 @@ export default function ChatRoute() {
               }
             />
           </div>
-        ) : messages.length === 0 ? (
+        ) : (
           <div className="min-h-0 flex-1 overflow-y-auto">
             <WelcomePanel onSelect={ask} />
           </div>
-        ) : (
-          <MessageList
-            messages={messages}
-            showSources={showSources}
-            showConfidence={showConfidence}
-            isStreaming={isStreaming}
-            onAsk={ask}
-            onRetry={retry}
-          />
         )}
       </ErrorBoundary>
 
