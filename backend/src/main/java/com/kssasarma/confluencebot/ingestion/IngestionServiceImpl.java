@@ -114,31 +114,36 @@ public class IngestionServiceImpl implements IngestionService {
      * or made inaccessible) — their stale chunks and tracking row are removed regardless of the
      * force flag, since this is about the fetched set going stale, not about re-embedding cost.
      *
-     * <p>The diff runs in the database (page_id NOT IN the current fetch) rather than pulling
-     * every tracked page for the space into the JVM — keeps this bounded by the (small) number
-     * of pages actually removed, not by space size, as more/larger spaces get ingested.
+     * <p>The diff-and-delete runs as a single atomic statement in the database (DELETE ... RETURNING)
+     * rather than a SELECT followed by per-row {@code deleteById} calls: nothing here pulls the
+     * space's full tracked-page list into the JVM (bounded by pages actually removed, not space
+     * size), and there's no read-then-delete window for a concurrent ingest run on the same space
+     * to race — a second run hitting an already-deleted row here would otherwise throw and roll
+     * back its whole transaction. The chunk cleanup is similarly a single array delete rather than
+     * one round trip per removed page.
      */
     private int deleteRemovedPages(String spaceKey, Set<String> currentPageIds) {
         String[] fetchedIds = currentPageIds.toArray(new String[0]);
 
-        PreparedStatementSetter pss = ps -> {
+        PreparedStatementSetter deletePagesPss = ps -> {
             ps.setString(1, spaceKey);
             ps.setArray(2, ps.getConnection().createArrayOf("varchar", fetchedIds));
         };
         List<String> removedIds = jdbcTemplate.query(
-                "SELECT page_id FROM confluence_pages WHERE space_key = ? AND page_id <> ALL (?)",
-                pss,
+                "DELETE FROM confluence_pages WHERE space_key = ? AND page_id <> ALL (?) RETURNING page_id",
+                deletePagesPss,
                 (rs, rowNum) -> rs.getString("page_id"));
 
-        for (String pageId : removedIds) {
-            deleteChunksForPage(pageId);
-            pageRepository.deleteById(pageId);
+        if (removedIds.isEmpty()) {
+            return 0;
         }
 
-        if (!removedIds.isEmpty()) {
-            log.info("Removed {} page(s) no longer present in space {}: {}", removedIds.size(), spaceKey, removedIds);
-        }
+        String[] removedIdsArray = removedIds.toArray(new String[0]);
+        PreparedStatementSetter deleteChunksPss = ps ->
+                ps.setArray(1, ps.getConnection().createArrayOf("varchar", removedIdsArray));
+        jdbcTemplate.update("DELETE FROM confluence_chunks WHERE metadata->>'page_id' = ANY (?)", deleteChunksPss);
 
+        log.info("Removed {} page(s) no longer present in space {}: {}", removedIds.size(), spaceKey, removedIds);
         return removedIds.size();
     }
 
