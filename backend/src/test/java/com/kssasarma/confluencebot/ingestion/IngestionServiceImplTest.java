@@ -16,6 +16,8 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.PreparedStatementSetter;
+import org.springframework.jdbc.core.RowMapper;
 
 import java.util.List;
 import java.util.Optional;
@@ -127,6 +129,31 @@ class IngestionServiceImplTest {
 
         verify(vectorStore).add(argThat(docs -> docs.stream()
                 .anyMatch(d -> "space_overview".equals(d.getMetadata().get("document_type")))));
+    }
+
+    @Test
+    void ingestSpace_trackedPageNoLongerInConfluence_isDeletedFromChunksAndTracking() {
+        when(confluenceClient.fetchSpaceMetadata("ENG")).thenReturn(SPACE_WITH_DESC);
+        when(confluenceClient.fetchAllPages("ENG")).thenReturn(List.of());
+        when(jdbcTemplate.query(anyString(), any(PreparedStatementSetter.class), any(RowMapper.class)))
+                .thenReturn(List.of("stale1"));
+
+        service.ingestSpace("ENG");
+
+        verify(jdbcTemplate).update(anyString(), eq("stale1"));
+        verify(pageRepository).deleteById("stale1");
+    }
+
+    @Test
+    void ingestSpace_forcedRun_stillRemovesPageNoLongerInConfluence() {
+        when(confluenceClient.fetchSpaceMetadata("ENG")).thenReturn(SPACE_WITH_DESC);
+        when(confluenceClient.fetchAllPages("ENG")).thenReturn(List.of());
+        when(jdbcTemplate.query(anyString(), any(PreparedStatementSetter.class), any(RowMapper.class)))
+                .thenReturn(List.of("stale2"));
+
+        service.ingestSpace("ENG", true);
+
+        verify(pageRepository).deleteById("stale2");
     }
 
     @Test

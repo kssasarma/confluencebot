@@ -15,6 +15,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.PreparedStatementSetter;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -71,6 +72,12 @@ public class IngestionServiceImpl implements IngestionService {
 
         List<ConfluencePageDetail> pages = confluenceClient.fetchAllPages(spaceKey);
 
+        Set<String> fetchedPageIds = new HashSet<>();
+        for (ConfluencePageDetail page : pages) {
+            fetchedPageIds.add(page.id());
+        }
+        int removed = deleteRemovedPages(spaceKey, fetchedPageIds);
+
         AtomicInteger processed   = new AtomicInteger(0);
         AtomicInteger totalChunks = new AtomicInteger(0);
         AtomicInteger skipped     = new AtomicInteger(0);
@@ -96,10 +103,43 @@ public class IngestionServiceImpl implements IngestionService {
         }
 
         long durationMs = System.currentTimeMillis() - startMs;
-        log.info("Ingestion complete — space: {}, processed: {}, chunks: {}, skipped: {}, time: {}ms",
-                spaceKey, processed.get(), totalChunks.get(), skipped.get(), durationMs);
+        log.info("Ingestion complete — space: {}, processed: {}, chunks: {}, skipped: {}, removed: {}, time: {}ms",
+                spaceKey, processed.get(), totalChunks.get(), skipped.get(), removed, durationMs);
 
         return new IngestionResult(processed.get(), totalChunks.get(), skipped.get(), durationMs);
+    }
+
+    /**
+     * Pages tracked for this space that Confluence no longer returned are gone (deleted, moved,
+     * or made inaccessible) — their stale chunks and tracking row are removed regardless of the
+     * force flag, since this is about the fetched set going stale, not about re-embedding cost.
+     *
+     * <p>The diff runs in the database (page_id NOT IN the current fetch) rather than pulling
+     * every tracked page for the space into the JVM — keeps this bounded by the (small) number
+     * of pages actually removed, not by space size, as more/larger spaces get ingested.
+     */
+    private int deleteRemovedPages(String spaceKey, Set<String> currentPageIds) {
+        String[] fetchedIds = currentPageIds.toArray(new String[0]);
+
+        PreparedStatementSetter pss = ps -> {
+            ps.setString(1, spaceKey);
+            ps.setArray(2, ps.getConnection().createArrayOf("varchar", fetchedIds));
+        };
+        List<String> removedIds = jdbcTemplate.query(
+                "SELECT page_id FROM confluence_pages WHERE space_key = ? AND page_id <> ALL (?)",
+                pss,
+                (rs, rowNum) -> rs.getString("page_id"));
+
+        for (String pageId : removedIds) {
+            deleteChunksForPage(pageId);
+            pageRepository.deleteById(pageId);
+        }
+
+        if (!removedIds.isEmpty()) {
+            log.info("Removed {} page(s) no longer present in space {}: {}", removedIds.size(), spaceKey, removedIds);
+        }
+
+        return removedIds.size();
     }
 
     @Override
