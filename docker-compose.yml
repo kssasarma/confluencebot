@@ -52,6 +52,7 @@ services:
       args:
         VITE_API_BASE: ${VITE_API_BASE:-/api}
         VITE_APP_TITLE: ${VITE_APP_TITLE:-Confluence Bot}
+        VITE_BASE_PATH: ${VITE_BASE_PATH:-/}
     container_name: confluence-chatbot-frontend
     ports:
       - "${FRONTEND_PORT:-3000}:80"

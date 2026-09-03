@@ -48,8 +48,8 @@ export const router = createBrowserRouter(
       ],
     },
   ],
-  // Lets the app be served from a sub-path (e.g. GitLab Pages project sites) without any
-  // hardcoded prefix — `BASE_URL` is whatever `vite build --base=...` was given at build time,
-  // and defaults to '/' for root deployments (Docker/nginx).
+  // Lets the app be served from a sub-path (e.g. a project site on a static host) without any
+  // hardcoded prefix — `BASE_URL` is resolved from the VITE_BASE_PATH env var at build time (see
+  // vite.config.ts), and defaults to '/' for root deployments (Docker/nginx).
   { basename: import.meta.env.BASE_URL },
 )
