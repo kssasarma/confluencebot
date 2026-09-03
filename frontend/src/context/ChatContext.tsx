@@ -42,22 +42,37 @@ const ChatContext = createContext<ChatContextValue | null>(null)
 
 export function ChatProvider({ children }: { children: ReactNode }) {
   const [search, setSearch] = useState('')
+
+  /**
+   * The conversations that exist only here, and have not reached the server.
+   *
+   * Held in a ref as well as in state because the two are read on different clocks. `isDraft` is
+   * read while rendering, so it needs state; `openTranscript` is read in the same tick as the
+   * `startDraft` that minted the id, so it needs an answer that does not wait for a re-render.
+   * Reading the state snapshot there is what used to send a brand-new conversation's id to the
+   * server and turn its 404 into "Could not load this conversation".
+   */
+  const draftsRef = useRef<Set<string>>(new Set())
   const [draftIds, setDraftIds] = useState<Set<string>>(() => new Set())
+
   const loadedRef = useRef<Set<string>>(new Set())
 
   const sessions = useSessions(search)
   const { upsert, applyTitle } = sessions
 
+  /** Publishes the ref for rendering. Never called during a render of another component. */
+  const publishDrafts = useCallback(() => setDraftIds(new Set(draftsRef.current)), [])
+
+  const forgetDraft = useCallback((chatId: string) => {
+    if (!draftsRef.current.delete(chatId)) return
+    publishDrafts()
+  }, [publishDrafts])
+
   const onSessionRecorded = useCallback(({ chatId, title }: { chatId: string; title: string | null }) => {
     upsert({ chatId, title })
     // It is the server's conversation now, not a local draft.
-    setDraftIds(current => {
-      if (!current.has(chatId)) return current
-      const next = new Set(current)
-      next.delete(chatId)
-      return next
-    })
-  }, [upsert])
+    forgetDraft(chatId)
+  }, [forgetDraft, upsert])
 
   const onTitleRefined = useCallback(({ chatId, title }: { chatId: string; title: string | null }) => {
     if (title) applyTitle(chatId, title)
@@ -69,6 +84,15 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     loadTranscript, sendMessage, retry, stopStreaming, discardChat,
   } = controller
 
+  /**
+   * The transcripts, readable without being a dependency.
+   *
+   * `startDraft` needs to know which drafts are empty. Taking `messagesByChat` as a dependency
+   * would rebuild it on every streamed token, and with it every callback memoised against it.
+   */
+  const messagesRef = useRef(messagesByChat)
+  messagesRef.current = messagesByChat
+
   const isDraft = useCallback(
     (chatId: string | null) => chatId !== null && draftIds.has(chatId),
     [draftIds],
@@ -77,37 +101,54 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   /**
    * Loads a conversation's transcript once.
    *
-   * Drafts are skipped: they have no server-side transcript, and requesting one would 404 on
-   * every render of a brand-new chat.
+   * Drafts are skipped outright — they have no server-side transcript to read. Everything else is
+   * fetched, and the answer decides: a conversation the server has never heard of is one nobody
+   * has asked a question in yet, so it becomes a draft here and opens as an empty chat. That is
+   * what makes a conversation's URL survive a reload, a bookmark and a second tab, none of which
+   * carry this tab's memory of which ids it minted.
    */
   const openTranscript = useCallback((chatId: string) => {
-    if (draftIds.has(chatId) || loadedRef.current.has(chatId)) return
+    if (draftsRef.current.has(chatId) || loadedRef.current.has(chatId)) return
     loadedRef.current.add(chatId)
-    loadTranscript(chatId)
-  }, [draftIds, loadTranscript])
 
+    void loadTranscript(chatId).then(outcome => {
+      if (outcome === 'unsaved') {
+        draftsRef.current.add(chatId)
+        publishDrafts()
+        return
+      }
+      // A request that broke is worth another attempt the next time the reader opens it; keeping
+      // the id marked as loaded would make the failure permanent for the life of the tab.
+      if (outcome === 'failed') loadedRef.current.delete(chatId)
+    })
+  }, [loadTranscript, publishDrafts])
+
+  /**
+   * Returns a conversation to type into.
+   *
+   * Safe to call from an event handler or an effect, and it registers the new id synchronously so
+   * the route that renders next can be told it is a draft without waiting for this state to land.
+   */
   const startDraft = useCallback((): string => {
     // An untouched draft is reused, so clicking "New chat" ten times leaves one empty chat rather
-    // than ten.
-    const untouched = [...draftIds].find(id => (messagesByChat[id] ?? []).length === 0)
+    // than ten. A draft carrying a failed read is not untouched: handing it back would make
+    // "New chat" a button that returns the reader to the error they are trying to leave.
+    const untouched = [...draftsRef.current].find(id =>
+      (messagesRef.current[id] ?? []).length === 0 && !loadErrorByChat[id])
     if (untouched) return untouched
 
     const chatId = newChatId()
-    setDraftIds(current => new Set(current).add(chatId))
+    draftsRef.current.add(chatId)
+    publishDrafts()
     return chatId
-  }, [draftIds, messagesByChat])
+  }, [loadErrorByChat, publishDrafts])
 
   const deleteConversation = useCallback((chatId: string) => {
     sessions.remove(chatId)
     discardChat(chatId)
     loadedRef.current.delete(chatId)
-    setDraftIds(current => {
-      if (!current.has(chatId)) return current
-      const next = new Set(current)
-      next.delete(chatId)
-      return next
-    })
-  }, [discardChat, sessions])
+    forgetDraft(chatId)
+  }, [discardChat, forgetDraft, sessions])
 
   const value = useMemo<ChatContextValue>(() => ({
     ...sessions,
