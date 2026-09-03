@@ -1,7 +1,7 @@
 export interface AuthUser {
   userId: number
   email: string
-  role: 'ADMIN' | 'USER'
+  role: 'ADMIN' | 'ADMIN_READ_ONLY' | 'USER'
   mustChangePassword: boolean
 }
 

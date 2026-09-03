@@ -9,10 +9,12 @@ import { apiJson, jsonBody } from './http'
  * layer exists to do.
  */
 
+export type AdminRole = 'ADMIN' | 'ADMIN_READ_ONLY' | 'USER'
+
 export interface AdminUser {
   id: number
   email: string
-  role: 'ADMIN' | 'USER'
+  role: AdminRole
   enabled: boolean
   mustChangePassword: boolean
   createdAt: string
@@ -54,6 +56,9 @@ export const createUser = (
 export const setUserEnabled = (id: number, enabled: boolean): Promise<AdminUser> =>
   apiJson<AdminUser>(`/admin/users/${id}/enabled`, { method: 'PATCH', ...jsonBody({ enabled }) })
 
+export const setUserRole = (id: number, role: AdminRole): Promise<AdminUser> =>
+  apiJson<AdminUser>(`/admin/users/${id}/role`, { method: 'PATCH', ...jsonBody({ role }) })
+
 export const ingestSpace = (spaceKey: string, force = false): Promise<IngestionJob> =>
   apiJson<IngestionJob>('/ingest/space', { method: 'POST', ...jsonBody({ spaceKey, force }) })
 
@@ -64,3 +69,7 @@ export const listJobs = (): Promise<IngestionJob[]> => apiJson<IngestionJob[]>('
 
 export const getJob = (jobId: string): Promise<IngestionJob> =>
   apiJson<IngestionJob>(`/ingest/jobs/${jobId}`)
+
+/** Resubmits a failed job. The failure stays in the history; this returns the new job. */
+export const retriggerJob = (jobId: string): Promise<IngestionJob> =>
+  apiJson<IngestionJob>(`/ingest/jobs/${jobId}/retrigger`, { method: 'POST' })

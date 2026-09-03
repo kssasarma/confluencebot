@@ -19,8 +19,10 @@ const AdminRoute = lazy(() => import('../routes/AdminRoute'))
  * role on every request. Its job here is to avoid rendering a screen whose every call would 403.
  */
 function RequireAdmin() {
-  const { isAdmin } = useAuth()
-  return isAdmin ? <Outlet /> : <Navigate to="/" replace />
+  // Read-only admins belong on this screen too: onboarding users is the whole of what they do.
+  // Which half of it they can act on is decided inside the screen, and by the API behind it.
+  const { canAdminister } = useAuth()
+  return canAdminister ? <Outlet /> : <Navigate to="/" replace />
 }
 
 /** The conversation state has to outlive navigation between conversations. */

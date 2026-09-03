@@ -1,6 +1,8 @@
 package com.kssasarma.confluencebot.ingestion;
 
 import com.kssasarma.confluencebot.domain.IngestionJobEntity;
+import com.kssasarma.confluencebot.domain.IngestionJobStatus;
+import com.kssasarma.confluencebot.domain.IngestionJobType;
 import com.kssasarma.confluencebot.repository.IngestionJobRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -77,5 +79,45 @@ public class IngestionJobService {
     @Transactional(readOnly = true)
     public List<IngestionJobEntity> findAll() {
         return jobRepo.findAllByOrderByCreatedAtDesc();
+    }
+
+    /**
+     * Resubmits a failed job as a new one, leaving the failure in the history.
+     *
+     * <p>A retrigger is a fresh row rather than a reset of the old one: the failed attempt is the
+     * only record of what went wrong, and overwriting its status and error message to re-run it
+     * would erase the reason anyone is retriggering in the first place.
+     *
+     * <p>Empty when the job does not exist or is not {@code FAILED} — a job still pending or
+     * running would otherwise be duplicated into a second concurrent run over the same space, and
+     * a completed one has nothing to retry. The caller distinguishes the two cases.
+     */
+    @Transactional
+    public Optional<IngestionJobEntity> retriggerJob(UUID jobId) {
+        return jobRepo.findById(jobId)
+                .filter(failed -> failed.getStatus() == IngestionJobStatus.FAILED)
+                .map(failed -> {
+                    // Read off the entity here, not in the callback: after commit it is detached,
+                    // for the same reason the id is captured eagerly in dispatchAfterCommit.
+                    IngestionJobType type = failed.getJobType();
+                    String spaceKey = failed.getSpaceKey();
+                    String pageId = failed.getPageId();
+                    boolean force = failed.isForce();
+
+                    IngestionJobEntity retry = type == IngestionJobType.SPACE
+                            ? IngestionJobEntity.forSpace(spaceKey, force)
+                            : IngestionJobEntity.forPage(pageId);
+                    jobRepo.save(retry);
+
+                    UUID retryId = retry.getId();
+                    dispatchAfterCommit(() -> {
+                        if (type == IngestionJobType.SPACE) {
+                            runner.runSpaceJob(retryId, spaceKey, force);
+                        } else {
+                            runner.runPageJob(retryId, pageId);
+                        }
+                    });
+                    return retry;
+                });
     }
 }

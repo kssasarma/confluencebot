@@ -30,7 +30,7 @@ export default function CommandPalette({ open, onClose }: CommandPaletteProps) {
   const navigate = useNavigate()
   const chat = useChat()
   const { theme, setTheme } = useTheme()
-  const { isAdmin } = useAuth()
+  const { canAdminister } = useAuth()
 
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<ChatSession[]>([])
@@ -110,7 +110,7 @@ export default function CommandPalette({ open, onClose }: CommandPaletteProps) {
                     <Item icon={<Settings size={15} />} onSelect={() => go('/settings')}>
                       Settings
                     </Item>
-                    {isAdmin && (
+                    {canAdminister && (
                       <Item icon={<ShieldCheck size={15} />} onSelect={() => go('/admin')}>
                         Admin
                       </Item>

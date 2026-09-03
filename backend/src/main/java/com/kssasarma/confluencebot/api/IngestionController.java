@@ -16,6 +16,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
@@ -209,5 +210,35 @@ public class IngestionController {
                 .map(IngestionJobResponse::from)
                 .toList();
         return ResponseEntity.ok(jobs);
+    }
+
+    @Operation(
+            summary = "Retrigger a failed ingestion job",
+            description = "Resubmits a failed ingestion job for processing. Only works on jobs with FAILED status.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "202", description = "Job retriggered and queued",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = IngestionJobResponse.class))),
+            @ApiResponse(responseCode = "400", description = "Job is not in FAILED status",
+                    content = @Content(mediaType = MediaType.APPLICATION_PROBLEM_JSON_VALUE,
+                            schema = @Schema(implementation = ProblemDetail.class))),
+            @ApiResponse(responseCode = "404", description = "Job not found",
+                    content = @Content(mediaType = MediaType.APPLICATION_PROBLEM_JSON_VALUE,
+                            schema = @Schema(implementation = ProblemDetail.class)))
+    })
+    @PreAuthorize("hasRole('ADMIN')")
+    @PostMapping("/jobs/{jobId}/retrigger")
+    public ResponseEntity<?> retriggerJob(
+            @Parameter(description = "UUID of the failed job to resubmit")
+            @PathVariable UUID jobId) {
+
+        return jobService.retriggerJob(jobId)
+                .map(retry -> ResponseEntity.accepted().body((Object) IngestionJobResponse.from(retry)))
+                // Empty covers both "no such job" and "not failed", so the original decides which.
+                .orElseGet(() -> jobService.findById(jobId)
+                        .map(job -> ResponseEntity.badRequest()
+                                .body((Object) ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST,
+                                        "Only FAILED jobs can be retriggered; this one is " + job.getStatus())))
+                        .orElseGet(() -> ResponseEntity.notFound().build()));
     }
 }
