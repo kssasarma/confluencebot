@@ -268,6 +268,37 @@ class ChatServiceTest {
         assertThat(prompt.getValue().hasHistory()).isFalse();
     }
 
+    /**
+     * What gets embedded is one short question, never the conversation.
+     *
+     * <p>The naive way to make retrieval context-aware is to paste the history in front of the
+     * question and embed that. It bloats every request in proportion to how long somebody has been
+     * talking, and it is worse than useless: the stale terms dominate the vector, so a follow-up
+     * retrieves the *previous* topic. The rewrite exists precisely so the query stays one short
+     * question — it replaces the question, it never appends to it.
+     */
+    @Test
+    void whatIsSearchedIsOneShortQuestion_neverTheConversation() {
+        ConversationContext context = new ConversationContext(List.of(
+                new ConversationExchange("How do I rotate the Kafka TLS certificates?",
+                        "Run the rotate script on each broker in turn. ".repeat(40)),
+                new ConversationExchange("Does it need a restart?", "No restart is required.")));
+
+        when(historyService.recentContext(any())).thenReturn(context);
+        // The rewriter declines: history exists, but the question reaches retrieval untouched.
+        when(hybridSearchService.search(anyString())).thenReturn(List.of(chunk()));
+        when(llmGateway.complete(any())).thenReturn("An answer.");
+        when(chatSessionService.recordTurn(any(), any())).thenReturn(session("Certificates"));
+
+        chatService.chat(new ChatQuery("And in staging?", CHAT_ID, user));
+
+        ArgumentCaptor<String> searched = ArgumentCaptor.forClass(String.class);
+        verify(hybridSearchService).search(searched.capture());
+
+        assertThat(searched.getValue()).isEqualTo("And in staging?");
+        assertThat(searched.getValue()).doesNotContain("rotate script", "restart");
+    }
+
     // ── Fixtures ──────────────────────────────────────────────────────────────
 
     private static RetrievedChunk chunk() {

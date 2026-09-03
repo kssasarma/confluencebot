@@ -130,6 +130,31 @@ class LlmFollowUpQueryRewriterTest {
                 .isEqualTo("And in staging?");
     }
 
+    /**
+     * The embedding cost of a follow-up does not grow with the conversation.
+     *
+     * <p>Twenty long turns behind it, what reaches retrieval is still one question inside the
+     * configured ceiling. The cap is what enforces it: a reply that outgrew a question is a model
+     * that answered or explained rather than rewrote, and it is thrown away.
+     */
+    @Test
+    void whatReachesRetrievalStaysBounded_howeverLongTheConversationRuns() {
+        List<ConversationExchange> longRun = new java.util.ArrayList<>();
+        for (int turn = 0; turn < 20; turn++) {
+            longRun.add(new ConversationExchange("Question " + turn,
+                    "A long answer about broker certificates. ".repeat(30)));
+        }
+
+        when(llmGateway.complete(any()))
+                .thenReturn("How do I rotate the Kafka TLS certificates in staging?");
+
+        String forRetrieval =
+                rewriter().rewriteForRetrieval("And in staging?", new ConversationContext(longRun));
+
+        assertThat(forRetrieval).hasSizeLessThanOrEqualTo(400);
+        assertThat(forRetrieval).doesNotContain("A long answer", "Question 0");
+    }
+
     @Test
     void anUnavailableModel_leavesTheQuestionAsAsked() {
         when(llmGateway.complete(any())).thenThrow(new LlmUnavailableException("circuit open"));
