@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, Ban, Check, Play, RefreshCw, UserPlus } from 'lucide-react'
+import { ArrowLeft, Ban, Check, Play, RefreshCw, RotateCcw, UserPlus } from 'lucide-react'
 import {
-  createUser, ingestPage, ingestSpace, listJobs, listUsers, setUserEnabled,
-  type AdminUser, type IngestionJob,
+  createUser, ingestPage, ingestSpace, listJobs, listUsers, retriggerJob, setUserEnabled,
+  setUserRole, type AdminRole, type AdminUser, type IngestionJob,
 } from '../services/adminService'
+import { useAuth } from '../context/AuthContext'
 import { queryKeys } from '../services/queryKeys'
 import { toMessage } from '../lib/errors'
 import { useToast } from '../components/ui/Toast'
@@ -21,6 +22,14 @@ import { SkeletonText } from '../components/ui/Skeleton'
 
 type Tab = 'users' | 'ingestion'
 
+const ROLE_LABELS: Record<AdminRole, string> = {
+  ADMIN: 'Admin',
+  ADMIN_READ_ONLY: 'Admin (read-only)',
+  USER: 'User',
+}
+
+const ROLES = Object.keys(ROLE_LABELS) as AdminRole[]
+
 /**
  * User management and ingestion control.
  *
@@ -29,7 +38,12 @@ type Tab = 'users' | 'ingestion'
  */
 export default function AdminRoute() {
   const [tab, setTab] = useState<Tab>('users')
+  const { isAdmin } = useAuth()
   useDocumentTitle('Admin')
+
+  // Ingestion is a full-admin power, so a read-only admin is not shown a tab whose every control
+  // the API would refuse. Onboarding is the whole screen for them.
+  const tabs: Tab[] = isAdmin ? ['users', 'ingestion'] : ['users']
 
   return (
     <div className="h-full overflow-y-auto">
@@ -45,7 +59,7 @@ export default function AdminRoute() {
         <h1 className="mb-6 text-xl font-semibold text-foreground">Admin</h1>
 
         <div role="tablist" aria-label="Admin sections" className="mb-6 flex gap-1">
-          {(['users', 'ingestion'] as Tab[]).map(name => (
+          {tabs.map(name => (
             <button
               key={name}
               role="tab"
@@ -63,7 +77,9 @@ export default function AdminRoute() {
           ))}
         </div>
 
-        <div role="tabpanel">{tab === 'users' ? <UsersTab /> : <IngestionTab />}</div>
+        <div role="tabpanel">
+          {tab === 'users' || !isAdmin ? <UsersTab /> : <IngestionTab />}
+        </div>
       </div>
     </div>
   )
@@ -72,9 +88,10 @@ export default function AdminRoute() {
 function UsersTab() {
   const queryClient = useQueryClient()
   const toast = useToast()
+  const { isAdmin, user: signedIn } = useAuth()
 
   const [email, setEmail] = useState('')
-  const [role, setRole] = useState('USER')
+  const [role, setRole] = useState<AdminRole>('USER')
   const [created, setCreated] = useState<{ email: string; tempPassword: string } | null>(null)
 
   const users = useQuery({ queryKey: queryKeys.adminUsers, queryFn: listUsers })
@@ -90,13 +107,24 @@ function UsersTab() {
     onError: error => toast.error('Could not create the user', toMessage(error, 'Please try again.')),
   })
 
+  const applyUser = (updated: AdminUser) => {
+    queryClient.setQueryData<AdminUser[]>(queryKeys.adminUsers, current =>
+      current?.map(user => (user.id === updated.id ? updated : user)))
+  }
+
   const toggle = useMutation({
     mutationFn: (user: AdminUser) => setUserEnabled(user.id, !user.enabled),
-    onSuccess: updated => {
-      queryClient.setQueryData<AdminUser[]>(queryKeys.adminUsers, current =>
-        current?.map(user => (user.id === updated.id ? updated : user)))
-    },
+    onSuccess: applyUser,
     onError: error => toast.error('Could not update the user', toMessage(error, 'Please try again.')),
+  })
+
+  const changeRole = useMutation({
+    mutationFn: ({ user, next }: { user: AdminUser; next: AdminRole }) => setUserRole(user.id, next),
+    onSuccess: updated => {
+      applyUser(updated)
+      toast.success('Role updated', `${updated.email} is now ${ROLE_LABELS[updated.role]}.`)
+    },
+    onError: error => toast.error('Could not change the role', toMessage(error, 'Please try again.')),
   })
 
   return (
@@ -141,11 +169,12 @@ function UsersTab() {
           <select
             id="new-user-role"
             value={role}
-            onChange={event => setRole(event.target.value)}
+            onChange={event => setRole(event.target.value as AdminRole)}
             className="h-10 rounded-lg border border-border bg-surface px-3 text-sm text-foreground"
           >
-            <option value="USER">User</option>
-            <option value="ADMIN">Admin</option>
+            {ROLES.map(name => (
+              <option key={name} value={name}>{ROLE_LABELS[name]}</option>
+            ))}
           </select>
         </div>
 
@@ -182,7 +211,31 @@ function UsersTab() {
                 <tr key={user.id} className="text-foreground">
                   <td className="py-2.5 pr-4 font-mono text-2xs">{user.email}</td>
                   <td className="py-2.5 pr-4">
-                    <Badge tone={user.role === 'ADMIN' ? 'accent' : 'info'}>{user.role}</Badge>
+                    {isAdmin && signedIn?.email !== user.email ? (
+                      <>
+                        <label htmlFor={`role-${user.id}`} className="sr-only">
+                          Role for {user.email}
+                        </label>
+                        <select
+                          id={`role-${user.id}`}
+                          value={user.role}
+                          onChange={event =>
+                            changeRole.mutate({ user, next: event.target.value as AdminRole })}
+                          disabled={changeRole.isPending}
+                          className="h-8 rounded-lg border border-border bg-surface px-2 text-2xs text-foreground disabled:opacity-50"
+                        >
+                          {ROLES.map(name => (
+                            <option key={name} value={name}>{ROLE_LABELS[name]}</option>
+                          ))}
+                        </select>
+                      </>
+                    ) : (
+                      // Your own row stays a label: the request that strips your own admin is the
+                      // last one you are allowed to make, so the API refuses it and so does this.
+                      <Badge tone={user.role === 'USER' ? 'info' : 'accent'}>
+                        {ROLE_LABELS[user.role] ?? user.role}
+                      </Badge>
+                    )}
                   </td>
                   <td className="py-2.5 pr-4">
                     <Badge tone={user.enabled ? 'success' : 'danger'}>
@@ -193,13 +246,15 @@ function UsersTab() {
                     {user.mustChangePassword ? 'Yes' : 'No'}
                   </td>
                   <td className="py-2.5 text-right">
-                    <IconButton
-                      size="sm"
-                      label={user.enabled ? `Disable ${user.email}` : `Enable ${user.email}`}
-                      icon={user.enabled ? <Ban size={14} /> : <Check size={14} />}
-                      onClick={() => toggle.mutate(user)}
-                      disabled={toggle.isPending}
-                    />
+                    {isAdmin && signedIn?.email !== user.email && (
+                      <IconButton
+                        size="sm"
+                        label={user.enabled ? `Disable ${user.email}` : `Enable ${user.email}`}
+                        icon={user.enabled ? <Ban size={14} /> : <Check size={14} />}
+                        onClick={() => toggle.mutate(user)}
+                        disabled={toggle.isPending}
+                      />
+                    )}
                   </td>
                 </tr>
               ))}
@@ -250,6 +305,15 @@ function IngestionTab() {
     mutationFn: () => ingestPage(pageId.trim()),
     onSuccess: () => { setPageId(''); void refresh() },
     onError: error => toast.error('Could not ingest the page', toMessage(error, 'Please try again.')),
+  })
+
+  const retrigger = useMutation({
+    mutationFn: (job: IngestionJob) => retriggerJob(job.jobId),
+    onSuccess: () => {
+      toast.success('Job resubmitted', 'The failed run stays in the history below.')
+      void refresh()
+    },
+    onError: error => toast.error('Could not retrigger the job', toMessage(error, 'Please try again.')),
   })
 
   return (
@@ -326,6 +390,7 @@ function IngestionTab() {
                 <th scope="col" className="pb-2 font-medium text-muted-foreground">Pages</th>
                 <th scope="col" className="pb-2 font-medium text-muted-foreground">Chunks</th>
                 <th scope="col" className="pb-2 font-medium text-muted-foreground">Started</th>
+                <th scope="col" className="pb-2"><span className="sr-only">Actions</span></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
@@ -341,8 +406,19 @@ function IngestionTab() {
                   </td>
                   <td className="py-2 pr-3 text-2xs text-muted-foreground">{job.pagesProcessed ?? '—'}</td>
                   <td className="py-2 pr-3 text-2xs text-muted-foreground">{job.chunksStored ?? '—'}</td>
-                  <td className="py-2 text-2xs text-muted-foreground">
+                  <td className="py-2 pr-3 text-2xs text-muted-foreground">
                     {job.startedAt ? absoluteTime(job.startedAt) : '—'}
+                  </td>
+                  <td className="py-2 text-right">
+                    {job.status === 'FAILED' && (
+                      <IconButton
+                        size="sm"
+                        label={`Retrigger ${job.jobType.toLowerCase()} job for ${job.spaceKey ?? job.pageId ?? 'this target'}`}
+                        icon={<RotateCcw size={14} />}
+                        onClick={() => retrigger.mutate(job)}
+                        disabled={retrigger.isPending}
+                      />
+                    )}
                   </td>
                 </tr>
               ))}

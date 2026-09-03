@@ -12,6 +12,8 @@ interface AuthContextValue {
   isLoading: boolean
   isAuthenticated: boolean
   isAdmin: boolean
+  /** Either admin role — enough to reach the admin screen, not enough to act everywhere on it. */
+  canAdminister: boolean
   login: (email: string, password: string) => Promise<void>
   applySession: (data: AuthResponse) => void
   changePassword: (currentPassword: string, newPassword: string) => Promise<void>
@@ -140,6 +142,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       user, token, isLoading,
       isAuthenticated: !!user,
       isAdmin: user?.role === 'ADMIN',
+      canAdminister: user?.role === 'ADMIN' || user?.role === 'ADMIN_READ_ONLY',
       login, applySession, changePassword, logout,
     }}>
       {children}

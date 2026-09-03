@@ -167,6 +167,38 @@ describe('opening a new chat', () => {
     expect(screen.getByRole('textbox', { name: /ask a question/i })).toBeInTheDocument()
   })
 
+  it('never greets the reader in a conversation that already has a transcript', async () => {
+    // The greeting is drawn from an empty transcript, and a conversation that has not been read
+    // yet also has an empty transcript — so opening a saved conversation from a cold tab used to
+    // put "Welcome, how may I help you?" on screen before its messages arrived.
+    fetchMock.mockImplementation(async input => {
+      const url = String(input)
+      if (TRANSCRIPT_URL.test(url)) {
+        return json([
+          {
+            id: 1, role: 'USER', content: 'Where are the runbooks?',
+            sources: [], followUpQuestions: [], citations: [], confidence: null,
+            createdAt: '2026-09-01T10:00:00Z',
+          },
+          {
+            id: 2, role: 'ASSISTANT', content: 'In the SRE space.',
+            sources: [], followUpQuestions: [], citations: [], confidence: 0.9,
+            createdAt: '2026-09-01T10:00:01Z',
+          },
+        ])
+      }
+      return stubBackground(url) ?? json({}, 404)
+    })
+
+    renderRoute('/chat/1c8a4b0e-1d5f-4a3e-9c2b-7f0d5f4a1b2c')
+
+    expect(await screen.findByText(/in the sre space/i)).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: /how may i help you/i })).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: /steps to deploy to production/i }),
+    ).not.toBeInTheDocument()
+  })
+
   it('still reports a genuine failure to read a conversation', async () => {
     fetchMock.mockImplementation(async input => {
       const url = String(input)

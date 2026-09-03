@@ -112,7 +112,11 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     loadedRef.current.add(chatId)
 
     void loadTranscript(chatId).then(outcome => {
-      if (outcome === 'unsaved') {
+      // A conversation with nothing in it is a draft however we found that out: a 404 because the
+      // server has never recorded it, or a read that came back empty. Both mean the reader has yet
+      // to ask anything, and the route reads this flag to tell "empty" apart from "not read yet".
+      if (outcome === 'unsaved'
+          || (outcome === 'loaded' && (messagesRef.current[chatId] ?? []).length === 0)) {
         draftsRef.current.add(chatId)
         publishDrafts()
         return

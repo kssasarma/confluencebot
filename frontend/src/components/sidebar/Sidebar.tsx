@@ -27,7 +27,7 @@ interface SidebarProps {
  */
 export default function Sidebar({ onNavigate }: SidebarProps) {
   const navigate = useNavigate()
-  const { isAdmin } = useAuth()
+  const { canAdminister } = useAuth()
   const confirm = useConfirm()
   const chat = useChat()
 
@@ -181,7 +181,7 @@ export default function Sidebar({ onNavigate }: SidebarProps) {
       </nav>
 
       <div className="space-y-1 border-t border-border p-2">
-        {isAdmin && (
+        {canAdminister && (
           <Link
             to="/admin"
             onClick={onNavigate}

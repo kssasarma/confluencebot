@@ -16,6 +16,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
@@ -227,14 +228,17 @@ public class IngestionController {
     })
     @PreAuthorize("hasRole('ADMIN')")
     @PostMapping("/jobs/{jobId}/retrigger")
-    public ResponseEntity<?> retriggerJob(@PathVariable UUID jobId) {
+    public ResponseEntity<?> retriggerJob(
+            @Parameter(description = "UUID of the failed job to resubmit")
+            @PathVariable UUID jobId) {
+
         return jobService.retriggerJob(jobId)
-                .map(job -> ResponseEntity.accepted().body((Object) IngestionJobResponse.from(job)))
+                .map(retry -> ResponseEntity.accepted().body((Object) IngestionJobResponse.from(retry)))
+                // Empty covers both "no such job" and "not failed", so the original decides which.
                 .orElseGet(() -> jobService.findById(jobId)
                         .map(job -> ResponseEntity.badRequest()
-                                .body((Object) ProblemDetail.forStatusAndDetail(
-                                        org.springframework.http.HttpStatus.BAD_REQUEST,
-                                        "Job is not in FAILED status; current status: " + job.getStatus())))
+                                .body((Object) ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST,
+                                        "Only FAILED jobs can be retriggered; this one is " + job.getStatus())))
                         .orElseGet(() -> ResponseEntity.notFound().build()));
     }
 }

@@ -87,6 +87,10 @@ public class AdminController {
         return userRepository.findById(id)
                 .map(u -> {
                     boolean enabled = Boolean.TRUE.equals(body.get("enabled"));
+                    if (!enabled && u.getEmail().equals(auth.getName())) {
+                        return ResponseEntity.badRequest().body((Object) ProblemDetail.forStatusAndDetail(
+                                HttpStatus.BAD_REQUEST, "You cannot disable your own account"));
+                    }
                     u.setEnabled(enabled);
                     User saved = userRepository.save(u);
                     logger.info("Admin {} {} user {} (id={})", auth.getName(), enabled ? "enabled" : "disabled", u.getEmail(), id);
@@ -117,6 +121,15 @@ public class AdminController {
         return userRepository.findById(id)
                 .map(u -> {
                     UserRole oldRole = u.getRole();
+
+                    // Self-demotion is the one change nobody can undo for you: the request that
+                    // strips your own ADMIN is also the last one you are authorised to make here.
+                    if (newRole != UserRole.ADMIN && u.getEmail().equals(auth.getName())) {
+                        logger.warn("Admin {} attempted to demote themselves to {}", auth.getName(), newRole);
+                        return ResponseEntity.badRequest().body((Object) ProblemDetail.forStatusAndDetail(
+                                HttpStatus.BAD_REQUEST, "You cannot demote your own account; ask another admin"));
+                    }
+
                     u.setRole(newRole);
                     User saved = userRepository.save(u);
                     logger.info("Admin {} changed role for user {} (id={}) from {} to {}", auth.getName(), u.getEmail(), id, oldRole, newRole);

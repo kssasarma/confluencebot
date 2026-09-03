@@ -37,7 +37,6 @@ export default function ChatRoute() {
   const session = chat.sessionFor(chatId)
   const isDraft = chat.isDraft(chatId)
   const isStreaming = chat.isStreaming(chatId)
-  const isLoading = chat.isLoadingTranscript(chatId)
   const loadError = chat.transcriptError(chatId)
 
   /**
@@ -74,8 +73,19 @@ export default function ChatRoute() {
    * This is the one state where the composer is not a bar along the bottom: the greeting, the
    * question box and the suggestions become a single centred column, so that opening a new chat
    * looks like an invitation rather than like a conversation whose messages failed to load.
+   *
+   * Gated on the conversation being a draft, because a draft is the only one we *know* is empty.
+   * An empty transcript otherwise means "not read yet": the fetch starts in an effect, so the
+   * first render of any saved conversation — a reload, a bookmark, a second tab, a click in the
+   * sidebar — has no messages and no request in flight, and greeting the reader there flashed
+   * "Welcome, how may I help you?" over the top of every conversation they opened. Conversations
+   * the server has never heard of become drafts when their read 404s, so the genuinely-empty ones
+   * still land here.
    */
-  const showWelcome = messages.length === 0 && !isLoading && !loadError
+  const showWelcome = isDraft && messages.length === 0 && !loadError
+
+  /** Read but not yet resolved: neither a known-empty draft nor a transcript we hold. */
+  const isPending = messages.length === 0 && !showWelcome && !loadError
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -107,7 +117,7 @@ export default function ChatRoute() {
         reloaded the page.
       */}
       <ErrorBoundary key={chatId} title="This conversation could not be displayed">
-        {isLoading && messages.length === 0 ? (
+        {isPending ? (
           <div className="mx-auto w-full max-w-3xl flex-1 px-4 py-6" aria-busy="true">
             <SkeletonText lines={4} className="mb-8" />
             <SkeletonText lines={6} />
@@ -138,9 +148,9 @@ export default function ChatRoute() {
               }
             />
           </div>
-        ) : showWelcome ? (
+        ) : (
           <WelcomeGreeting name={displayNameFromEmail(user?.email)} />
-        ) : null}
+        )}
       </ErrorBoundary>
 
       {/*
