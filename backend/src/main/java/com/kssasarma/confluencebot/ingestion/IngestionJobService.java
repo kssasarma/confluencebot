@@ -78,4 +78,34 @@ public class IngestionJobService {
     public List<IngestionJobEntity> findAll() {
         return jobRepo.findAllByOrderByCreatedAtDesc();
     }
+
+    @Transactional
+    public Optional<IngestionJobEntity> retriggerJob(UUID jobId) {
+        return jobRepo.findById(jobId).flatMap(job -> {
+            if (!job.getStatus().equals(com.kssasarma.confluencebot.domain.IngestionJobStatus.FAILED)) {
+                return Optional.empty();
+            }
+
+            IngestionJobEntity newJob = null;
+            if (job.getJobType().equals(com.kssasarma.confluencebot.domain.IngestionJobType.SPACE)) {
+                newJob = IngestionJobEntity.forSpace(job.getSpaceKey(), job.isForce());
+            } else if (job.getJobType().equals(com.kssasarma.confluencebot.domain.IngestionJobType.PAGE)) {
+                newJob = IngestionJobEntity.forPage(job.getPageId());
+            }
+
+            if (newJob != null) {
+                jobRepo.save(newJob);
+                UUID newJobId = newJob.getId();
+                dispatchAfterCommit(() -> {
+                    if (job.getJobType().equals(com.kssasarma.confluencebot.domain.IngestionJobType.SPACE)) {
+                        runner.runSpaceJob(newJobId, job.getSpaceKey(), job.isForce());
+                    } else {
+                        runner.runPageJob(newJobId, job.getPageId());
+                    }
+                });
+                return Optional.of(newJob);
+            }
+            return Optional.empty();
+        });
+    }
 }

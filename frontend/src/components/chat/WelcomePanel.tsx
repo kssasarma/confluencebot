@@ -55,7 +55,7 @@ export function WelcomeGreeting({ name }: { name: string }) {
  */
 export function WelcomeSuggestions({ onSelect }: { onSelect: (prompt: string) => void }) {
   return (
-    <div className="min-h-0 flex-1 animate-fade-in-up overflow-y-auto px-4 pb-6 pt-3">
+    <div className="min-h-0 flex-1 animate-fade-in-up overflow-y-auto px-4 pb-6 pt-3 transition-opacity duration-200">
       <div className="mx-auto w-full max-w-3xl">
         <p
           id="welcome-suggestions-label"

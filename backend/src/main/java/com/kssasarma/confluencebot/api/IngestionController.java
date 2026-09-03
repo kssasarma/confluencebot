@@ -210,4 +210,31 @@ public class IngestionController {
                 .toList();
         return ResponseEntity.ok(jobs);
     }
+
+    @Operation(
+            summary = "Retrigger a failed ingestion job",
+            description = "Resubmits a failed ingestion job for processing. Only works on jobs with FAILED status.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "202", description = "Job retriggered and queued",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = IngestionJobResponse.class))),
+            @ApiResponse(responseCode = "400", description = "Job is not in FAILED status",
+                    content = @Content(mediaType = MediaType.APPLICATION_PROBLEM_JSON_VALUE,
+                            schema = @Schema(implementation = ProblemDetail.class))),
+            @ApiResponse(responseCode = "404", description = "Job not found",
+                    content = @Content(mediaType = MediaType.APPLICATION_PROBLEM_JSON_VALUE,
+                            schema = @Schema(implementation = ProblemDetail.class)))
+    })
+    @PreAuthorize("hasRole('ADMIN')")
+    @PostMapping("/jobs/{jobId}/retrigger")
+    public ResponseEntity<?> retriggerJob(@PathVariable UUID jobId) {
+        return jobService.retriggerJob(jobId)
+                .map(job -> ResponseEntity.accepted().body((Object) IngestionJobResponse.from(job)))
+                .orElseGet(() -> jobService.findById(jobId)
+                        .map(job -> ResponseEntity.badRequest()
+                                .body((Object) ProblemDetail.forStatusAndDetail(
+                                        org.springframework.http.HttpStatus.BAD_REQUEST,
+                                        "Job is not in FAILED status; current status: " + job.getStatus())))
+                        .orElseGet(() -> ResponseEntity.notFound().build()));
+    }
 }

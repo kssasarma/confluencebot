@@ -138,9 +138,9 @@ export default function ChatRoute() {
               }
             />
           </div>
-        ) : (
+        ) : showWelcome ? (
           <WelcomeGreeting name={displayNameFromEmail(user?.email)} />
-        )}
+        ) : null}
       </ErrorBoundary>
 
       {/*
