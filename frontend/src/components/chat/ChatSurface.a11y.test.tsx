@@ -6,7 +6,7 @@ import { renderWithProviders } from '../../test/render'
 import { expectNoAxeViolations } from '../../test/a11y'
 import MessageList from './MessageList'
 import Composer from './Composer'
-import WelcomePanel from './WelcomePanel'
+import { WelcomeGreeting, WelcomeSuggestions } from './WelcomePanel'
 
 /**
  * The delivery plan's Phase 6 acceptance criterion: zero axe violations on the chat route.
@@ -82,8 +82,35 @@ describe('the chat surface', () => {
   })
 
   it('has no axe violations on the empty state', async () => {
-    const { container } = renderWithProviders(<WelcomePanel onSelect={() => {}} />)
+    // Rendered the way the route composes it: greeting, question box, then suggestions.
+    const { container } = renderWithProviders(
+      <div>
+        <WelcomeGreeting name="Priya Sharma" />
+        <Composer chatId="c-welcome" onSend={() => {}} onStop={() => {}} isStreaming={false} />
+        <WelcomeSuggestions onSelect={() => {}} />
+      </div>,
+    )
     await expectNoAxeViolations(container)
+  })
+
+  it('greets the reader by name, and still reads as a greeting without one', () => {
+    const { unmount } = renderWithProviders(<WelcomeGreeting name="Priya Sharma" />)
+    expect(screen.getByRole('heading', { level: 2 }))
+      .toHaveTextContent('Welcome Priya Sharma, how may I help you?')
+    unmount()
+
+    renderWithProviders(<WelcomeGreeting name="" />)
+    expect(screen.getByRole('heading', { level: 2 }))
+      .toHaveTextContent('Welcome, how may I help you?')
+  })
+
+  it('sends a suggestion rather than dropping it into the composer', async () => {
+    const onSelect = vi.fn()
+    const user = userEvent.setup()
+    renderWithProviders(<WelcomeSuggestions onSelect={onSelect} />)
+
+    await user.click(screen.getByRole('button', { name: /steps to deploy to production/i }))
+    expect(onSelect).toHaveBeenCalledWith('What are the steps to deploy to production?')
   })
 
   it('mirrors a streaming answer into a live region for screen readers', () => {

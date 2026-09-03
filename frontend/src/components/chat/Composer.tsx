@@ -12,6 +12,13 @@ interface ComposerProps {
   isStreaming: boolean
   /** Fired on ArrowUp in an empty composer, to bring back the last question for editing. */
   lastQuestion?: string
+  /**
+   * `docked` is the composer beneath a transcript: a bar along the bottom edge, ruled off from
+   * the conversation above it. `centred` is the composer on a conversation with nothing in it,
+   * where it is the middle of the screen rather than the floor of it, and there is nothing above
+   * for a rule to divide it from.
+   */
+  variant?: 'docked' | 'centred'
 }
 
 /** Beyond this the composer scrolls rather than eating the transcript. */
@@ -27,14 +34,28 @@ const COUNTER_THRESHOLD = 0.9
  * something and losing a paragraph you had just typed.
  */
 export default function Composer({
-  chatId, onSend, onStop, isStreaming, lastQuestion,
+  chatId, onSend, onStop, isStreaming, lastQuestion, variant = 'docked',
 }: ComposerProps) {
   const [value, setValue] = useState(() => readDraft(chatId))
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const isCentred = variant === 'centred'
 
   // Re-read on a conversation switch: each conversation keeps its own unsent question.
   useEffect(() => setValue(readDraft(chatId)), [chatId])
   useEffect(() => writeDraft(chatId, value), [chatId, value])
+
+  /**
+   * An empty conversation opens with the caret already in the box.
+   *
+   * There is exactly one thing to do on that screen, and a caret arriving in the middle of it is
+   * also how the reader can tell that a new chat has opened at all — two empty conversations look
+   * alike otherwise. It runs on the conversation, not on every render, so it never yanks focus
+   * back mid-sentence; and never in the docked variant, where the reader may be reading rather
+   * than typing.
+   */
+  useEffect(() => {
+    if (isCentred) textareaRef.current?.focus()
+  }, [isCentred, chatId])
 
   useEffect(() => {
     const element = textareaRef.current
@@ -80,11 +101,17 @@ export default function Composer({
   const overLimit = remaining < 0
 
   return (
-    <div className="border-t border-border bg-background px-4 py-3">
+    <div
+      className={cn(
+        'shrink-0 px-4',
+        isCentred ? 'py-0' : 'border-t border-border bg-background py-3',
+      )}
+    >
       <div className="mx-auto max-w-3xl">
         <div
           className={cn(
             'flex items-end gap-2 rounded-xl border bg-surface px-3 py-2 transition-colors',
+            isCentred && 'rounded-2xl px-4 py-2.5 shadow-soft',
             overLimit ? 'border-danger' : 'border-border focus-within:border-primary',
           )}
         >
