@@ -215,6 +215,11 @@ management:
   endpoint:
     health:
       show-details: when-authorized
+  health:
+    mail:
+      # Mail is optional (planned for MVP2) — don't fail /actuator/health probing the SMTP
+      # relay when it isn't configured, or make every health check depend on it once it is.
+      enabled: false
 
 spring.mail:
   host: ${MAIL_HOST:smtp.gmail.com}
@@ -222,8 +227,9 @@ spring.mail:
   username: ${MAIL_USERNAME:}
   password: ${MAIL_PASSWORD:}
   properties.mail.smtp:
-    auth: true
-    starttls.enable: true
+    auth: ${MAIL_SMTP_AUTH:true}
+    starttls.enable: ${MAIL_STARTTLS_ENABLE:true}
+    starttls.required: ${MAIL_STARTTLS_REQUIRED:true}
 
 logging:
   level:
