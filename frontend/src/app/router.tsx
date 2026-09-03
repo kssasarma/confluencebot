@@ -32,18 +32,24 @@ function ChatLayout() {
   )
 }
 
-export const router = createBrowserRouter([
-  {
-    element: <ChatLayout />,
-    children: [
-      { index: true, element: <NewChatRedirect /> },
-      { path: 'chat/:chatId', element: <ChatRoute /> },
-      { path: 'settings', element: <SettingsRoute /> },
-      {
-        element: <RequireAdmin />,
-        children: [{ path: 'admin', element: <AdminRoute /> }],
-      },
-      { path: '*', element: <NotFoundRoute /> },
-    ],
-  },
-])
+export const router = createBrowserRouter(
+  [
+    {
+      element: <ChatLayout />,
+      children: [
+        { index: true, element: <NewChatRedirect /> },
+        { path: 'chat/:chatId', element: <ChatRoute /> },
+        { path: 'settings', element: <SettingsRoute /> },
+        {
+          element: <RequireAdmin />,
+          children: [{ path: 'admin', element: <AdminRoute /> }],
+        },
+        { path: '*', element: <NotFoundRoute /> },
+      ],
+    },
+  ],
+  // Lets the app be served from a sub-path (e.g. GitLab Pages project sites) without any
+  // hardcoded prefix — `BASE_URL` is whatever `vite build --base=...` was given at build time,
+  // and defaults to '/' for root deployments (Docker/nginx).
+  { basename: import.meta.env.BASE_URL },
+)
