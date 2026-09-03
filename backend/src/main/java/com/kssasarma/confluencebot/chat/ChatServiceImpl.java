@@ -6,6 +6,9 @@ import com.kssasarma.confluencebot.api.dto.SourceReference;
 import com.kssasarma.confluencebot.chat.citation.CitationIndex;
 import com.kssasarma.confluencebot.chat.confidence.ConfidenceScorer;
 import com.kssasarma.confluencebot.chat.confidence.ConfidenceSignals;
+import com.kssasarma.confluencebot.chat.context.ConversationContext;
+import com.kssasarma.confluencebot.chat.context.ConversationHistoryService;
+import com.kssasarma.confluencebot.chat.context.FollowUpQueryRewriter;
 import com.kssasarma.confluencebot.chat.prompt.ConfluencePromptBuilder;
 import com.kssasarma.confluencebot.chat.source.SourceReferenceFactory;
 import com.kssasarma.confluencebot.chat.title.ChatTitleRefiner;
@@ -37,9 +40,17 @@ import java.util.concurrent.CompletableFuture;
  * generation step differs, which is why both entry points share {@link #prepare} and
  * {@link #ground}.
  *
- * <p>Composition rather than inheritance throughout: retrieval, citation mapping, source
- * presentation, confidence scoring and title summarising are each owned by a collaborator that can
- * be replaced or tested on its own. What is left here is only the order things happen in.
+ * <p>Every turn is answered in the light of the ones before it. That takes two things, and the
+ * order below reflects it: the conversation is loaded first, then the question is condensed into a
+ * standalone query so <em>retrieval</em> looks for the right documents, and the same conversation
+ * is carried into the prompt so <em>generation</em> knows what "it" refers to. Doing only the
+ * second is the trap: a model that can read the conversation but is handed documents fetched for
+ * the words "and in staging?" answers the right question from the wrong pages, confidently.
+ *
+ * <p>Composition rather than inheritance throughout: retrieval, conversation memory, query
+ * rewriting, citation mapping, source presentation, confidence scoring and title summarising are
+ * each owned by a collaborator that can be replaced or tested on its own. What is left here is only
+ * the order things happen in.
  */
 @Service
 public class ChatServiceImpl implements ChatService {
@@ -53,6 +64,8 @@ public class ChatServiceImpl implements ChatService {
     private static final long FIRST_TURN_MESSAGE_COUNT = 2L;
 
     private final HybridSearchService hybridSearchService;
+    private final ConversationHistoryService historyService;
+    private final FollowUpQueryRewriter queryRewriter;
     private final ConfluencePromptBuilder promptBuilder;
     private final LlmGateway llmGateway;
     private final PreferenceService preferenceService;
@@ -63,6 +76,8 @@ public class ChatServiceImpl implements ChatService {
     private final double minSimilarityThreshold;
 
     public ChatServiceImpl(HybridSearchService hybridSearchService,
+                           ConversationHistoryService historyService,
+                           FollowUpQueryRewriter queryRewriter,
                            ConfluencePromptBuilder promptBuilder,
                            LlmGateway llmGateway,
                            PreferenceService preferenceService,
@@ -72,6 +87,8 @@ public class ChatServiceImpl implements ChatService {
                            ChatTitleRefiner titleRefiner,
                            @Value("${chat.retrieval.min-similarity-threshold:0.4}") double minSimilarityThreshold) {
         this.hybridSearchService = hybridSearchService;
+        this.historyService = historyService;
+        this.queryRewriter = queryRewriter;
         this.promptBuilder = promptBuilder;
         this.llmGateway = llmGateway;
         this.preferenceService = preferenceService;
@@ -151,9 +168,17 @@ public class ChatServiceImpl implements ChatService {
     private RetrievalOutcome prepare(ChatQuery query) {
         log.info("Chat query received: {}", query.question());
 
-        List<RetrievedChunk> chunks = hybridSearchService.search(query.question());
+        ConversationContext context = historyService.recentContext(query);
+
+        // What is searched for and what is asked are deliberately different strings. Retrieval gets
+        // the question made standalone, because an index cannot resolve a pronoun; the model gets
+        // the question as the user typed it, alongside the conversation that explains it. The
+        // transcript records the same original, so nobody is later shown words they did not write.
+        String retrievalQuery = queryRewriter.rewriteForRetrieval(query.question(), context);
+
+        List<RetrievedChunk> chunks = hybridSearchService.search(retrievalQuery);
         if (chunks.isEmpty()) {
-            log.warn("No relevant documents found for query: {}", query.question());
+            log.warn("No relevant documents found for query: {}", retrievalQuery);
             return RetrievalOutcome.empty();
         }
 
@@ -170,7 +195,7 @@ public class ChatServiceImpl implements ChatService {
                 : preferenceService.resolve(query.user(), query.chatId());
 
         return new RetrievalOutcome(
-                promptBuilder.buildPrompt(query.question(), chunks, lowConfidence, preferences),
+                promptBuilder.buildPrompt(query.question(), chunks, lowConfidence, preferences, context),
                 sourceReferenceFactory.from(chunks),
                 CitationIndex.fromChunks(chunks),
                 signals);

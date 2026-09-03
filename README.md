@@ -12,9 +12,11 @@ POST /api/chat  ·  POST /api/chat/stream
     │
     ▼
 ChatService
+    ├── ConversationHistoryService     — the last few exchanges of this conversation
+    ├── FollowUpQueryRewriter          — "and in staging?" → a query an index can answer
     ├── HybridSearchService            — dense (HNSW cosine) + lexical, fused and re-ranked
     ├── PreferenceService.resolve()    — per-chat overrides on top of the account defaults
-    ├── ConfluencePromptBuilder        — system rules + retrieved excerpts
+    ├── ConfluencePromptBuilder        — system rules + conversation + retrieved excerpts
     ├── LlmGateway                     — bulkhead + circuit breaker + retry around the model
     └── ChatSessionService.recordTurn()— question and answer persisted together, on success only
     │
@@ -212,6 +214,12 @@ All variables have sensible defaults where optional. Only the three starred vari
 | `CHAT_MAX_TOKENS` | | `2048` | Maximum tokens in LLM response |
 | `CHAT_TOP_K` | | `5` | Number of vector search results to include in context |
 | `CHAT_SIMILARITY_THRESHOLD` | | `0.70` | Minimum cosine similarity score for a chunk to be included |
+| `CHAT_CONTEXT_ENABLED` | | `true` | Answer each question in the light of the conversation so far |
+| `CHAT_CONTEXT_MAX_EXCHANGES` | | `6` | Previous question/answer pairs carried into the next turn |
+| `CHAT_CONTEXT_MAX_ANSWER_CHARS` | | `1200` | Characters kept of each previous answer |
+| `CHAT_CONTEXT_REWRITE_ENABLED` | | `true` | Condense a follow-up into a standalone query before searching |
+| `CHAT_CONTEXT_REWRITE_TIMEOUT` | | `PT3S` | Ceiling on the latency the rewrite may add to an answer |
+| `CHAT_CONTEXT_REWRITE_MAX_CHARS` | | `400` | Longest accepted rewrite; longer replies are discarded |
 | `DB_URL` | | `jdbc:postgresql://localhost:5432/confluencebot` | Full JDBC URL (Docker Compose overrides this automatically) |
 | `DB_NAME` | | `confluencebot` | Database name (used by Docker Compose for Postgres init) |
 | `DB_USERNAME` | | `confluencebot` | Database username |
@@ -264,6 +272,40 @@ POST /api/ingest/page/{pageId}
 ```
 
 Use the numeric page ID from the Confluence URL (`?pageId=98765`). Always re-embeds regardless of version.
+
+### Conversation context
+
+Send the same `chatId` and the exchange is answered as part of that conversation rather than on its
+own. Nothing extra is sent from the client: the transcript the server already writes is what it
+reads back.
+
+The context is used twice, because a follow-up breaks the pipeline in two different places.
+
+**Retrieval.** A search index cannot resolve a pronoun. Asked for "and in staging?" it returns pages
+about staging, not about the certificate rotation under discussion. So a question that leans on the
+conversation is first condensed into one that stands on its own, and *that* is what gets searched:
+
+```
+turn 1   "How do I rotate the Kafka TLS certificates?"
+turn 2   "And in staging?"
+         → searched as: "How do I rotate the Kafka TLS certificates in staging?"
+         → asked as:    "And in staging?"      (with turn 1 as conversation)
+         → recorded as: "And in staging?"      (the transcript shows what was typed)
+```
+
+**Generation.** The previous turns are sent as real user/assistant messages, so the model can
+resolve "it" and "that one" against its own earlier answers, and is told not to repeat itself.
+Facts still come only from the excerpts retrieved for the current question — an earlier answer is
+not a source, and excerpt numbers never carry across turns.
+
+Everything here degrades to the previous behaviour rather than to an error. A conversation that
+cannot be read, a rewrite that times out, a saturated pool or an unavailable model all fall back to
+searching the question exactly as the user typed it. The rewrite runs against its own model permits
+(`llm-context`) so it can never consume the ones answers depend on, and its cost is bounded: at most
+`CHAT_CONTEXT_REWRITE_TIMEOUT` of latency, and a prompt that never grows past
+`CHAT_CONTEXT_MAX_EXCHANGES × CHAT_CONTEXT_MAX_ANSWER_CHARS` however long the conversation runs.
+
+Set `CHAT_CONTEXT_ENABLED=false` to answer every question in isolation again.
 
 ### Chat
 
@@ -480,6 +522,7 @@ Re-run ingestion after switching — vectors cannot be copied between stores, bu
 | **Builder** | `SearchRequest.builder()`, `ConfluencePageEntity.newPage()` |
 | **Adapter** | `SpringAiLlmGateway` — the only class that knows which model library is in use |
 | **Decorator** | `ResilientLlmGateway` — wraps the gateway in the bulkhead, circuit breaker and retry policy |
+| **Bulkhead** | `llm` / `llm-rerank` / `llm-context` — an auxiliary model call can never exhaust the permits answers need |
 | **Observer** | `ChatStreamListener` — the pipeline pushes tokens without knowing they become server-sent events |
 | **DTO / Assembler** | `*Response` records — no JPA entity is ever serialized, so nothing is lazily loaded outside its transaction |
 | **Dependency Injection** | Constructor injection throughout — no field `@Autowired` |

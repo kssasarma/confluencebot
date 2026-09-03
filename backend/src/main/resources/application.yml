@@ -151,6 +151,35 @@ chat:
     max-pool-size: ${CHAT_TITLE_MAX_POOL_SIZE:4}
     queue-capacity: ${CHAT_TITLE_QUEUE_CAPACITY:32}
 
+  # How much of a conversation is carried into the next answer. Without this every question is
+  # answered as though it were the first one asked: "and in staging?" is searched for as those
+  # three words, and the model has never seen what came before.
+  context:
+    enabled: ${CHAT_CONTEXT_ENABLED:true}
+
+    # Previous question-and-answer pairs carried into the next turn. The prompt cost is capped at
+    # this many times max-answer-chars however long the conversation runs.
+    max-exchanges: ${CHAT_CONTEXT_MAX_EXCHANGES:6}
+
+    # Characters kept of each previous answer. Enough to establish what was said; the detail is
+    # re-retrieved for the question actually being asked.
+    max-answer-chars: ${CHAT_CONTEXT_MAX_ANSWER_CHARS:1200}
+
+    # Condense a follow-up into a standalone query before searching. Off, the model still sees the
+    # conversation but retrieval does not, which answers the right question from the wrong pages.
+    rewrite-enabled: ${CHAT_CONTEXT_REWRITE_ENABLED:true}
+
+    # Ceiling on the latency this feature can add. Past it, retrieval proceeds with the question
+    # as the user typed it.
+    rewrite-timeout: ${CHAT_CONTEXT_REWRITE_TIMEOUT:PT3S}
+
+    # Longest accepted rewrite. Anything longer is a model that answered instead of rewriting.
+    rewrite-max-chars: ${CHAT_CONTEXT_REWRITE_MAX_CHARS:400}
+
+    # Threads for the rewrite. It never queues: no free thread means search the raw question.
+    core-pool-size: ${CHAT_CONTEXT_CORE_POOL_SIZE:2}
+    max-pool-size: ${CHAT_CONTEXT_MAX_POOL_SIZE:8}
+
   # Presentation of the cited pages.
   source:
     # Characters of the matching passage shown under a citation, truncated on a word boundary.

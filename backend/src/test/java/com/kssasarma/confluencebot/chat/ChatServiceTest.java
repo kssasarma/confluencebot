@@ -4,6 +4,10 @@ import com.kssasarma.confluencebot.api.dto.ChatApiResponse;
 import com.kssasarma.confluencebot.api.dto.SourceReference;
 import com.kssasarma.confluencebot.chat.confidence.ConfidenceScorer;
 import com.kssasarma.confluencebot.chat.confidence.WeightedSignalConfidenceScorer;
+import com.kssasarma.confluencebot.chat.context.ConversationContext;
+import com.kssasarma.confluencebot.chat.context.ConversationExchange;
+import com.kssasarma.confluencebot.chat.context.ConversationHistoryService;
+import com.kssasarma.confluencebot.chat.context.FollowUpQueryRewriter;
 import com.kssasarma.confluencebot.chat.prompt.ConfluencePromptBuilder;
 import com.kssasarma.confluencebot.chat.source.SourceReferenceFactory;
 import com.kssasarma.confluencebot.chat.title.ChatTitleRefiner;
@@ -46,6 +50,8 @@ class ChatServiceTest {
     private static final String CHAT_ID = "0f2a5f1e-9c1c-4f1f-9a2b-6f0d5f4a1b2c";
 
     @Mock private HybridSearchService hybridSearchService;
+    @Mock private ConversationHistoryService historyService;
+    @Mock private FollowUpQueryRewriter queryRewriter;
     @Mock private LlmGateway llmGateway;
     @Mock private PreferenceService preferenceService;
     @Mock private ChatSessionService chatSessionService;
@@ -63,12 +69,18 @@ class ChatServiceTest {
 
     @BeforeEach
     void setUp() {
-        chatService = new ChatServiceImpl(hybridSearchService, promptBuilder, llmGateway,
-                preferenceService, chatSessionService, sourceReferenceFactory, confidenceScorer,
-                titleRefiner, 0.4);
+        chatService = new ChatServiceImpl(hybridSearchService, historyService, queryRewriter,
+                promptBuilder, llmGateway, preferenceService, chatSessionService,
+                sourceReferenceFactory, confidenceScorer, titleRefiner, 0.4);
         when(preferenceService.resolve(any(), any())).thenReturn(EffectiveChatPreferences.defaults());
         when(titleRefiner.refine(any()))
                 .thenReturn(CompletableFuture.completedFuture(Optional.empty()));
+
+        // The default is a conversation with nothing behind it, which is what most of these tests
+        // exercise; the ones about context override it.
+        when(historyService.recentContext(any())).thenReturn(ConversationContext.EMPTY);
+        when(queryRewriter.rewriteForRetrieval(anyString(), any()))
+                .thenAnswer(invocation -> invocation.getArgument(0));
     }
 
     @Test
@@ -192,6 +204,99 @@ class ChatServiceTest {
         assertThat(String.join("", listener.tokens)).contains("could not find");
         assertThat(listener.completed).isNotNull();
         verifyNoInteractions(llmGateway);
+    }
+
+    // ── Conversation context ──────────────────────────────────────────────────
+
+    @Test
+    void followUp_isRetrievedByItsStandaloneRewriteButAskedAsTheUserTypedIt() {
+        ConversationContext context = new ConversationContext(List.of(
+                new ConversationExchange("How do I rotate the Kafka TLS certificates?",
+                        "Run the rotate script on each broker.")));
+
+        when(historyService.recentContext(any())).thenReturn(context);
+        when(queryRewriter.rewriteForRetrieval("And in staging?", context))
+                .thenReturn("How do I rotate the Kafka TLS certificates in staging?");
+        when(hybridSearchService.search(anyString())).thenReturn(List.of(chunk()));
+        when(llmGateway.complete(any())).thenReturn("Same script, different inventory file.");
+        when(chatSessionService.recordTurn(any(), any())).thenReturn(session("Certificate rotation"));
+
+        chatService.chat(new ChatQuery("And in staging?", CHAT_ID, user));
+
+        // Retrieval gets the resolved query — an index cannot follow "and in staging?" on its own.
+        verify(hybridSearchService).search("How do I rotate the Kafka TLS certificates in staging?");
+
+        // The model is asked the question as the user wrote it, with the conversation behind it.
+        ArgumentCaptor<LlmPrompt> prompt = ArgumentCaptor.forClass(LlmPrompt.class);
+        verify(llmGateway).complete(prompt.capture());
+        assertThat(prompt.getValue().user()).contains("And in staging?");
+        assertThat(prompt.getValue().history()).isEqualTo(context.exchanges());
+
+        // And the transcript records what was typed, not what was searched for.
+        ArgumentCaptor<ChatTurn> turn = ArgumentCaptor.forClass(ChatTurn.class);
+        verify(chatSessionService).recordTurn(eq(user), turn.capture());
+        assertThat(turn.getValue().question()).isEqualTo("And in staging?");
+    }
+
+    @Test
+    void streamedFollowUp_carriesTheConversationIntoThePromptToo() {
+        ConversationContext context = new ConversationContext(List.of(
+                new ConversationExchange("What is the deploy window?", "Tuesdays, 02:00-04:00 IST.")));
+
+        when(historyService.recentContext(any())).thenReturn(context);
+        when(hybridSearchService.search(anyString())).thenReturn(List.of(chunk()));
+        when(llmGateway.stream(any())).thenReturn(Flux.just("It is enforced by the pipeline."));
+        when(chatSessionService.recordTurn(any(), any())).thenReturn(session("Deploy window"));
+
+        chatService.stream(new ChatQuery("Who enforces it?", CHAT_ID, user), new RecordingListener());
+
+        ArgumentCaptor<LlmPrompt> prompt = ArgumentCaptor.forClass(LlmPrompt.class);
+        verify(llmGateway).stream(prompt.capture());
+        assertThat(prompt.getValue().history()).isEqualTo(context.exchanges());
+    }
+
+    @Test
+    void firstQuestionOfAConversation_carriesNoHistory() {
+        when(hybridSearchService.search(anyString())).thenReturn(List.of(chunk()));
+        when(llmGateway.complete(any())).thenReturn("An answer.");
+        when(chatSessionService.recordTurn(any(), any())).thenReturn(session("A title"));
+
+        chatService.chat(new ChatQuery("What is the deploy window?", CHAT_ID, user));
+
+        ArgumentCaptor<LlmPrompt> prompt = ArgumentCaptor.forClass(LlmPrompt.class);
+        verify(llmGateway).complete(prompt.capture());
+        assertThat(prompt.getValue().hasHistory()).isFalse();
+    }
+
+    /**
+     * What gets embedded is one short question, never the conversation.
+     *
+     * <p>The naive way to make retrieval context-aware is to paste the history in front of the
+     * question and embed that. It bloats every request in proportion to how long somebody has been
+     * talking, and it is worse than useless: the stale terms dominate the vector, so a follow-up
+     * retrieves the *previous* topic. The rewrite exists precisely so the query stays one short
+     * question — it replaces the question, it never appends to it.
+     */
+    @Test
+    void whatIsSearchedIsOneShortQuestion_neverTheConversation() {
+        ConversationContext context = new ConversationContext(List.of(
+                new ConversationExchange("How do I rotate the Kafka TLS certificates?",
+                        "Run the rotate script on each broker in turn. ".repeat(40)),
+                new ConversationExchange("Does it need a restart?", "No restart is required.")));
+
+        when(historyService.recentContext(any())).thenReturn(context);
+        // The rewriter declines: history exists, but the question reaches retrieval untouched.
+        when(hybridSearchService.search(anyString())).thenReturn(List.of(chunk()));
+        when(llmGateway.complete(any())).thenReturn("An answer.");
+        when(chatSessionService.recordTurn(any(), any())).thenReturn(session("Certificates"));
+
+        chatService.chat(new ChatQuery("And in staging?", CHAT_ID, user));
+
+        ArgumentCaptor<String> searched = ArgumentCaptor.forClass(String.class);
+        verify(hybridSearchService).search(searched.capture());
+
+        assertThat(searched.getValue()).isEqualTo("And in staging?");
+        assertThat(searched.getValue()).doesNotContain("rotate script", "restart");
     }
 
     // ── Fixtures ──────────────────────────────────────────────────────────────

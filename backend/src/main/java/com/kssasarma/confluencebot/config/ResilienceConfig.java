@@ -19,8 +19,10 @@ import java.time.Duration;
  *
  * Bulkhead: limits concurrent LLM calls to 5; waits up to 5s before rejecting.
  *
- * The re-rank pass gets its own separate instance so a misconfigured re-rank model
- * can't trip the main answer-generation circuit breaker.
+ * The re-rank pass and the follow-up rewrite each get their own separate instances so a
+ * misconfigured auxiliary model can't trip the main answer-generation circuit breaker, and — just
+ * as importantly — can't consume the permits answers depend on. Both are improvements to an
+ * answer; neither may ever be the reason there isn't one.
  */
 @Configuration
 public class ResilienceConfig {
@@ -67,5 +69,26 @@ public class ResilienceConfig {
     @Bean("rerankBulkhead")
     public Bulkhead rerankBulkhead(BulkheadRegistry registry) {
         return registry.bulkhead("llm-rerank");
+    }
+
+    @Bean("contextCircuitBreaker")
+    public CircuitBreaker contextCircuitBreaker(CircuitBreakerRegistry registry) {
+        return registry.circuitBreaker("llm-context");
+    }
+
+    /**
+     * Permits for condensing a follow-up into a standalone query.
+     *
+     * <p>Does not wait, unlike the others. The caller is holding a user's question open while this
+     * runs and abandons it after a short deadline anyway, so a permit that arrives four seconds
+     * late arrives after the decision it was for. Refusing at once frees the thread and retrieval
+     * proceeds with the question as asked.
+     */
+    @Bean("contextBulkhead")
+    public Bulkhead contextBulkhead(BulkheadRegistry registry) {
+        return registry.bulkhead("llm-context", BulkheadConfig.custom()
+            .maxConcurrentCalls(3)
+            .maxWaitDuration(Duration.ZERO)
+            .build());
     }
 }
