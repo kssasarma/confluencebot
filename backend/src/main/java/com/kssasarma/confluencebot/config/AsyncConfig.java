@@ -83,6 +83,33 @@ public class AsyncConfig {
     }
 
     /**
+     * Runs the follow-up rewrite that makes retrieval aware of the conversation.
+     *
+     * <p>Unlike the title pool this one is on the critical path: the answer cannot be retrieved
+     * until the rewrite is done or abandoned. So it never queues — the queue is a synchronous
+     * handoff, and work that finds no free thread is refused immediately, which the rewriter reads
+     * as "search for the question as the user typed it". Waiting in a line would be the one
+     * outcome worse than a slightly weaker search, because the user is sitting in front of an
+     * empty answer bubble the whole time.
+     */
+    @Bean(name = "chatContextExecutor")
+    public Executor chatContextExecutor(
+            @Value("${chat.context.core-pool-size:2}") int corePoolSize,
+            @Value("${chat.context.max-pool-size:8}") int maxPoolSize) {
+
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(corePoolSize);
+        executor.setMaxPoolSize(maxPoolSize);
+        executor.setQueueCapacity(0);
+        executor.setThreadNamePrefix("chat-context-");
+        // Abandoned rewrites are still running when the deadline passes; shutdown must not wait
+        // on work whose result was already discarded.
+        executor.setWaitForTasksToCompleteOnShutdown(false);
+        executor.initialize();
+        return executor;
+    }
+
+    /**
      * Drives keep-alive frames and the bounded post-answer linger on open answer streams.
      *
      * These are timer callbacks measured in milliseconds of work, so a small pool serves a large
