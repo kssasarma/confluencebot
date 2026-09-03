@@ -1,0 +1,150 @@
+/**
+ * The design tokens. Every colour in the app resolves to one of these.
+ *
+ * ── Why the statuses have four tokens each ────────────────────────────────
+ * A single `--danger` cannot serve as both a button fill and as text on a white card: the
+ * lightness that makes white text readable on a fill is not the lightness that makes the same
+ * hue readable *as* text. Guessing between the two is how a palette drifts out of contrast, so
+ * the roles are named rather than inferred:
+ *
+ *   --x            a solid fill (button, badge, bubble)
+ *   --x-foreground the text and icons that sit on that fill
+ *   --x-emphasis   the hue used AS text or an icon, on any surface or on --x-soft
+ *   --x-soft       a tinted background for chips, banners and callouts
+ *
+ * ── Every pair below is contrast-tested ───────────────────────────────────
+ * `src/design/contrast.test.ts` parses this file and fails the build if any documented pair
+ * drops below WCAG 2.1 AA — 4.5:1 for text, 3:1 for the focus ring as a non-text indicator.
+ * Editing a value here without running the tests is not possible; the test reads the stylesheet
+ * itself rather than a copy, so the two cannot drift.
+ *
+ * Values are bare HSL channels so Tailwind can compose them with an alpha:
+ * `hsl(var(--primary) / 0.1)`.
+ */
+
+@layer base {
+  :root {
+    color-scheme: light;
+
+    /* ── Neutrals ── */
+    --background: 0 0% 98%;
+    --foreground: 222 20% 14%;
+    --surface: 0 0% 100%;
+    --surface-hover: 220 13% 95%;
+    --border: 220 13% 88%;
+    --muted: 220 13% 91%;
+    --muted-foreground: 220 9% 42%;
+
+    /* Focus indicator. 3:1 against every surface it can land on. */
+    --ring: 221 83% 48%;
+
+    /* ── Statuses ── */
+    --primary: 221 83% 48%;
+    --primary-foreground: 0 0% 100%;
+    --primary-emphasis: 221 83% 48%;
+    --primary-soft: 221 55% 95%;
+    --primary-hover: 221 83% 42%;
+
+    --accent: 265 68% 52%;
+    --accent-foreground: 0 0% 100%;
+    --accent-emphasis: 265 68% 52%;
+    --accent-soft: 265 40% 95%;
+
+    --success: 142 62% 45%;
+    --success-foreground: 222 30% 9%;
+    --success-emphasis: 142 62% 28.5%;
+    --success-soft: 142 34% 95%;
+
+    --warning: 35 92% 55%;
+    --warning-foreground: 222 30% 9%;
+    --warning-emphasis: 35 92% 30.5%;
+    --warning-soft: 35 64% 95%;
+
+    --danger: 0 72% 51%;
+    --danger-foreground: 0 0% 100%;
+    --danger-emphasis: 0 72% 46%;
+    --danger-soft: 0 44% 95%;
+    --danger-hover: 0 72% 45%;
+
+    --info: 199 88% 50%;
+    --info-foreground: 222 30% 9%;
+    --info-emphasis: 199 88% 32.5%;
+    --info-soft: 199 60% 95%;
+
+    /* ── Elevation ── */
+    --shadow-soft: 0 1px 2px hsl(222 20% 14% / 0.06), 0 1px 3px hsl(222 20% 14% / 0.08);
+    --shadow-raised: 0 2px 4px hsl(222 20% 14% / 0.06), 0 8px 16px -6px hsl(222 20% 14% / 0.12);
+    --shadow-overlay: 0 4px 8px hsl(222 20% 14% / 0.08), 0 24px 48px -12px hsl(222 20% 14% / 0.24);
+
+    /* ── Motion ──
+     * One easing for everything that enters or settles: an expo-out curve reads as "arriving"
+     * rather than "sliding", which is what stops a fast UI from feeling mechanical. */
+    --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+    --duration-fast: 120ms;
+    --duration-base: 200ms;
+    --duration-slow: 320ms;
+
+    /* ── Stacking ──
+     * Documented so that stacking is decided here and not by DOM order. Every overlay in the app
+     * reads one of these; nothing hard-codes a z-index. */
+    --z-sticky: 20;
+    --z-dropdown: 30;
+    --z-drawer: 40;
+    --z-modal: 50;
+    --z-popover: 60;
+    --z-toast: 100;
+    --z-palette: 200;
+  }
+
+  .dark {
+    color-scheme: dark;
+
+    --background: 222 20% 10%;
+    --foreground: 220 13% 93%;
+    --surface: 222 20% 13%;
+    --surface-hover: 222 20% 17%;
+    --border: 222 15% 22%;
+    --muted: 222 15% 20%;
+    --muted-foreground: 220 9% 60.5%;
+
+    --ring: 221 83% 68%;
+
+    --primary: 221 83% 56.5%;
+    --primary-foreground: 0 0% 100%;
+    --primary-emphasis: 221 83% 68%;
+    --primary-soft: 221 55% 16%;
+    --primary-hover: 221 83% 50.5%;
+
+    --accent: 265 68% 60%;
+    --accent-foreground: 0 0% 100%;
+    --accent-emphasis: 265 68% 71%;
+    --accent-soft: 265 40% 16%;
+
+    --success: 142 62% 52%;
+    --success-foreground: 222 30% 9%;
+    --success-emphasis: 142 62% 52%;
+    --success-soft: 142 34% 16%;
+
+    --warning: 35 92% 60%;
+    --warning-foreground: 222 30% 9%;
+    --warning-emphasis: 35 92% 60%;
+    --warning-soft: 35 64% 16%;
+
+    --danger: 0 72% 53.5%;
+    --danger-foreground: 0 0% 100%;
+    --danger-emphasis: 0 72% 68.5%;
+    --danger-soft: 0 44% 16%;
+    --danger-hover: 0 72% 47.5%;
+
+    --info: 199 88% 56%;
+    --info-foreground: 222 30% 9%;
+    --info-emphasis: 199 88% 56%;
+    --info-soft: 199 60% 16%;
+
+    /* Shadows carry almost no weight on a dark ground; the border does the separating, and the
+     * shadow only deepens it. Reusing the light values here produces invisible elevation. */
+    --shadow-soft: 0 1px 2px hsl(0 0% 0% / 0.4);
+    --shadow-raised: 0 2px 4px hsl(0 0% 0% / 0.4), 0 8px 16px -6px hsl(0 0% 0% / 0.5);
+    --shadow-overlay: 0 4px 8px hsl(0 0% 0% / 0.5), 0 24px 48px -12px hsl(0 0% 0% / 0.7);
+  }
+}

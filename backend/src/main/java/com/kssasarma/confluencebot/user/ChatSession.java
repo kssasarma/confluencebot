@@ -23,6 +23,14 @@ public class ChatSession {
     @Column(nullable = false)
     private boolean pinned = false;
 
+    /**
+     * True while the title is machine-derived and may still be replaced by a better summary.
+     * A rename by the user clears it, which is what stops the async summariser from undoing
+     * a deliberate choice a second later.
+     */
+    @Column(name = "title_generated", nullable = false)
+    private boolean titleGenerated = false;
+
     @Column(name = "created_at", updatable = false)
     private Instant createdAt = Instant.now();
 
@@ -39,11 +47,22 @@ public class ChatSession {
     public User getUser() { return user; }
     public String getTitle() { return title; }
     public boolean isPinned() { return pinned; }
+    public boolean isTitleGenerated() { return titleGenerated; }
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
 
     public void setChatId(String chatId) { this.chatId = chatId; }
     public void setUser(User user) { this.user = user; }
-    public void setTitle(String title) { this.title = title; }
+    /** A title the user chose. Never overwritten by the summariser. */
+    public void setTitle(String title) {
+        this.title = title;
+        this.titleGenerated = false;
+    }
+
+    /** A title the system derived or summarised. Stays open to improvement. */
+    public void setGeneratedTitle(String title) {
+        this.title = title;
+        this.titleGenerated = true;
+    }
     public void setPinned(boolean pinned) { this.pinned = pinned; }
 }

@@ -31,11 +31,33 @@ public sealed interface ChatStreamEvent {
         }
     }
 
-    /** The answer finished: carries the conversation it was recorded in and the follow-ups. */
-    record Done(String type, String chatId, String title, List<String> followUpQuestions)
-            implements ChatStreamEvent {
+    /**
+     * The answer finished.
+     *
+     * <p>Carries everything that can only be known once the whole answer exists: the conversation
+     * it was recorded in, the follow-up suggestions, which markers resolve to which page, and how
+     * well retrieval matched. A client that reconnects mid-answer gets the same shape from the
+     * transcript endpoint.
+     */
+    record Done(String type, String chatId, String title, List<String> followUpQuestions,
+                List<Citation> citations, Double confidence) implements ChatStreamEvent {
+
         public static Done of(ChatApiResponse response) {
-            return new Done("done", response.chatId(), response.title(), response.followUpQuestions());
+            return new Done("done", response.chatId(), response.title(),
+                    response.followUpQuestions(), response.citations(), response.confidence());
+        }
+    }
+
+    /**
+     * The conversation title was refined after the answer finished.
+     *
+     * <p>Summarising the exchange needs a model call of its own, which must never hold up the
+     * answer. The clipped question is sent with {@code done} so the sidebar is never blank, and
+     * this event replaces it a moment later if the summary arrives before the stream closes.
+     */
+    record Title(String type, String chatId, String title) implements ChatStreamEvent {
+        public static Title of(String chatId, String title) {
+            return new Title("title", chatId, title);
         }
     }
 

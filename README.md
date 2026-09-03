@@ -323,21 +323,39 @@ data:{"type":"sources","sources":[{"pageId":"12345","title":"Deployment Guide", 
 
 data:{"type":"token","delta":"Deploy by running "}
 
-data:{"type":"done","chatId":"0f2a…","title":"How do I deploy?","followUpQuestions":["…"]}
+data:{"type":"done","chatId":"0f2a…","title":"How do I deploy?","followUpQuestions":["…"],
+      "citations":[{"marker":1,"pageId":"12345"}],"confidence":0.82}
+
+data:{"type":"title","chatId":"0f2a…","title":"Production deploy steps"}
 
 data:[DONE]
 ```
 
+`citations` resolves each bracketed marker in the answer — `[1]`, `[2]` — to the page it cites.
+The mapping is explicit rather than positional: excerpts are numbered per retrieved chunk while
+`sources` carries one entry per page, so two chunks of one page produce two markers pointing at a
+single source.
+
+`confidence` (0–1) is **retrieval quality**: how well the question matched the indexed pages. It
+is not a claim that the answer is correct, and a client must not label it as one — an answer can
+be confidently retrieved and still wrong.
+
+`title` is optional and arrives only on the first turn of a conversation, when a summarised title
+was produced before the stream closed. The clipped question ships with `done` either way, so the
+sidebar is never blank.
+
 A `{"type":"error","message":"…"}` payload replaces `done` when the answer cannot be produced.
 
 > Reverse proxies must not buffer this endpoint. The bundled nginx config already sets
-> `proxy_buffering off` for `/api/`.
+> `proxy_buffering off` for `/api/`. A comment frame is sent every
+> `CHAT_STREAM_HEARTBEAT_INTERVAL` (15s) so an intermediary does not treat a slow generation as
+> an idle connection.
 
 ### Conversations
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/api/user/chats` | List the caller's conversations, pinned first |
+| `GET` | `/api/user/chats?q=&cursor=&limit=` | One page of the caller's conversations, pinned first. `q` searches titles and transcripts |
 | `POST` | `/api/user/chats` | Create one — idempotent: an untouched, untitled conversation is reused |
 | `PATCH` | `/api/user/chats/{chatId}` | Rename or pin |
 | `DELETE` | `/api/user/chats/{chatId}` | Delete the conversation and its transcript |
@@ -346,6 +364,31 @@ A `{"type":"error","message":"…"}` payload replaces `done` when the answer can
 | `PUT` | `/api/user/chats/{chatId}/preferences` | Replace the overrides; `null` drops one |
 | `GET` | `/api/user/preferences` | Account-wide preferences |
 | `PATCH` | `/api/user/preferences` | Update them; omitted fields stay unchanged |
+
+The list is paginated with a keyset cursor: follow `nextCursor` and stop when it is `null`. Page
+size is capped server-side.
+
+Supplying `q` filters to conversations whose title contains the text or whose transcript matches
+it, and each result carries the passage that matched:
+
+```json
+{
+  "items": [{
+    "chatId": "0f2a…",
+    "title": "Production deploy steps",
+    "titleGenerated": true,
+    "match": { "messageId": 91, "snippet": "The [[HL]]deploy[[/HL]] pipeline runs the smoke suite" }
+  }],
+  "nextCursor": "MHwxNzcyMjc…"
+}
+```
+
+Highlights are delimited with `[[HL]]`…`[[/HL]]` rather than `<mark>` on purpose: the snippet is
+text a user wrote, and a client that had to render it as HTML to show the highlight would be one
+careless `innerHTML` away from executing it.
+
+`titleGenerated` is true while the title is still machine-derived. A rename clears it, and the
+async summariser will not overwrite a title a person chose.
 
 Untitled conversations that never received a message are cleaned up once they are older than
 `CHAT_ABANDONED_SESSION_TTL` (1 hour by default).

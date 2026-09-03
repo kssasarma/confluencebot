@@ -32,6 +32,13 @@ export interface ChatPreferences {
   customPrompt?: string | null
 }
 
+/** The passage that caused a conversation to match a search. */
+export interface SearchMatch {
+  messageId: number | null
+  /** Highlights are delimited with [[HL]]…[[/HL]] so they can be rendered without parsing HTML. */
+  snippet: string | null
+}
+
 /** A conversation as the server knows it. Drafts live only in the browser until first use. */
 export interface ChatSession {
   chatId: string
@@ -40,6 +47,26 @@ export interface ChatSession {
   messageCount: number
   createdAt?: string
   updatedAt?: string
+  /** True while the title is still machine-derived and may improve itself. */
+  titleGenerated?: boolean
+  match?: SearchMatch | null
+}
+
+export interface ChatSessionPage {
+  items: ChatSession[]
+  /** Null on the last page. */
+  nextCursor: string | null
+}
+
+/**
+ * Why an answer failed, attached to the message it belongs to.
+ *
+ * Modelled on the message rather than pushed as a separate bubble: an answer that streamed halfway
+ * and then lost its connection is one damaged answer, not a good answer followed by a bad one.
+ */
+export interface MessageError {
+  message: string
+  retryable: boolean
 }
 
 export interface Message {
@@ -50,11 +77,26 @@ export interface Message {
   streaming?: boolean
   /** The user stopped generation, so this answer was not recorded. */
   stopped?: boolean
-  /** The answer could not be produced; content holds the reason. */
-  failed?: boolean
+  /** Set when the answer could not be completed. The partial content, if any, is kept. */
+  error?: MessageError
   sources?: Source[]
   followUpQuestions?: string[]
+  /** Resolves each [n] marker in `content` to the page it cites. */
+  citations?: Citation[]
+  /**
+   * How well the question matched the indexed documentation, 0–1.
+   *
+   * Retrieval quality — deliberately not "how likely the answer is to be correct". See
+   * `ConfidenceBadge`, which labels it accordingly.
+   */
+  confidence?: number | null
   createdAt?: string
+}
+
+export interface Citation {
+  /** The number inside the brackets in the answer text; 1-based. */
+  marker: number
+  pageId: string
 }
 
 export interface Source {
@@ -65,4 +107,7 @@ export interface Source {
   anchorUrl?: string
   spaceKey?: string
   score?: number
+  sectionHeading?: string | null
+  /** A short extract of the matching passage, so a citation can be judged without opening it. */
+  excerpt?: string | null
 }

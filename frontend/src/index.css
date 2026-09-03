@@ -1,48 +1,129 @@
 @import '@fontsource-variable/inter';
+@import './design/tokens.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
-  :root {
-    --background: 0 0% 98%;
-    --foreground: 222 20% 14%;
-    --surface: 0 0% 100%;
-    --surface-hover: 220 13% 95%;
-    --border: 220 13% 88%;
-    --primary: 221 83% 48%;
-    --primary-foreground: 0 0% 100%;
-    --primary-hover: 221 83% 42%;
-    --muted: 220 13% 91%;
-    --muted-foreground: 220 9% 46%;
-    --danger: 0 72% 51%;
-    --success: 142 71% 38%;
-  }
-
-  .dark {
-    --background: 222 20% 10%;
-    --foreground: 220 13% 93%;
-    --surface: 222 20% 13%;
-    --surface-hover: 222 20% 17%;
-    --border: 222 15% 22%;
-    --primary: 221 83% 58%;
-    --primary-foreground: 0 0% 100%;
-    --primary-hover: 221 83% 64%;
-    --muted: 222 15% 20%;
-    --muted-foreground: 220 9% 56%;
-    --danger: 0 72% 61%;
-    --success: 142 71% 48%;
-  }
-
   * { box-sizing: border-box; }
-  body { @apply bg-background text-foreground font-sans antialiased; }
 
-  ::-webkit-scrollbar { width: 6px; height: 6px; }
-  ::-webkit-scrollbar-track { @apply bg-transparent; }
-  ::-webkit-scrollbar-thumb { @apply bg-border rounded-full; }
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+  }
+
+  /**
+   * One focus ring for the entire application.
+   *
+   * Per-component `focus:ring-*` classes are how an app ends up with a keyboard-navigable
+   * sidebar that shows no focus at all: every new element has to remember to opt in. This rule
+   * covers everything by default, and `:focus-visible` means a mouse click never paints it.
+   * The offset colour follows the ground so the ring reads on both a card and the page behind it.
+   */
+  :focus-visible {
+    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
+  }
+
+  /* Elements that manage their own indicator opt out rather than fighting the global one. */
+  [data-focus-ring='none']:focus-visible {
+    @apply ring-0 ring-offset-0;
+  }
+
+  /**
+   * Scrollbars follow the theme.
+   *
+   * `background-clip: content-box` with a transparent border is what produces the inset thumb;
+   * without it the thumb touches the track edge and reads as a scrollbar from another app.
+   */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border)) transparent;
+  }
+
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--border));
+    border: 3px solid transparent;
+    background-clip: content-box;
+    border-radius: 9999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: hsl(var(--muted-foreground) / 0.5);
+    background-clip: content-box;
+  }
+
+  /* Text selection reads as part of the palette rather than as the browser default blue. */
+  ::selection {
+    background-color: hsl(var(--primary) / 0.25);
+  }
+
+  /**
+   * Reduced motion collapses durations rather than removing animation.
+   *
+   * `animation: none` looks equivalent and is not: components that unmount on `onAnimationEnd`
+   * never receive the event and stay on screen forever. A 0.01ms animation still fires.
+   */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer components {
+  /**
+   * Syntax highlighting, bound to the same tokens as everything else.
+   *
+   * highlight.js ships dozens of themes, each a second palette that drifts from the app's own the
+   * first time a token is retuned. These classes are the whole theme: nine rules against
+   * variables that already exist.
+   */
+  .hljs { @apply text-foreground; }
+  .hljs-comment,
+  .hljs-quote { @apply text-muted-foreground italic; }
+  .hljs-keyword,
+  .hljs-selector-tag,
+  .hljs-literal,
+  .hljs-type { color: hsl(var(--accent-emphasis)); }
+  .hljs-string,
+  .hljs-regexp,
+  .hljs-addition { color: hsl(var(--success-emphasis)); }
+  .hljs-number,
+  .hljs-symbol,
+  .hljs-bullet { color: hsl(var(--warning-emphasis)); }
+  .hljs-title,
+  .hljs-section,
+  .hljs-name,
+  .hljs-selector-id,
+  .hljs-selector-class { color: hsl(var(--primary-emphasis)); }
+  .hljs-attr,
+  .hljs-attribute,
+  .hljs-variable,
+  .hljs-template-variable { color: hsl(var(--info-emphasis)); }
+  .hljs-deletion { color: hsl(var(--danger-emphasis)); }
+  .hljs-emphasis { @apply italic; }
+  .hljs-strong { @apply font-semibold; }
 }
 
 @layer utilities {
   .scrollbar-none { scrollbar-width: none; }
   .scrollbar-none::-webkit-scrollbar { display: none; }
+
+  /**
+   * Lets the browser skip layout and paint for off-screen messages.
+   *
+   * The cheap 80% of virtualisation: a long transcript stops costing a full layout pass on every
+   * streamed token, without any of the scroll-anchor breakage that a windowing library brings to
+   * content whose height changes every frame.
+   */
+  .content-auto {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 200px;
+  }
 }

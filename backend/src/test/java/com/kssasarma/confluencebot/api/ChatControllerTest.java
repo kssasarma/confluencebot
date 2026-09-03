@@ -20,6 +20,8 @@ import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.time.Duration;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -39,10 +41,17 @@ class ChatControllerTest {
 
     private MockMvc mockMvc;
 
+    /**
+     * Keep-alives and the post-answer linger are disabled above (both durations are zero), so
+     * this scheduler is never asked to run anything; it exists only to satisfy the constructor.
+     */
+    private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+
     @BeforeEach
     void setUp() {
         mockMvc = MockMvcBuilders
-                .standaloneSetup(new ChatController(chatService, new SyncTaskExecutor(), Duration.ofMinutes(1)))
+                .standaloneSetup(new ChatController(chatService, new SyncTaskExecutor(), scheduler,
+                        Duration.ofMinutes(1), Duration.ZERO, Duration.ZERO))
                 .setCustomArgumentResolvers(new AuthenticationPrincipalArgumentResolver())
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
