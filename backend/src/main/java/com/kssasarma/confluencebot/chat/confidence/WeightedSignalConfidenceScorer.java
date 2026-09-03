@@ -1,8 +1,6 @@
 package com.kssasarma.confluencebot.chat.confidence;
 
 import com.kssasarma.confluencebot.config.ChatConfidenceProperties;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
-import org.springframework.stereotype.Component;
 
 /**
  * The default scorer: a weighted blend of four independent signals.
@@ -23,11 +21,11 @@ import org.springframework.stereotype.Component;
  * similarity over a real corpus rarely drops below ~0.3 even for unrelated text, so treating a
  * raw 0.35 as "35% confident" would systematically overstate a miss.
  *
- * <p>Registered with {@link ConditionalOnMissingBean} so a deployment can drop in its own
- * {@link ConfidenceScorer} without excluding this class.
+ * <p>Carries no stereotype of its own. It is published by
+ * {@link com.kssasarma.confluencebot.config.ChatConfidenceConfiguration}, which is what lets a
+ * deployment replace it without excluding this class — and what keeps it a plain object that
+ * tests can construct with hand-picked weights.
  */
-@Component
-@ConditionalOnMissingBean(ConfidenceScorer.class)
 public class WeightedSignalConfidenceScorer implements ConfidenceScorer {
 
     private final ChatConfidenceProperties properties;
