@@ -37,6 +37,12 @@ function stubBackground(url: string): Response | null {
   if (url.includes('/user/chats?') || url.endsWith('/user/chats')) {
     return json({ items: [], nextCursor: null })
   }
+  // Asked once on mount by the auth provider. Answered rather than left to 404: a rejected
+  // promise settling at an unpredictable point is exactly the kind of timing these focus
+  // assertions are sensitive to, and this deployment simply has no directory configured.
+  if (url.includes('/auth/sso')) {
+    return json({ enabled: false, providerId: null, providerName: null, authorizationUrl: null, logoutUrl: null })
+  }
   if (url.includes('/preferences')) {
     return json({
       theme: 'system', language: 'en', responseStyle: 'balanced',

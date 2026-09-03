@@ -89,6 +89,10 @@ function makeFetchMock(options: { meRoles: string[]; users?: StubUser[]; jobs?: 
         return new Response(null, { status: 204 })
       }
       if (url.includes('/ingest/jobs')) return json(jobs)
+      // Asked once on mount by the auth provider; this deployment has no directory configured.
+      if (url.includes('/auth/sso')) {
+        return json({ enabled: false, providerId: null, providerName: null, authorizationUrl: null, logoutUrl: null })
+      }
 
       return json({}, 404)
     },

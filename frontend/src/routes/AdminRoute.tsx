@@ -306,6 +306,7 @@ function UsersTab() {
                 <th scope="col" className="pb-2 font-medium text-muted-foreground">Email</th>
                 <th scope="col" className="pb-2 font-medium text-muted-foreground">Name</th>
                 <th scope="col" className="pb-2 font-medium text-muted-foreground">Roles</th>
+                <th scope="col" className="pb-2 font-medium text-muted-foreground">Sign-in</th>
                 <th scope="col" className="pb-2 font-medium text-muted-foreground">Status</th>
                 <th scope="col" className="pb-2 font-medium text-muted-foreground">Must change password</th>
                 <th scope="col" className="pb-2"><span className="sr-only">Actions</span></th>
@@ -338,6 +339,13 @@ function UsersTab() {
                         ))}
                       </div>
                     )}
+                  </td>
+                  <td className="py-2.5 pr-4 text-2xs text-muted-foreground">
+                    {/* Worth a column of its own: a directory account has no password here, so
+                        there is nothing to reset and nothing to hand somebody who is locked out. */}
+                    {user.ssoLinked
+                      ? (user.authProvider === 'OTDS' ? 'Directory' : 'Password or directory')
+                      : 'Password'}
                   </td>
                   <td className="py-2.5 pr-4">
                     <Badge tone={user.enabled ? 'success' : 'danger'}>

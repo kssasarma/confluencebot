@@ -67,16 +67,23 @@ beforeEach(() => {
   vi.stubGlobal('fetch', fetchMock)
 })
 
+/**
+ * A fresh Response per call, not one shared instance — a Response body can only be read once, and
+ * the auth provider makes more than one request on mount (it also asks whether this deployment
+ * offers single sign-on).
+ */
+function alwaysRespond(body: unknown, status = 200): void {
+  fetchMock.mockImplementation(() => Promise.resolve(json(body, status)))
+}
+
 function signIn(roles: string[]) {
   localStorage.setItem(TOKEN_KEY, 'header.payload.signature')
-  fetchMock.mockResolvedValue(json({
-    userId: 1, email: 'reader@example.com', roles, mustChangePassword: false,
-  }))
+  alwaysRespond({ userId: 1, email: 'reader@example.com', roles, mustChangePassword: false })
 }
 
 describe('ProfileMenu trigger', () => {
   it('renders nothing while signed out', () => {
-    fetchMock.mockResolvedValue(json({}, 401))
+    alwaysRespond({}, 401)
 
     renderWithProviders(<ProfileMenu />)
 

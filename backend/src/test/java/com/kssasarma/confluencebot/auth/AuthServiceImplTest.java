@@ -49,8 +49,12 @@ class AuthServiceImplTest {
 
     @BeforeEach
     void setUp() {
-        service = new AuthServiceImpl(authenticationManager, jwtService, userRepository,
-                refreshTokenRepository, passwordEncoder, Duration.ofDays(30));
+        // A real TokenIssuer over the mocked collaborators: minting moved out of AuthServiceImpl
+        // when single sign-on became a second way to reach a session, and these assertions are
+        // about what comes back from a flow — which is exactly what the issuer builds.
+        service = new AuthServiceImpl(authenticationManager, userRepository,
+                refreshTokenRepository, passwordEncoder,
+                new TokenIssuer(jwtService, refreshTokenRepository, Duration.ofDays(30)));
     }
 
     private static User userWithRoles(Long id, String email, Set<UserRole> roles) {
