@@ -1,10 +1,12 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { AlertTriangle, SlidersHorizontal } from 'lucide-react'
+import { useAuth } from '../context/AuthContext'
 import { useChat } from '../context/ChatContext'
 import { useEffectiveDisplayPreferences } from '../hooks/usePreferences'
 import { useDocumentTitle } from '../hooks/useDocumentTitle'
 import { useEventCallback } from '../hooks/useEventCallback'
+import { displayNameFromEmail } from '../lib/displayName'
 import Button from '../components/ui/Button'
 import EmptyState from '../components/ui/EmptyState'
 import ErrorBoundary from '../components/ui/ErrorBoundary'
@@ -14,9 +16,8 @@ import MessageList from '../components/chat/MessageList'
 import { prefetchMarkdown } from '../components/chat/LazyMarkdown'
 import Composer from '../components/chat/Composer'
 import ChatHeader from '../components/chat/ChatHeader'
-import WelcomePanel from '../components/chat/WelcomePanel'
+import { WelcomeGreeting, WelcomeSuggestions } from '../components/chat/WelcomePanel'
 import ChatPreferencesDialog from '../components/settings/ChatPreferencesDialog'
-import { useState } from 'react'
 
 /**
  * One conversation, addressed by URL.
@@ -29,6 +30,7 @@ export default function ChatRoute() {
   const { chatId = '' } = useParams()
   const navigate = useNavigate()
   const chat = useChat()
+  const { user } = useAuth()
   const [showPreferences, setShowPreferences] = useState(false)
 
   const messages = chat.messagesFor(chatId)
@@ -65,6 +67,15 @@ export default function ChatRoute() {
 
   const ask = useEventCallback((question: string) => chat.send(chatId, question))
   const retry = useEventCallback(() => chat.retry(chatId))
+
+  /**
+   * Nothing said here yet, and nothing preventing it being said.
+   *
+   * This is the one state where the composer is not a bar along the bottom: the greeting, the
+   * question box and the suggestions become a single centred column, so that opening a new chat
+   * looks like an invitation rather than like a conversation whose messages failed to load.
+   */
+  const showWelcome = messages.length === 0 && !isLoading && !loadError
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -128,19 +139,31 @@ export default function ChatRoute() {
             />
           </div>
         ) : (
-          <div className="min-h-0 flex-1 overflow-y-auto">
-            <WelcomePanel onSelect={ask} />
-          </div>
+          <WelcomeGreeting name={displayNameFromEmail(user?.email)} />
         )}
       </ErrorBoundary>
 
+      {/*
+        The composer keeps this position in the tree in both layouts, and only its variant
+        changes. Moving the element into the welcome column instead would remount it on the first
+        question — dropping the caret out of the box at the exact moment the reader is most likely
+        to type the next one.
+      */}
       <Composer
         chatId={chatId}
         onSend={ask}
         onStop={chat.stop}
         isStreaming={isStreaming}
         lastQuestion={lastQuestion}
+        variant={showWelcome ? 'centred' : 'docked'}
       />
+
+      {/*
+        Keyed by conversation as well, so that starting another new chat replays the entrance
+        animation. Two empty conversations are identical to look at; the movement is what says
+        one has been replaced by the other.
+      */}
+      {showWelcome && <WelcomeSuggestions key={chatId} onSelect={ask} />}
 
       {showPreferences && (
         <ChatPreferencesDialog chatId={chatId} onClose={() => setShowPreferences(false)} />

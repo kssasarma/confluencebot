@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import { render, type RenderOptions, type RenderResult } from '@testing-library/react'
 import { ThemeProvider } from '../context/ThemeContext'
+import { AuthProvider } from '../context/AuthContext'
 import { ToastProvider } from '../components/ui/Toast'
 import { ConfirmProvider } from '../components/ui/ConfirmDialog'
 
@@ -12,6 +13,10 @@ import { ConfirmProvider } from '../components/ui/ConfirmDialog'
  * A fresh `QueryClient` per render, with retries off: a test that exercises a failure would
  * otherwise wait out two retries before asserting, and a shared client would leak one test's
  * cache into the next.
+ *
+ * `AuthProvider` is here because the chat surface greets the reader by name and so genuinely
+ * depends on it. With no token in storage it settles immediately on a signed-out session and
+ * makes no request, which is the right default for a component test that is not about signing in.
  */
 export function renderWithProviders(
   ui: ReactElement,
@@ -30,7 +35,9 @@ export function renderWithProviders(
         <ThemeProvider>
           <ToastProvider>
             <ConfirmProvider>
-              <MemoryRouter initialEntries={[route]}>{children}</MemoryRouter>
+              <AuthProvider>
+                <MemoryRouter initialEntries={[route]}>{children}</MemoryRouter>
+              </AuthProvider>
             </ConfirmProvider>
           </ToastProvider>
         </ThemeProvider>

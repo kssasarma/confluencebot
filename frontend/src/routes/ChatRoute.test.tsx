@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { AuthProvider } from '../context/AuthContext'
 import { ChatProvider } from '../context/ChatContext'
 import { ThemeProvider } from '../context/ThemeContext'
 import { ConfirmProvider } from '../components/ui/ConfirmDialog'
@@ -71,14 +72,16 @@ function renderRoute(route: string) {
       <ThemeProvider>
         <ToastProvider>
           <ConfirmProvider>
-            <MemoryRouter initialEntries={[route]}>
-              <ChatProvider>
-                <Routes>
-                  <Route index element={<NewChatRedirect />} />
-                  <Route path="chat/:chatId" element={<ChatRoute />} />
-                </Routes>
-              </ChatProvider>
-            </MemoryRouter>
+            <AuthProvider>
+              <MemoryRouter initialEntries={[route]}>
+                <ChatProvider>
+                  <Routes>
+                    <Route index element={<NewChatRedirect />} />
+                    <Route path="chat/:chatId" element={<ChatRoute />} />
+                  </Routes>
+                </ChatProvider>
+              </MemoryRouter>
+            </AuthProvider>
           </ConfirmProvider>
         </ToastProvider>
       </ThemeProvider>
@@ -102,6 +105,46 @@ describe('opening a new chat', () => {
 
     expect(transcriptCalls()).toEqual([])
     expect(screen.queryByText(/could not load this conversation/i)).not.toBeInTheDocument()
+  })
+
+  it('centres the question box, with the greeting above it and the suggestions below', async () => {
+    renderRoute('/')
+
+    const heading = await screen.findByRole('heading', { name: /how may i help you/i })
+    const box = screen.getByRole('textbox', { name: /ask a question/i })
+    const suggestion = screen.getByRole('button', { name: /steps to deploy to production/i })
+
+    const follows = (first: Element, second: Element) =>
+      Boolean(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING)
+
+    expect(follows(heading, box)).toBe(true)
+    expect(follows(box, suggestion)).toBe(true)
+
+    // The caret is already in the box, which is also how a second new chat announces itself.
+    expect(box).toHaveFocus()
+  })
+
+  it('keeps the caret in the question box once the first answer replaces the welcome', async () => {
+    fetchMock.mockImplementation(async input => {
+      const url = String(input)
+      if (url.includes('/chat/stream')) return answerStream('In the SRE space.')
+      if (TRANSCRIPT_URL.test(url)) return json({ detail: 'not found' }, 404)
+      return stubBackground(url) ?? json({}, 404)
+    })
+
+    renderRoute('/')
+    const box = await screen.findByRole('textbox', { name: /ask a question/i })
+
+    await userEvent.type(box, 'Where are the runbooks?{Enter}')
+    expect(await screen.findByText(/in the sre space/i)).toBeInTheDocument()
+
+    // The composer moved from the middle of the screen to the bottom of it without being torn
+    // down: the same element, still focused, ready for the follow-up question.
+    expect(screen.getByRole('textbox', { name: /ask a question/i })).toBe(box)
+    expect(box).toHaveFocus()
+    expect(
+      screen.queryByRole('button', { name: /steps to deploy to production/i }),
+    ).not.toBeInTheDocument()
   })
 
   it('does not report a conversation the server has never recorded as broken', async () => {
