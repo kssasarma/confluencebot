@@ -1,12 +1,16 @@
 stages:
   - deploy
 
+variables:
+  # The URL path the site is served from — everything after the Pages domain, e.g.
+  # "/karavindasar/ot-confluence-bot/". Defaults to this project's own path, so it tracks a
+  # rename/move automatically and needs no edit here. If the project is ever served from a
+  # different path (a different group/project slug, a custom domain with its own prefix, ...),
+  # override it with a PAGES_BASE_PATH CI/CD variable in Settings > CI/CD > Variables — that takes
+  # precedence over this default without touching the pipeline or the code.
+  PAGES_BASE_PATH: "/${CI_PROJECT_PATH}/"
+
 # Publishes frontend/ as a static GitLab Pages site.
-#
-# The site's URL path is whatever this project's namespace/path is (e.g. group "karavindasar",
-# project "ot-confluence-bot" -> served under "/karavindasar/ot-confluence-bot/", regardless of
-# which Pages domain fronts it) — so the Vite `base` is derived from $CI_PROJECT_PATH at build
-# time rather than hardcoded, and keeps working if the project is renamed or moved.
 #
 # The backend isn't part of this job: Pages only serves static files, so the API it talks to must
 # already be reachable at its own public HTTPS URL with CORS enabled for the Pages origin. Point
@@ -28,7 +32,7 @@ pages:
   script:
     - cd frontend
     - npm ci
-    - npm run build -- --base="/${CI_PROJECT_PATH}/"
+    - npm run build -- --base="${PAGES_BASE_PATH}"
     - cd ..
     - rm -rf public
     - mv frontend/dist public
