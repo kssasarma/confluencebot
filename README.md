@@ -81,6 +81,10 @@ CHAT_MODEL=openai/llama-4-17b-maverick
 EMBED_MODEL=openai/snowflake-arctic
 ```
 
+Answering, embedding and re-ranking can each be pointed at their own endpoint, model and key — see
+[Three models, three endpoints](#three-models-three-endpoints). Left alone, all three use the
+server above.
+
 > **Tip — Ollama on the same machine as Docker:** use `http://host.docker.internal:11434/v1` so the container can reach Ollama running on your host.
 
 ### 2. Start everything
@@ -199,6 +203,39 @@ Or load the `.env` file via your IDE's run configuration.
 
 All variables have sensible defaults where optional. Only the three starred variables are required.
 
+### Three models, three endpoints
+
+Answering a question uses the model three times, for three different jobs:
+
+| Job | What it does | What it emits |
+|---|---|---|
+| **Embedding** | Turns pages and questions into vectors, at ingestion and at query time | A vector |
+| **Re-ranking** | Orders the retrieved excerpts by how well they answer the question | A permutation — `3,1,2` |
+| **Answering** | Writes the answer from the excerpts it was given | Prose, streamed |
+
+Each has its own endpoint, model and API key, and each falls back to `AI_BASE_URL` / `AI_API_KEY`
+when it is not given one — so a single local server still needs only those two variables. Splitting
+them is what lets a deployment write answers with a large hosted model while embedding and ranking
+on a small local one:
+
+```dotenv
+AI_BASE_URL=http://localhost:11434/v1     # local Ollama: embedding and re-ranking
+AI_API_KEY=dummy
+
+CHAT_BASE_URL=https://api.openai.com/v1   # answers come from somewhere else
+CHAT_API_KEY=sk-...
+CHAT_MODEL=gpt-4.1
+
+RERANK_MODEL=qwen2.5:3b                   # local, and much cheaper than the answer model
+```
+
+Re-ranking is the one most worth moving. It is a single short call that emits a handful of tokens,
+it runs before the first token of the answer is streamed, and every question pays for it — so the
+model that writes well is rarely the one that should be doing it. Set `RERANK_MODEL` alone to keep
+it on the same server, or `RERANK_BASE_URL` too to move it elsewhere. If the call fails, is refused
+by its circuit breaker, or returns something that is not an order, retrieval keeps the MMR ordering
+and the answer is unaffected.
+
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `CONFLUENCE_BASE_URL` | ★ | — | Base URL of your Confluence Server (no trailing slash) |
@@ -206,10 +243,20 @@ All variables have sensible defaults where optional. Only the three starred vari
 | `CONFLUENCE_SPACE_KEY` | ★ | — | Default space key to ingest (e.g. `MYSPACE`) |
 | `CONFLUENCE_PAGE_FETCH_LIMIT` | | `250` | Pages per paginated API request |
 | `CONFLUENCE_REQUEST_TIMEOUT_SECONDS` | | `30` | HTTP timeout for Confluence API calls |
-| `AI_BASE_URL` | | `http://localhost:11434/v1` | OpenAI-compatible endpoint for both embedding and chat |
-| `AI_API_KEY` | | `dummy` | API key (use `dummy` for local servers that don't require one) |
+| `AI_BASE_URL` | | `http://localhost:11434/v1` | Shared OpenAI-compatible endpoint; every role below falls back to it |
+| `AI_API_KEY` | | `dummy` | Shared API key (use `dummy` for local servers that don't require one) |
+| `CHAT_BASE_URL` | | `AI_BASE_URL` | Endpoint that writes the answer |
+| `CHAT_API_KEY` | | `AI_API_KEY` | Key for the answering endpoint |
 | `CHAT_MODEL` | | `openai/llama-4-17b-maverick` | Chat/completion model name |
+| `EMBED_BASE_URL` | | `AI_BASE_URL` | Endpoint that produces embeddings |
+| `EMBED_API_KEY` | | `AI_API_KEY` | Key for the embedding endpoint |
 | `EMBED_MODEL` | | `openai/snowflake-arctic` | Embedding model name (must produce 1024-dim vectors) |
+| `RERANK_BASE_URL` | | `CHAT_BASE_URL` | Endpoint that re-ranks retrieved excerpts |
+| `RERANK_API_KEY` | | `CHAT_API_KEY` | Key for the re-ranking endpoint |
+| `RERANK_MODEL` | | `CHAT_MODEL` | Model that re-ranks retrieved excerpts |
+| `RERANK_TEMPERATURE` | | `0.0` | Ranking should be repeatable, so lower than the answer model |
+| `RERANK_MAX_TOKENS` | | `64` | A permutation needs few tokens; raise it for a reasoning model |
+| `CHAT_RERANK_LLM_ENABLED` | | `true` | Off: keep the MMR order and skip the re-rank call entirely |
 | `CHAT_TEMPERATURE` | | `0.1` | LLM temperature (lower = more deterministic) |
 | `CHAT_MAX_TOKENS` | | `2048` | Maximum tokens in LLM response |
 | `CHAT_TOP_K` | | `5` | Number of vector search results to include in context |
