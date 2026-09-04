@@ -17,10 +17,11 @@ import org.springframework.validation.annotation.Validated;
  * that writes a good answer is rarely the cheapest model that can order five excerpts, and on a
  * hosted endpoint the two are not even billed alike.
  *
- * <p>Everything here is optional and empty means inherit: a deployment that only wants a smaller
- * model sets {@code model} and nothing else; one that runs re-ranking on a local server while
- * answering from a hosted one sets {@code base-url} too. The resolution order for each field is
- * this block, then {@code spring.ai.openai.chat.*}, then {@code spring.ai.openai.*}.
+ * <p>Everything here is optional and empty means inherit: in native mode, a deployment that only
+ * wants a smaller model sets {@code model} and nothing else; one that runs re-ranking on a local
+ * server while answering from a hosted one sets {@code base-url} too. Chat-completions mode always
+ * uses {@code spring.ai.openai.chat.options.model}, never this block's model. Endpoint and key
+ * resolution is this block, then {@code spring.ai.openai.chat.*}, then {@code spring.ai.openai.*}.
  *
  * <p>Each value carries its own default rather than relying on the shipped {@code application.yml}
  * — record binding fills an absent property with zero, and a zero {@code maxTokens} would truncate
@@ -49,8 +50,7 @@ public record ChatRerankProperties(
          *  re-ranking runs on the same host under a different key or tenant. */
         @DefaultValue("") String apiKey,
 
-        /** Model that does the ranking. Empty inherits the chat model, which is what this
-         *  pass used before it could be configured separately. */
+        /** Native reranker model. Ignored when {@link Transport#CHAT_COMPLETIONS} is selected. */
         @DefaultValue("") String model,
 
         /** Ranking is a decision, not a composition: the same excerpts should produce the same

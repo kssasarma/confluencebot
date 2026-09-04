@@ -59,10 +59,13 @@ class ChatRerankConfigurationTest {
     }
 
     @Test
-    void chatCompletionsTransportUsesTheChatClientAdapter() {
-        runner.withPropertyValues("chat.rerank.transport=chat-completions").run(context ->
-                assertThat(context.getBean("rerankClient"))
-                        .isInstanceOf(ChatCompletionRerankClient.class));
+    void chatCompletionsTransportUsesChatModelAndIgnoresRerankModel() {
+        runner.withPropertyValues(
+                "chat.rerank.transport=chat-completions",
+                "chat.rerank.model=mmarco-rerank").run(context -> {
+            assertThat(context.getBean("rerankClient")).isInstanceOf(ChatCompletionRerankClient.class);
+            assertThat(defaultOptions().getModel()).isEqualTo("big-writer");
+        });
     }
 
     @Test
@@ -151,6 +154,14 @@ class ChatRerankConfigurationTest {
         assertThat(ChatRerankConfiguration.inherit("", "chat", "shared")).isEqualTo("chat");
         assertThat(ChatRerankConfiguration.inherit("", "  ", "shared")).isEqualTo("shared");
         assertThat(ChatRerankConfiguration.inherit("", null, "")).isEmpty();
+    }
+
+    @Test
+    void chatCompletionsModelNeverFallsBackToTheRerankModel() {
+        ChatRerankProperties properties = new ChatRerankProperties(
+                true, ChatRerankProperties.Transport.CHAT_COMPLETIONS, "", "", "mmarco-rerank", 0.0, 64);
+
+        assertThat(ChatRerankConfiguration.model(properties, "big-writer")).isEqualTo("big-writer");
     }
 
     private ChatOptions defaultOptions() {

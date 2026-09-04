@@ -238,13 +238,13 @@ ending in `/v1`). If the call fails or is refused by its circuit breaker, retrie
 ordering and the answer is unaffected.
 
 To use an OpenAI-compatible chat model for this pass instead, set
-`RERANK_TRANSPORT=chat-completions`. The app then calls `/chat/completions` using the configured
-`RERANK_*` connection/model (or the `CHAT_*` values it inherits) and asks for a JSON permutation
-of the excerpts. For example, to use the same model and endpoint that answer questions:
+`RERANK_TRANSPORT=chat-completions`. The app then calls `/chat/completions` with `CHAT_MODEL`
+(and deliberately ignores `RERANK_MODEL`) and asks for a JSON permutation of the excerpts. Its
+endpoint and API key can still be overridden by `RERANK_BASE_URL` and `RERANK_API_KEY`. For
+example, to use the same model and endpoint that answer questions:
 
 ```dotenv
 RERANK_TRANSPORT=chat-completions
-RERANK_MODEL=gpt-4.1
 ```
 
 | Variable | Required | Default | Description |
@@ -264,7 +264,7 @@ RERANK_MODEL=gpt-4.1
 | `EMBED_MODEL` | | `openai/snowflake-arctic` | Embedding model name (must produce 1024-dim vectors) |
 | `RERANK_BASE_URL` | | `CHAT_BASE_URL` | Re-ranking API base URL; used for `/rerank` or `/chat/completions`, according to transport |
 | `RERANK_API_KEY` | | `CHAT_API_KEY` | Key for the re-ranking connection |
-| `RERANK_MODEL` | | `CHAT_MODEL` | Native rerank alias in `native` mode, or chat-completions model in `chat-completions` mode |
+| `RERANK_MODEL` | | `CHAT_MODEL` | Native rerank alias in `native` mode; ignored in `chat-completions` mode |
 | `RERANK_TRANSPORT` | | `native` | `native` calls `/rerank`; `chat-completions` prompts the configured chat model for the excerpt order |
 | `RERANK_TEMPERATURE` | | `0.0` | Ranking should be repeatable, so lower than the answer model |
 | `RERANK_MAX_TOKENS` | | `64` | A permutation needs few tokens; raise it for a reasoning model |

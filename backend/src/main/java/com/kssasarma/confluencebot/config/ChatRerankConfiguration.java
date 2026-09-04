@@ -57,10 +57,10 @@ public class ChatRerankConfiguration {
             @Value("${spring.ai.openai.chat.base-url:}") String chatBaseUrl,
             @Value("${spring.ai.openai.chat.api-key:}") String chatApiKey,
             @Value("${spring.ai.openai.chat.options.model:}") String chatModel) {
-        String model = inherit(properties.model(), chatModel);
+        String model = model(properties, chatModel);
         if (properties.transport() == ChatRerankProperties.Transport.CHAT_COMPLETIONS) {
             if (!StringUtils.hasText(model)) {
-                throw new IllegalStateException("No re-rank model configured: set RERANK_MODEL or CHAT_MODEL.");
+                throw new IllegalStateException("No chat model configured: set CHAT_MODEL.");
             }
             log.info("Re-ranking with model '{}' through chat completions", model);
             return new ChatCompletionRerankClient(rerankChatClient.getObject());
@@ -96,7 +96,7 @@ public class ChatRerankConfiguration {
             @Value("${spring.ai.openai.chat.api-key:}") String chatApiKey,
             @Value("${spring.ai.openai.chat.options.model:}") String chatModel) {
 
-        String model = inherit(properties.model(), chatModel);
+        String model = model(properties, chatModel);
 
         if (!properties.hasOwnConnection()) {
             log.info("Re-ranking with model '{}' on the chat endpoint", model);
@@ -152,5 +152,15 @@ public class ChatRerankConfiguration {
             if (StringUtils.hasText(candidate)) return candidate;
         }
         return "";
+    }
+
+    /**
+     * Chat-completions ranking deliberately uses the answer model. A native reranker alias is not
+     * necessarily a chat model, and must never be sent to {@code /chat/completions}.
+     */
+    static String model(ChatRerankProperties properties, String chatModel) {
+        return properties.transport() == ChatRerankProperties.Transport.CHAT_COMPLETIONS
+                ? chatModel
+                : inherit(properties.model(), chatModel);
     }
 }
