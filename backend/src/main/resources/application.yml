@@ -36,12 +36,13 @@ app:
     enabled: ${SSO_ENABLED:false}
 
     # Short id used in URLs, not shown to anyone. It is the last segment of both OAuth URLs, so
-    # the redirect URL ends /api/login/oauth2/code/<this>. Name it after the provider — otds,
-    # entra, okta — and the logs and the registered URL read for themselves.
-    provider-id: ${SSO_PROVIDER_ID:sso}
+    # the redirect URL ends /api/login/oauth2/code/<this>. Defaulted to the directory this is
+    # deployed against, so the common case sets neither of these two; point them elsewhere and
+    # everything follows, because nothing downstream expects a particular value.
+    provider-id: ${SSO_PROVIDER_ID:otds}
 
     # What the button says: "Continue with <this>".
-    provider-name: ${SSO_PROVIDER_NAME:SSO}
+    provider-name: ${SSO_PROVIDER_NAME:OpenText}
 
     issuer-uri: ${SSO_ISSUER_URI:}
     client-id: ${SSO_CLIENT_ID:}

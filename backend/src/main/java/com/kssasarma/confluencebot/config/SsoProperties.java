@@ -51,14 +51,17 @@ public record SsoProperties(
          *
          * <p>It is the last segment of both OAuth URLs, so the redirect URL registered with the
          * provider ends {@code /api/login/oauth2/code/<this>}. Changing it after registering that
-         * URL breaks the callback, which is the one reason to think before setting it. Naming it
-         * after the provider — {@code otds}, {@code entra}, {@code okta} — makes the logs and the
-         * registered URL read for themselves.
+         * URL breaks the callback, which is the one reason to think before setting it.
+         *
+         * <p>Defaulted to {@code otds} because that is the directory this is deployed against, so
+         * the common case configures nothing. It is a default and not an assumption: point it at
+         * {@code entra} or {@code keycloak} and everything downstream follows, because nothing
+         * reads this value expecting a particular one.
          */
-        @DefaultValue("sso") String providerId,
+        @DefaultValue("otds") String providerId,
 
         /** What the sign-in button calls this provider: "Continue with <this>". Shown to users. */
-        @DefaultValue("SSO") String providerName,
+        @DefaultValue("OpenText") String providerName,
 
         /** Issuer, e.g. {@code https://otds.example.com/otdsws/oauth2} or
          *  {@code https://login.microsoftonline.com/<tenant>/v2.0}. On its own it means "discover
