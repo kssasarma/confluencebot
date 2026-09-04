@@ -76,7 +76,7 @@ public class AuthServiceImpl implements AuthService {
         User managed = userRepository.findById(user.getId())
                 .orElseThrow(() -> new BadCredentialsException("Invalid email or password"));
 
-        // An OTDS-provisioned account has no password here to be current, new, or wrong. Saying so
+        // A directory-provisioned account has no password here to be current, new, or wrong. So
         // is kinder than the "current password is incorrect" every attempt would otherwise get,
         // and it is the whole reason the change-password wall is not shown to those accounts.
         if (managed.hasNoLocalPassword()) {

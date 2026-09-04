@@ -9,48 +9,62 @@ app:
     # so this only matters when the UI is served from somewhere else.
     allowed-origins: ${CORS_ALLOWED_ORIGINS:*}
 
-  # ── Single sign-on: OpenText Directory Services ───────────────────────────
+  # ── Single sign-on: any OAuth 2.0 / OpenID Connect provider ───────────────
   #
-  # OTDS is an OAuth 2.0 / OpenID Connect authorization server, so it is configured here as a
-  # standard OIDC provider rather than through anything OpenText-specific. Off by default: nothing
-  # below is read, no OAuth beans are created, and the only way in stays a password.
+  # Password sign-in is not replaced by any of this. The two are alternatives offered side by
+  # side: leave `enabled` false and the login screen is the password form it has always been;
+  # switch it on and a "Continue with <provider-name>" button appears next to that form. Nothing
+  # below is read while it is off — no OAuth beans, no filter chain, no startup cost.
+  #
+  # Nothing here names a vendor. OpenText Directory Services is what this was built against, but
+  # OTDS is an ordinary OIDC authorization server and so is every alternative a company might use
+  # instead — Entra ID, Okta, Keycloak, Ping, Auth0. Pointing this at a different one is a change
+  # to these values and to nothing else.
   #
   # Describe the provider one of two ways:
   #   Discovery       — set issuer-uri alone. The authorization, token, userinfo and JWKS
   #                     endpoints are read from {issuer}/.well-known/openid-configuration at
-  #                     startup, so an OTDS upgrade that moves a path costs no config change.
+  #                     startup, so a provider upgrade that moves a path costs no config change.
   #   Explicit        — set authorization-uri and token-uri (plus jwk-set-uri or user-info-uri).
-  #                     Nothing is fetched. Use this for an OTDS release that does not serve a
-  #                     discovery document, or when the browser and this service reach OTDS under
-  #                     different host names.
+  #                     Nothing is fetched. Use this for a server that publishes no discovery
+  #                     document, or when the browser and this service reach it under different
+  #                     host names.
   #
-  # Whichever you choose, the redirect URI below must be registered against the OAuth client in
-  # the OTDS administration console, character for character.
+  # Whichever you choose, the redirect URI below must be registered against the OAuth client with
+  # the provider, character for character.
   sso:
     enabled: ${SSO_ENABLED:false}
-    provider-name: ${SSO_PROVIDER_NAME:OpenText}
 
-    issuer-uri: ${OTDS_ISSUER_URI:}
-    client-id: ${OTDS_CLIENT_ID:}
-    client-secret: ${OTDS_CLIENT_SECRET:}
-    scopes: ${OTDS_SCOPES:openid,profile,email}
+    # Short id used in URLs, not shown to anyone. It is the last segment of both OAuth URLs, so
+    # the redirect URL ends /api/login/oauth2/code/<this>. Name it after the provider — otds,
+    # entra, okta — and the logs and the registered URL read for themselves.
+    provider-id: ${SSO_PROVIDER_ID:sso}
+
+    # What the button says: "Continue with <this>".
+    provider-name: ${SSO_PROVIDER_NAME:SSO}
+
+    issuer-uri: ${SSO_ISSUER_URI:}
+    client-id: ${SSO_CLIENT_ID:}
+    client-secret: ${SSO_CLIENT_SECRET:}
+    scopes: ${SSO_SCOPES:openid,profile,email}
 
     # {baseUrl} expands to this service's own scheme, host and port — correct behind a proxy only
-    # if forward-headers-strategy below is on. Pin it to a literal URL if in any doubt; OTDS
-    # compares it exactly.
-    redirect-uri: ${OTDS_REDIRECT_URI:{baseUrl}/api/login/oauth2/code/{registrationId}}
-    client-authentication-method: ${OTDS_CLIENT_AUTHENTICATION_METHOD:client_secret_basic}
+    # if forward-headers-strategy below is on. Pin it to a literal URL if in any doubt; providers
+    # compare it exactly.
+    redirect-uri: ${SSO_REDIRECT_URI:{baseUrl}/api/login/oauth2/code/{registrationId}}
+    client-authentication-method: ${SSO_CLIENT_AUTHENTICATION_METHOD:client_secret_basic}
 
     # Only needed when not using discovery.
-    authorization-uri: ${OTDS_AUTHORIZATION_URI:}
-    token-uri: ${OTDS_TOKEN_URI:}
-    user-info-uri: ${OTDS_USER_INFO_URI:}
-    jwk-set-uri: ${OTDS_JWK_SET_URI:}
+    authorization-uri: ${SSO_AUTHORIZATION_URI:}
+    token-uri: ${SSO_TOKEN_URI:}
+    user-info-uri: ${SSO_USER_INFO_URI:}
+    jwk-set-uri: ${SSO_JWK_SET_URI:}
 
     # The claim that identifies the person, and the claims searched in order for their address.
-    # An OTDS attribute mapping can put the address under any of these, so the second is a list.
-    user-name-attribute: ${OTDS_USER_NAME_ATTRIBUTE:sub}
-    email-claims: ${OTDS_EMAIL_CLAIMS:email,mail,upn,preferred_username}
+    # A provider's attribute mapping can put the address under any of these, so the second is a
+    # list.
+    user-name-attribute: ${SSO_USER_NAME_ATTRIBUTE:sub}
+    email-claims: ${SSO_EMAIL_CLAIMS:email,mail,upn,preferred_username}
 
     # Role given to an account created on first sign-in. Reading roles out of directory groups is
     # authorization, which this build does not do — promote from the admin screen.
@@ -60,12 +74,12 @@ app:
     # when nginx serves the UI and the API on one origin; give an absolute URL when it does not.
     login-success-uri: ${SSO_LOGIN_SUCCESS_URI:/sso/callback}
 
-    # OTDS end-session endpoint. Set it and signing out ends the OTDS session too, so the next
-    # sign-in asks for credentials instead of silently returning the same person.
-    logout-uri: ${OTDS_LOGOUT_URI:}
+    # The provider's end-session endpoint. Set it and signing out ends that session too, so the
+    # next sign-in asks for credentials instead of silently returning the same person.
+    logout-uri: ${SSO_LOGOUT_URI:}
 
-    # Lifetime of the single-use code the browser carries back from OTDS. It is redeemed by the
-    # page it lands on, immediately.
+    # Lifetime of the single-use code the browser carries back. It is redeemed by the page it
+    # lands on, immediately.
     code-ttl: ${SSO_CODE_TTL:PT1M}
 
 spring:

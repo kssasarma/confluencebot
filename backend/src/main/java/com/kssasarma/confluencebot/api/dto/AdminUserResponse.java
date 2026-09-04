@@ -11,15 +11,17 @@ public record AdminUserResponse(
         boolean enabled,
         boolean mustChangePassword,
         Instant createdAt,
-        /** Where the account came from: {@code LOCAL} or {@code OTDS}. */
+        /** Where the account came from: {@code LOCAL} or {@code SSO}. */
         String authProvider,
-        /** True once the account can sign in through the directory. */
+        /** Which identity provider it is linked to, or null if none. */
+        String ssoProviderId,
+        /** True once the account can sign in through a directory. */
         boolean ssoLinked
 ) {
     public static AdminUserResponse from(User u) {
         return new AdminUserResponse(
                 u.getId(), u.getEmail(), u.getRole().name(),
                 u.isEnabled(), u.isMustChangePassword(), u.getCreatedAt(),
-                u.getAuthProvider().name(), u.isSsoLinked());
+                u.getAuthProvider().name(), u.getSsoProviderId(), u.isSsoLinked());
     }
 }

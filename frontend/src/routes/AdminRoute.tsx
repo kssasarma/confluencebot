@@ -242,7 +242,7 @@ function UsersTab() {
                     {/* Worth a column of its own: a directory account has no password here, so
                         there is nothing to reset and nothing to hand somebody who is locked out. */}
                     {user.ssoLinked
-                      ? (user.authProvider === 'OTDS' ? 'Directory' : 'Password or directory')
+                      ? (user.authProvider === 'SSO' ? 'Directory' : 'Password or directory')
                       : 'Password'}
                   </td>
                   <td className="py-2.5 pr-4">

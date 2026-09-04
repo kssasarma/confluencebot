@@ -65,7 +65,9 @@ class SsoServiceImplTest {
 
         assertThat(status.enabled()).isFalse();
         // Not even the provider's name: a signed-out visitor has not earned a description of the
-        // directory this deployment happens to sit behind.
+        // directory this deployment happens to sit behind. The password form is rendered from
+        // this same answer, so "off" has to be a complete answer rather than a missing one.
+        assertThat(status.providerId()).isNull();
         assertThat(status.providerName()).isNull();
         assertThat(status.authorizationUrl()).isNull();
     }
@@ -75,18 +77,29 @@ class SsoServiceImplTest {
         SsoStatusResponse status = service.describe();
 
         assertThat(status.enabled()).isTrue();
+        assertThat(status.providerId()).isEqualTo("otds");
         assertThat(status.providerName()).isEqualTo("OpenText");
         assertThat(status.authorizationUrl()).isEqualTo("/api/oauth2/authorization/otds");
         assertThat(status.logoutUrl()).isNull();
     }
 
     @Test
-    void aConfiguredEndSessionEndpointIsPassedOnSoSigningOutReachesTheProvider() {
-        SsoServiceImpl withLogout = new SsoServiceImpl(
-                SsoPropertiesFixture.aProvider().logoutUri("https://otds.example.com/otdsws/logout").build(),
+    void theStartUrlFollowsWhicheverProviderIdTheDeploymentChose() {
+        SsoServiceImpl entra = new SsoServiceImpl(
+                SsoPropertiesFixture.aProvider().providerId("entra").providerName("Microsoft").build(),
                 loginCodeRepository, tokenIssuer);
 
-        assertThat(withLogout.describe().logoutUrl()).isEqualTo("https://otds.example.com/otdsws/logout");
+        assertThat(entra.describe().authorizationUrl()).isEqualTo("/api/oauth2/authorization/entra");
+        assertThat(entra.describe().providerId()).isEqualTo("entra");
+    }
+
+    @Test
+    void aConfiguredEndSessionEndpointIsPassedOnSoSigningOutReachesTheProvider() {
+        SsoServiceImpl withLogout = new SsoServiceImpl(
+                SsoPropertiesFixture.aProvider().logoutUri("https://idp.example.com/logout").build(),
+                loginCodeRepository, tokenIssuer);
+
+        assertThat(withLogout.describe().logoutUrl()).isEqualTo("https://idp.example.com/logout");
     }
 
     @Test

@@ -24,6 +24,8 @@ export interface AuthResponse {
  */
 export interface SsoConfig {
   enabled: boolean
+  /** Identifies which provider a session came from. Null when SSO is off. */
+  providerId: string | null
   /** What to call the provider on the button. Null when SSO is off. */
   providerName: string | null
   /** Where to send the browser to begin. Null when SSO is off. */

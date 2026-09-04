@@ -7,7 +7,7 @@ public interface UserRepository extends JpaRepository<User, Long> {
     Optional<User> findByEmail(String email);
 
     /**
-     * Used by the OTDS sign-in path, where the address is whatever the directory happens to emit.
+     * Used by the single sign-on path, where the address is whatever the directory happens to emit.
      *
      * <p>A directory that returns {@code Jane.Doe@corp.example} for an account onboarded here as
      * {@code jane.doe@corp.example} is describing the same person, and matching case-sensitively
@@ -16,8 +16,11 @@ public interface UserRepository extends JpaRepository<User, Long> {
      */
     Optional<User> findByEmailIgnoreCase(String email);
 
-    /** The stable link to an OTDS identity: the subject claim, not the address. */
-    Optional<User> findByExternalId(String externalId);
+    /**
+     * The stable link to a directory identity: the subject claim, not the address — and scoped to
+     * the provider that issued it, because a subject is only unique within its own directory.
+     */
+    Optional<User> findBySsoProviderIdAndExternalId(String ssoProviderId, String externalId);
 
     boolean existsByEmail(String email);
 }

@@ -19,7 +19,7 @@ import org.springframework.security.web.SecurityFilterChain;
  * <p>The handshake gets a filter chain of its own, ahead of the application's. The two want
  * opposite things from a session: the API is stateless and must stay that way, while the
  * authorization-code flow has to remember the {@code state} and PKCE verifier it generated across
- * a round trip through the browser to OTDS and back. Scoping a session-bearing chain to the two
+ * a round trip through the browser to the provider and back. Scoping a session-bearing chain to the two
  * OAuth URLs buys that memory for the twenty seconds it is needed without any of it leaking into
  * how the rest of the application is authenticated.
  *
@@ -35,13 +35,17 @@ import org.springframework.security.web.SecurityFilterChain;
 public class SsoSecurityConfig {
 
     /**
-     * Resolved once at startup. When discovery is in use this is the call that reads OTDS's
-     * metadata, so a mistyped issuer or an unreachable directory fails the deployment rather than
-     * the first person who tries to sign in.
+     * Resolved once at startup. When discovery is in use this is the call that reads the
+     * provider's metadata, so a mistyped issuer or an unreachable directory fails the deployment
+     * rather than the first person who tries to sign in.
+     *
+     * <p>A repository holds a collection, and this one holds a single registration only because a
+     * single provider is configured. Offering a second is a matter of building a second
+     * registration and passing it here; nothing downstream of this bean knows how many there are.
      */
     @Bean
     public ClientRegistrationRepository clientRegistrationRepository(SsoProperties properties) {
-        return new InMemoryClientRegistrationRepository(OtdsClientRegistrationFactory.create(properties));
+        return new InMemoryClientRegistrationRepository(SsoClientRegistrationFactory.create(properties));
     }
 
     @Bean
@@ -63,6 +67,8 @@ public class SsoSecurityConfig {
                                               SsoLoginSuccessHandler successHandler,
                                               SsoLoginFailureHandler failureHandler) throws Exception {
         return http
+                // Wildcards rather than the configured provider id: the id is a deployment's to
+                // choose, and a chain that matched only one would stop routing the moment it changed.
                 .securityMatcher(SsoProperties.AUTHORIZATION_BASE_URI + "/*",
                                  SsoProperties.REDIRECTION_BASE_URI)
                 // Both URLs are top-level browser navigations, not requests the application makes:

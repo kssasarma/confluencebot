@@ -16,10 +16,10 @@ import java.util.UUID;
  * Mints the credential pair a signed-in client carries.
  *
  * <p>Extracted from {@link AuthServiceImpl} once single sign-on became a second way to arrive at a
- * session: a password login and an OTDS login differ entirely in how identity is established and
- * not at all in what is handed back afterwards, and the half they share is the half that must not
- * drift — an access token minted one way and a refresh token recorded the other is a session that
- * cannot be rotated.
+ * session: a password login and a directory login differ entirely in how identity is established
+ * and not at all in what is handed back afterwards, and the half they share is the half that must
+ * not drift — an access token minted one way and a refresh token recorded the other is a session
+ * that cannot be rotated.
  */
 @Component
 @Transactional

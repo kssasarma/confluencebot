@@ -22,7 +22,7 @@ public class User implements UserDetails {
     /**
      * BCrypt hash, or null for an account that has no password here at all.
      *
-     * <p>Null is how an OTDS-provisioned account is represented: there is nothing to verify
+     * <p>Null is how a directory-provisioned account is represented: there is nothing to verify
      * locally, and nothing to leak. A password sign-in attempt against one still runs the normal
      * path and fails as bad credentials, because no raw password matches an absent hash.
      */
@@ -45,7 +45,18 @@ public class User implements UserDetails {
     private AuthProvider authProvider = AuthProvider.LOCAL;
 
     /**
-     * The OTDS subject this account is linked to, or null if it has never signed in that way.
+     * Which identity provider {@link #externalId} belongs to — the configured
+     * {@code app.sso.provider-id}, or null for an account that has never signed in that way.
+     *
+     * <p>Stored rather than assumed because a subject is only unique within the provider that
+     * issued it: two directories can both call somebody {@code 12345}, and a deployment that
+     * changes provider must not seat the new directory's users in the old one's accounts.
+     */
+    @Column(name = "sso_provider_id", length = 64)
+    private String ssoProviderId;
+
+    /**
+     * The subject this account is linked to, or null if it has never signed in through a provider.
      *
      * <p>Keyed on the subject rather than the address because a directory can rename a mailbox
      * without it becoming a different person, and because two identities must never collapse into
@@ -75,10 +86,11 @@ public class User implements UserDetails {
     public UserRole getRole() { return role; }
     public boolean isMustChangePassword() { return mustChangePassword; }
     public AuthProvider getAuthProvider() { return authProvider; }
+    public String getSsoProviderId() { return ssoProviderId; }
     public String getExternalId() { return externalId; }
     public Instant getCreatedAt() { return createdAt; }
 
-    /** True once this account can sign in through OTDS. */
+    /** True once this account can sign in through an identity provider. */
     public boolean isSsoLinked() { return externalId != null; }
 
     /** True when there is no password to change, verify or reset here. */
@@ -90,5 +102,6 @@ public class User implements UserDetails {
     public void setEnabled(boolean enabled) { this.enabled = enabled; }
     public void setMustChangePassword(boolean mustChangePassword) { this.mustChangePassword = mustChangePassword; }
     public void setAuthProvider(AuthProvider authProvider) { this.authProvider = authProvider; }
+    public void setSsoProviderId(String ssoProviderId) { this.ssoProviderId = ssoProviderId; }
     public void setExternalId(String externalId) { this.externalId = externalId; }
 }

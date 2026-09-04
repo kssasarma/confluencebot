@@ -5,7 +5,8 @@ import {
   refreshSession, revokeSession, getSsoConfig, exchangeSsoCode,
 } from '../services/authService'
 import {
-  clearSession, getRefreshToken, getToken, isSsoSession, markSsoSession, onSessionChange, storeSession,
+  clearSession, getRefreshToken, getSsoSessionProvider, getToken, markSsoSession, onSessionChange,
+  storeSession,
 } from '../lib/token'
 import { clearSsoHandoff, readSsoHandoff } from '../lib/sso'
 
@@ -115,7 +116,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (handoff?.code) {
       exchangeSsoCode(handoff.code)
         .then(session => {
-          markSsoSession()
+          if (handoff.providerId) markSsoSession(handoff.providerId)
           applySession(session)
         })
         .catch(error => setSsoError(
@@ -176,17 +177,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(() => {
     const refreshToken = getRefreshToken()
     // Read before clearing: clearing the session is what forgets where it came from.
-    const cameFromProvider = isSsoSession()
+    const sessionProvider = getSsoSessionProvider()
     const revoked = refreshToken ? revokeSession(refreshToken) : Promise.resolve()
     clearSession()
 
     // Ending the session here is not ending the one at the provider. Without this, signing out and
     // signing back in returns the same person with nothing asked of them, which does not look like
-    // signing out at all. Only for a session that actually came from the provider, though: someone
-    // who signed in with a password has no provider session to end. The revoke is given a chance
-    // to land before the browser leaves.
+    // signing out at all. Only for a session that came from the provider now configured, though:
+    // somebody who signed in with a password has no provider session to end, and one left over
+    // from a provider this deployment no longer points at is not ours to end either.
     const logoutUrl = sso?.logoutUrl
-    if (logoutUrl && cameFromProvider) void revoked.finally(() => window.location.assign(logoutUrl))
+    if (logoutUrl && sessionProvider && sessionProvider === sso?.providerId) {
+      void revoked.finally(() => window.location.assign(logoutUrl))
+    }
   }, [sso])
 
   return (

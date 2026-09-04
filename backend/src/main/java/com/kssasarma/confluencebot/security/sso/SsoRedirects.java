@@ -2,14 +2,15 @@ package com.kssasarma.confluencebot.security.sso;
 
 import com.kssasarma.confluencebot.config.SsoProperties;
 import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
-
-import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /**
- * Builds the URL the browser lands on when it comes back from OTDS.
+ * Builds the URL the browser lands on when it comes back from the identity provider.
  *
  * <p>The result is always carried in the fragment. A fragment is never sent to a server — not to
  * this one, not in the {@code Referer} of whatever the page loads next — so the single-use code
@@ -24,13 +25,39 @@ final class SsoRedirects {
     /** Fragment parameter carrying a message to show on the sign-in screen on failure. */
     static final String ERROR_PARAM = "sso_error";
 
+    /** Fragment parameter naming the provider that answered. */
+    static final String PROVIDER_PARAM = "sso_provider";
+
     private SsoRedirects() {
     }
 
-    static String targetUrl(SsoProperties properties, HttpServletRequest request,
-                            String parameter, String value) {
-        return resolveBase(properties, request)
-                + "#" + parameter + "=" + URLEncoder.encode(value, StandardCharsets.UTF_8);
+    /**
+     * The provider is sent alongside the code because signing out has to know where this session
+     * came from. A deployment can be re-pointed at a different directory, and a stale marker
+     * saying only "this was an SSO session" would send the next sign-out to the wrong provider.
+     */
+    static String successUrl(SsoProperties properties, HttpServletRequest request,
+                             String code, String providerId) {
+        Map<String, String> fragment = new LinkedHashMap<>();
+        fragment.put(CODE_PARAM, code);
+        fragment.put(PROVIDER_PARAM, providerId);
+        return build(properties, request, fragment);
+    }
+
+    static String errorUrl(SsoProperties properties, HttpServletRequest request, String message) {
+        return build(properties, request, Map.of(ERROR_PARAM, message));
+    }
+
+    private static String build(SsoProperties properties, HttpServletRequest request,
+                                Map<String, String> fragment) {
+        StringBuilder url = new StringBuilder(resolveBase(properties, request)).append('#');
+        String separator = "";
+        for (Map.Entry<String, String> entry : fragment.entrySet()) {
+            url.append(separator).append(entry.getKey()).append('=')
+                    .append(URLEncoder.encode(entry.getValue(), StandardCharsets.UTF_8));
+            separator = "&";
+        }
+        return url.toString();
     }
 
     /**

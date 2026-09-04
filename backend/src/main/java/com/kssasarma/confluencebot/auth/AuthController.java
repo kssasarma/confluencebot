@@ -49,7 +49,8 @@ public class AuthController {
 
     @Operation(summary = "Describe the single sign-on provider, if one is configured",
             description = "Read by the sign-in screen before anyone has authenticated, to decide "
-                    + "whether to offer a directory sign-in and where to send the browser.")
+                    + "whether to offer a directory sign-in alongside the password form and where "
+                    + "to send the browser. The password form is offered either way.")
     @GetMapping("/sso")
     public SsoStatusResponse sso() {
         return ssoService.describe();

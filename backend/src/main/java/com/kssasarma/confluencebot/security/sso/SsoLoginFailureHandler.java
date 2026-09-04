@@ -20,7 +20,7 @@ import java.io.IOException;
  *
  * <p>The error <em>code</em> travels — {@code invalid_grant}, {@code invalid_client},
  * {@code access_denied} — because it is the single most useful thing to be able to read off a
- * screen and quote to whoever administers OTDS. The provider's free-text description does not: it
+ * screen and quote to whoever administers the directory. The free-text description does not: it
  * is written for a developer, arrives unsanitised from another system, and has a habit of
  * containing internal host names.
  */
@@ -38,10 +38,10 @@ class SsoLoginFailureHandler implements AuthenticationFailureHandler {
     @Override
     public void onAuthenticationFailure(HttpServletRequest request, HttpServletResponse response,
                                         AuthenticationException exception) throws IOException {
-        log.warn("OTDS sign-in failed: {}", exception.getMessage(), exception);
+        log.warn("Single sign-on failed: {}", exception.getMessage(), exception);
 
         redirectStrategy.sendRedirect(request, response,
-                SsoRedirects.targetUrl(properties, request, SsoRedirects.ERROR_PARAM, message(exception)));
+                SsoRedirects.errorUrl(properties, request, message(exception)));
     }
 
     private String message(AuthenticationException exception) {

@@ -17,11 +17,11 @@ import static org.mockito.Mockito.mock;
 /**
  * That switching single sign-on off leaves nothing behind.
  *
- * <p>This is the promise made to every deployment that does not use OTDS: adding the feature added
- * an OAuth client library to the classpath, and if any of it were wired up unconditionally then a
- * blank {@code OTDS_ISSUER_URI} would become a startup failure for people who never asked for the
- * feature. The condition is what stops that, and a condition nothing asserts is a condition that
- * quietly stops applying.
+ * <p>This is the promise made to every deployment that signs in with passwords alone: adding the
+ * feature added an OAuth client library to the classpath, and if any of it were wired up
+ * unconditionally then a blank {@code SSO_ISSUER_URI} would become a startup failure for people
+ * who never asked for the feature. The condition is what stops that, and a condition nothing
+ * asserts is a condition that quietly stops applying.
  */
 class SsoSecurityConfigTest {
 
@@ -58,11 +58,12 @@ class SsoSecurityConfigTest {
     void switchedOnTheProviderIsRegisteredFromTheConfiguredEndpoints() {
         runner.withPropertyValues(
                 "app.sso.enabled=true",
+                "app.sso.provider-id=otds",
                 "app.sso.client-id=confluence-bot",
                 "app.sso.client-secret=s3cret",
-                "app.sso.authorization-uri=https://otds.example.com/otdsws/oauth2/auth",
-                "app.sso.token-uri=https://otds.example.com/otdsws/oauth2/token",
-                "app.sso.jwk-set-uri=https://otds.example.com/otdsws/oauth2/jwks"
+                "app.sso.authorization-uri=https://idp.example.com/oauth2/auth",
+                "app.sso.token-uri=https://idp.example.com/oauth2/token",
+                "app.sso.jwk-set-uri=https://idp.example.com/oauth2/jwks"
         ).run(context -> {
             assertThat(context).hasNotFailed();
             assertThat(context).hasSingleBean(ClientRegistrationRepository.class);
@@ -70,7 +71,7 @@ class SsoSecurityConfigTest {
             assertThat(context).hasSingleBean(SsoLoginFailureHandler.class);
 
             ClientRegistrationRepository registrations = context.getBean(ClientRegistrationRepository.class);
-            assertThat(registrations.findByRegistrationId(SsoProperties.REGISTRATION_ID)).isNotNull();
+            assertThat(registrations.findByRegistrationId("otds")).isNotNull();
         });
     }
 

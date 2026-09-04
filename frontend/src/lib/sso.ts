@@ -10,12 +10,15 @@
 
 const CODE_PARAM = 'sso_code'
 const ERROR_PARAM = 'sso_error'
+const PROVIDER_PARAM = 'sso_provider'
 
 export interface SsoHandoff {
   /** Exchange this, once, for a normal token pair. */
   code?: string
   /** A message to show on the sign-in screen instead. */
   error?: string
+  /** Which provider answered, so signing out later can end that session too. */
+  providerId?: string
 }
 
 /** Returns what the provider sent back, or null when this is an ordinary page load. */
@@ -28,7 +31,11 @@ export function readSsoHandoff(): SsoHandoff | null {
   const error = params.get(ERROR_PARAM)
   if (!code && !error) return null
 
-  return { code: code ?? undefined, error: error ?? undefined }
+  return {
+    code: code ?? undefined,
+    error: error ?? undefined,
+    providerId: params.get(PROVIDER_PARAM) ?? undefined,
+  }
 }
 
 /**
