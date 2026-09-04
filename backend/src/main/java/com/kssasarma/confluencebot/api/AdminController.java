@@ -150,6 +150,7 @@ public class AdminController {
         if (raw == null || raw.isEmpty()) return Set.of(UserRole.USER);
         Set<UserRole> parsed = new LinkedHashSet<>();
         for (String value : raw) {
+            if (value == null) throw new IllegalArgumentException("Role must not be null");
             parsed.add(UserRole.valueOf(value.toUpperCase()));
         }
         return parsed;

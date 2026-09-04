@@ -19,6 +19,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -142,6 +143,18 @@ class AdminControllerTest {
     }
 
     @Test
+    void createUser_nullRoleInList_returnsBadRequestRatherThanCrashing() {
+        when(userRepository.existsByEmail("bad@example.com")).thenReturn(false);
+
+        ResponseEntity<?> response = controller.createUser(
+                new AdminUserRequest("bad@example.com", Arrays.asList("ADMIN", null), null),
+                asAdmin("admin@example.com"));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        verify(userRepository, never()).save(any());
+    }
+
+    @Test
     void createUser_emailAlreadyInUse_returnsConflict() {
         when(userRepository.existsByEmail("dup@example.com")).thenReturn(true);
 
@@ -219,6 +232,15 @@ class AdminControllerTest {
         ResponseEntity<?> response = controller.updateRoles(2L, Map.of(), asAdmin("admin@example.com"));
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+    }
+
+    @Test
+    void updateRoles_nullRoleInList_returnsBadRequestRatherThanCrashing() {
+        ResponseEntity<?> response = controller.updateRoles(2L, Map.of("roles", Arrays.asList("USER", null)),
+                asAdmin("admin@example.com"));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        verify(userRepository, never()).findById(any());
     }
 
     @Test

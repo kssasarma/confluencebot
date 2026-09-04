@@ -57,6 +57,12 @@ public class MailConfig {
         props.put("mail.smtp.auth", String.valueOf(smtpAuth));
         props.put("mail.smtp.starttls.enable", String.valueOf(startTlsEnable));
         props.put("mail.smtp.starttls.required", String.valueOf(startTlsRequired));
+        // JavaMail has no timeout by default, so an unreachable relay would otherwise hang the
+        // caller (createUser sends the welcome email synchronously) for the OS TCP timeout,
+        // which can be a minute or more.
+        props.put("mail.smtp.connectiontimeout", "5000");
+        props.put("mail.smtp.timeout", "5000");
+        props.put("mail.smtp.writetimeout", "5000");
 
         return sender;
     }
