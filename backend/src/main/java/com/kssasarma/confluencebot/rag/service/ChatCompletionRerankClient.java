@@ -46,16 +46,23 @@ public class ChatCompletionRerankClient implements RerankClient {
     static List<Integer> parseOrder(String response, int documentCount) {
         if (response == null) throw new IllegalArgumentException("Chat re-rank returned no content");
         Matcher matcher = JSON_ARRAY.matcher(response);
-        if (!matcher.find()) {
-            throw new IllegalArgumentException("Chat re-rank did not return a JSON index array");
+        while (matcher.find()) {
+            List<Integer> order = parseCandidate(matcher.group(1), documentCount);
+            if (order != null) return order;
         }
+        throw new IllegalArgumentException("Chat re-rank did not return a complete JSON index array");
+    }
 
-        String values = matcher.group(1).trim();
+    /**
+     * A chat model can mention a partial ordering before its final JSON answer. Each array is
+     * considered until a complete, zero-based permutation is found.
+     */
+    private static List<Integer> parseCandidate(String candidate, int documentCount) {
+        String values = candidate.trim();
         if (values.isEmpty() && documentCount == 0) return List.of();
         String[] parts = values.split("\\s*,\\s*");
         if (parts.length != documentCount) {
-            throw new IllegalArgumentException("Chat re-rank returned " + parts.length
-                    + " indexes for " + documentCount + " excerpts");
+            return null;
         }
 
         List<Integer> order = new ArrayList<>(documentCount);
@@ -65,10 +72,10 @@ public class ChatCompletionRerankClient implements RerankClient {
             try {
                 index = Integer.parseInt(part.trim());
             } catch (NumberFormatException e) {
-                throw new IllegalArgumentException("Chat re-rank returned a non-integer index", e);
+                return null;
             }
             if (index < 0 || index >= documentCount || seen[index]) {
-                throw new IllegalArgumentException("Chat re-rank returned an invalid index: " + index);
+                return null;
             }
             seen[index] = true;
             order.add(index);

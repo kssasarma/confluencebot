@@ -25,6 +25,27 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         this.userDetailsService = userDetailsService;
     }
 
+    /**
+     * A {@code SseEmitter} completes through an async redispatch. {@link OncePerRequestFilter}
+     * skips that dispatcher type by default, which leaves the fresh security context anonymous
+     * even though the original request carried a valid bearer token. Re-authenticate from the
+     * request header rather than permitting an unauthenticated async dispatch.
+     */
+    @Override
+    protected boolean shouldNotFilterAsyncDispatch() {
+        return false;
+    }
+
+    /**
+     * An error dispatch can follow an SSE response that has already started. It needs the same
+     * authentication restoration as the async dispatch so the security layer does not turn the
+     * original error into a second, committed-response authorization failure.
+     */
+    @Override
+    protected boolean shouldNotFilterErrorDispatch() {
+        return false;
+    }
+
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {

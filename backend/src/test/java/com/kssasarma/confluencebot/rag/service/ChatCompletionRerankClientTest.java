@@ -40,13 +40,19 @@ class ChatCompletionRerankClientTest {
     }
 
     @Test
-    void rejectsAnIncompleteOrDuplicateOrder() {
+    void skipsAnInvalidArrayBeforeTheCompleteOrder() {
+        assertThat(ChatCompletionRerankClient.parseOrder("Considering [0, 1], final: [2, 0, 1]", 3))
+                .containsExactly(2, 0, 1);
+    }
+
+    @Test
+    void rejectsAResponseWithoutACompletePermutation() {
         assertThatThrownBy(() -> ChatCompletionRerankClient.parseOrder("[1, 1, 0]", 3))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("invalid index");
+                .hasMessageContaining("complete JSON index array");
         assertThatThrownBy(() -> ChatCompletionRerankClient.parseOrder("[1, 0]", 3))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("indexes");
+                .hasMessageContaining("complete JSON index array");
     }
 
     @Test

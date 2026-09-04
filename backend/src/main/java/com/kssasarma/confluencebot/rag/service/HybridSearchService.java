@@ -76,7 +76,7 @@ public class HybridSearchService {
 
         List<RetrievedChunk> reranked = reRankingService.rerank(query, queryEmbedding, fused, topK);
 
-        log.info("Hybrid search: {} dense + {} lexical → {} final chunks after re-ranking",
+        log.info("Hybrid search: {} dense + {} lexical → {} final chunks after ranking",
             denseResults.size(), lexicalResults.size(), reranked.size());
         return reranked;
     }
