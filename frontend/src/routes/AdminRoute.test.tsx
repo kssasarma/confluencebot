@@ -44,8 +44,8 @@ function json(body: unknown, status = 200): Response {
   })
 }
 
-function makeFetchMock(options: { meRoles: string[]; users?: StubUser[]; jobs?: unknown[] }) {
-  const { meRoles, users = [], jobs = [] } = options
+function makeFetchMock(options: { meRoles: string[]; users?: StubUser[]; jobs?: unknown[]; emailSent?: boolean }) {
+  const { meRoles, users = [], jobs = [], emailSent = true } = options
   return vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(
     async (input, init) => {
       const url = String(input)
@@ -63,6 +63,7 @@ function makeFetchMock(options: { meRoles: string[]; users?: StubUser[]; jobs?: 
             enabled: true, mustChangePassword: true, createdAt: '2026-09-04T00:00:00Z',
           },
           tempPassword: 'temp-pass-123',
+          emailSent,
         }, 201)
       }
       const rolesMatch = url.match(/\/admin\/users\/(\d+)\/roles$/)
@@ -200,5 +201,32 @@ describe('AdminRoute user creation', () => {
       email: 'new.hire@example.com',
       roles: ['USER', 'INGESTOR'],
     })
+  })
+
+  it('tells the admin the welcome email was sent instead of showing the password', async () => {
+    seedToken()
+    vi.stubGlobal('fetch', makeFetchMock({ meRoles: ['ADMIN'], users: [], emailSent: true }))
+
+    renderWithProviders(<AdminRoute />, { route: '/admin' })
+
+    await userEvent.type(await screen.findByLabelText(/email/i), 'new.hire@example.com')
+    await userEvent.click(await screen.findByRole('button', { name: /add user/i }))
+
+    const banner = await screen.findByRole('status')
+    expect(within(banner).getByText(/sign-in instructions were emailed/i)).toBeInTheDocument()
+    expect(within(banner).queryByText('temp-pass-123')).not.toBeInTheDocument()
+  })
+
+  it('falls back to showing the password when the welcome email could not be sent', async () => {
+    seedToken()
+    vi.stubGlobal('fetch', makeFetchMock({ meRoles: ['ADMIN'], users: [], emailSent: false }))
+
+    renderWithProviders(<AdminRoute />, { route: '/admin' })
+
+    await userEvent.type(await screen.findByLabelText(/email/i), 'new.hire@example.com')
+    await userEvent.click(await screen.findByRole('button', { name: /add user/i }))
+
+    const banner = await screen.findByRole('status')
+    expect(within(banner).getByText('temp-pass-123')).toBeInTheDocument()
   })
 })

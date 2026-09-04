@@ -138,14 +138,14 @@ function UsersTab() {
 
   const [email, setEmail] = useState('')
   const [roles, setRoles] = useState<AdminRole[]>(['USER'])
-  const [created, setCreated] = useState<{ email: string; tempPassword: string } | null>(null)
+  const [created, setCreated] = useState<{ email: string; tempPassword: string; emailSent: boolean } | null>(null)
 
   const users = useQuery({ queryKey: queryKeys.adminUsers, queryFn: listUsers })
 
   const create = useMutation({
     mutationFn: () => createUser(email.trim(), roles),
     onSuccess: result => {
-      setCreated({ email: result.user.email, tempPassword: result.tempPassword })
+      setCreated({ email: result.user.email, tempPassword: result.tempPassword, emailSent: result.emailSent })
       setEmail('')
       setRoles(['USER'])
       void queryClient.invalidateQueries({ queryKey: queryKeys.adminUsers })
@@ -178,17 +178,27 @@ function UsersTab() {
       {created && (
         <div role="status" className="rounded-lg border border-success/40 bg-success-soft p-4 text-sm">
           <p className="mb-1 font-medium text-success-emphasis">User created</p>
-          <p className="text-muted-foreground">
-            Email: <span className="font-mono text-foreground">{created.email}</span>
-          </p>
-          <p className="text-muted-foreground">
-            Temporary password:{' '}
-            <span className="font-mono text-foreground">{created.tempPassword}</span>
-          </p>
-          <p className="mt-1 text-2xs text-muted-foreground">
-            Share this over a secure channel. It is shown once, and the user must change it at
-            first sign-in.
-          </p>
+          {created.emailSent ? (
+            <p className="text-muted-foreground">
+              Sign-in instructions were emailed to{' '}
+              <span className="font-mono text-foreground">{created.email}</span>. No need to
+              share a password yourself.
+            </p>
+          ) : (
+            <>
+              <p className="text-muted-foreground">
+                Email: <span className="font-mono text-foreground">{created.email}</span>
+              </p>
+              <p className="text-muted-foreground">
+                Temporary password:{' '}
+                <span className="font-mono text-foreground">{created.tempPassword}</span>
+              </p>
+              <p className="mt-1 text-2xs text-muted-foreground">
+                We couldn't email this — mail may not be configured. Share it over a secure
+                channel; it is shown once, and the user must change it at first sign-in.
+              </p>
+            </>
+          )}
           <Button size="sm" variant="ghost" className="mt-2" onClick={() => setCreated(null)}>
             Dismiss
           </Button>

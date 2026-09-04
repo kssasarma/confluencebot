@@ -2,6 +2,7 @@ package com.kssasarma.confluencebot.api;
 
 import com.kssasarma.confluencebot.api.dto.AdminUserRequest;
 import com.kssasarma.confluencebot.api.dto.AdminUserResponse;
+import com.kssasarma.confluencebot.email.EmailService;
 import com.kssasarma.confluencebot.user.User;
 import com.kssasarma.confluencebot.user.UserRepository;
 import com.kssasarma.confluencebot.user.UserRole;
@@ -34,11 +35,13 @@ public class AdminController {
     private static final Logger logger = LoggerFactory.getLogger(AdminController.class);
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
+    private final EmailService emailService;
     private final SecureRandom secureRandom = new SecureRandom();
 
-    public AdminController(UserRepository userRepository, PasswordEncoder passwordEncoder) {
+    public AdminController(UserRepository userRepository, PasswordEncoder passwordEncoder, EmailService emailService) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
+        this.emailService = emailService;
     }
 
     @Operation(summary = "List all users")
@@ -77,9 +80,11 @@ public class AdminController {
         user.setMustChangePassword(true);
 
         User saved = userRepository.save(user);
-        logger.info("Admin {} created new user {} with roles {}", auth.getName(), request.email(), roles);
+        boolean emailSent = emailService.sendWelcomeEmail(request.email(), tempPassword);
+        logger.info("Admin {} created new user {} with roles {} (welcome email {})",
+                auth.getName(), request.email(), roles, emailSent ? "sent" : "not sent");
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(Map.of("user", AdminUserResponse.from(saved), "tempPassword", tempPassword));
+                .body(Map.of("user", AdminUserResponse.from(saved), "tempPassword", tempPassword, "emailSent", emailSent));
     }
 
     @Operation(summary = "Enable or disable a user account")

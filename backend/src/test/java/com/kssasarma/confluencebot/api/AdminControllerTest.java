@@ -2,6 +2,7 @@ package com.kssasarma.confluencebot.api;
 
 import com.kssasarma.confluencebot.api.dto.AdminUserRequest;
 import com.kssasarma.confluencebot.api.dto.AdminUserResponse;
+import com.kssasarma.confluencebot.email.EmailService;
 import com.kssasarma.confluencebot.user.User;
 import com.kssasarma.confluencebot.user.UserRepository;
 import com.kssasarma.confluencebot.user.UserRole;
@@ -25,6 +26,7 @@ import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -38,12 +40,13 @@ class AdminControllerTest {
 
     @Mock private UserRepository userRepository;
     @Mock private PasswordEncoder passwordEncoder;
+    @Mock private EmailService emailService;
 
     private AdminController controller;
 
     @BeforeEach
     void setUp() {
-        controller = new AdminController(userRepository, passwordEncoder);
+        controller = new AdminController(userRepository, passwordEncoder, emailService);
     }
 
     private static Authentication asAdmin(String email) {
@@ -94,6 +97,36 @@ class AdminControllerTest {
         Map<String, Object> body = bodyOf(response);
         AdminUserResponse created = (AdminUserResponse) body.get("user");
         assertThat(created.roles()).containsExactlyInAnyOrder("INGESTOR", "USER");
+    }
+
+    @Test
+    void createUser_emailSendSucceeds_reportsEmailSentTrue() {
+        when(userRepository.existsByEmail("new@example.com")).thenReturn(false);
+        when(passwordEncoder.encode(any())).thenReturn("hashed");
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(emailService.sendWelcomeEmail(eq("new@example.com"), any())).thenReturn(true);
+
+        ResponseEntity<?> response = controller.createUser(
+                new AdminUserRequest("new@example.com", null, null), asAdmin("admin@example.com"));
+
+        Map<String, Object> body = bodyOf(response);
+        assertThat(body.get("emailSent")).isEqualTo(true);
+    }
+
+    @Test
+    void createUser_emailSendFails_stillCreatesUserAndReportsEmailSentFalse() {
+        when(userRepository.existsByEmail("new@example.com")).thenReturn(false);
+        when(passwordEncoder.encode(any())).thenReturn("hashed");
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(emailService.sendWelcomeEmail(eq("new@example.com"), any())).thenReturn(false);
+
+        ResponseEntity<?> response = controller.createUser(
+                new AdminUserRequest("new@example.com", null, null), asAdmin("admin@example.com"));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        Map<String, Object> body = bodyOf(response);
+        assertThat(body.get("emailSent")).isEqualTo(false);
+        assertThat(body.get("tempPassword")).isNotNull();
     }
 
     @Test

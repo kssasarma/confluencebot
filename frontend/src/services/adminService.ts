@@ -23,6 +23,8 @@ export interface AdminUser {
 export interface CreateUserResult {
   user: AdminUser
   tempPassword: string
+  /** Whether the welcome email carrying the temp password reached the user. */
+  emailSent: boolean
 }
 
 export interface IngestionJob {
