@@ -343,11 +343,14 @@ change here.
 ### Setting it up
 
 **1. Register an OAuth client with your identity provider.** It needs the authorization code grant
-and this redirect URL, where `<provider-id>` is whatever you set `SSO_PROVIDER_ID` to:
+and this redirect URL:
 
 ```
-https://your-host/api/login/oauth2/code/<provider-id>
+https://your-host/api/login/oauth2/code/otds
 ```
+
+The last segment is `SSO_PROVIDER_ID`, which defaults to `otds`. Change it and this URL changes
+with it, so register whichever you settle on.
 
 Under `/api` on purpose — the bundled nginx already proxies `/api` and nothing else, so SSO needs
 no new proxy rule. Providers compare the URL exactly, so scheme, host, port and path all have to
@@ -355,15 +358,15 @@ match what the browser will actually use.
 
 **2. Point this application at it**, one of two ways.
 
-*Discovery* — the shorter configuration, and the one that survives the provider moving a path:
+*Discovery* — the shorter configuration, and the one that survives the provider moving a path.
+`SSO_PROVIDER_ID` and `SSO_PROVIDER_NAME` default to `otds` and `OpenText`, so an OTDS deployment
+sets neither:
 
 ```dotenv
 SSO_ENABLED=true
-SSO_PROVIDER_ID=otds
-SSO_PROVIDER_NAME=OpenText
 SSO_ISSUER_URI=https://otds.example.com/otdsws/oauth2
 SSO_CLIENT_ID=confluence-chatbot
-SSO_CLIENT_SECRET=the-secret-the-provider-generated
+SSO_CLIENT_SECRET=the-secret-otds-generated
 ```
 
 The endpoints, the JWKS location and the signing algorithms are read from
@@ -375,10 +378,8 @@ this service reach it under different host names. Nothing is fetched:
 
 ```dotenv
 SSO_ENABLED=true
-SSO_PROVIDER_ID=otds
-SSO_PROVIDER_NAME=OpenText
 SSO_CLIENT_ID=confluence-chatbot
-SSO_CLIENT_SECRET=the-secret-the-provider-generated
+SSO_CLIENT_SECRET=the-secret-otds-generated
 SSO_AUTHORIZATION_URI=https://otds.example.com/otdsws/oauth2/auth
 SSO_TOKEN_URI=https://otds.example.com/otdsws/oauth2/token
 SSO_JWK_SET_URI=https://otds.example.com/otdsws/oauth2/jwks
@@ -394,7 +395,8 @@ SSO_JWK_SET_URI=https://otds.example.com/otdsws/oauth2/jwks
 
 ### Other providers
 
-The same three lines, pointed elsewhere. Nothing else changes.
+OTDS is the default, not an assumption. Overriding the id and the issuer is the whole of pointing
+this somewhere else — no code, no rebuild, no migration.
 
 ```dotenv
 # Microsoft Entra ID
@@ -430,8 +432,8 @@ rework — but it is not built.
 | Variable | Default | Description |
 |---|---|---|
 | `SSO_ENABLED` | `false` | Master switch. Off, none of the below is read and no OAuth beans exist |
-| `SSO_PROVIDER_ID` | `sso` | Short id used in URLs. Last segment of the redirect URL |
-| `SSO_PROVIDER_NAME` | `SSO` | What the button says: "Continue with …" |
+| `SSO_PROVIDER_ID` | `otds` | Short id used in URLs. Last segment of the redirect URL |
+| `SSO_PROVIDER_NAME` | `OpenText` | What the button says: "Continue with …" |
 | `SSO_ISSUER_URI` | | Issuer to discover the endpoints from. Alone, this is the whole configuration |
 | `SSO_CLIENT_ID` | | The OAuth client registered with the provider. Required |
 | `SSO_CLIENT_SECRET` | | Its secret. Empty marks the client public and forces `none` |
