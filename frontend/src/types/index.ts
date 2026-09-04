@@ -15,6 +15,25 @@ export interface AuthResponse {
   error?: string
 }
 
+/**
+ * What the sign-in screen is told about single sign-on, before anyone has authenticated.
+ *
+ * Read from a public endpoint on purpose: whether there is a directory to sign in through is a
+ * property of the deployment, not of the build, so baking it into the bundle would mean rebuilding
+ * the frontend to turn SSO on.
+ */
+export interface SsoConfig {
+  enabled: boolean
+  /** Identifies which provider a session came from. Null when SSO is off. */
+  providerId: string | null
+  /** What to call the provider on the button. Null when SSO is off. */
+  providerName: string | null
+  /** Where to send the browser to begin. Null when SSO is off. */
+  authorizationUrl: string | null
+  /** Where to send it after signing out, to end the provider's session too. Often null. */
+  logoutUrl: string | null
+}
+
 export type ResponseStyle = 'concise' | 'balanced' | 'detailed'
 
 export interface UserPreferences {

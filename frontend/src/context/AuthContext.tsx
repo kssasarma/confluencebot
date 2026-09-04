@@ -1,10 +1,14 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
-import type { AuthUser, AuthResponse } from '../types'
+import type { AuthUser, AuthResponse, SsoConfig } from '../types'
 import {
   login as apiLogin, getMe, changePassword as apiChangePassword,
-  refreshSession, revokeSession,
+  refreshSession, revokeSession, getSsoConfig, exchangeSsoCode,
 } from '../services/authService'
-import { clearSession, getRefreshToken, getToken, onSessionChange, storeSession } from '../lib/token'
+import {
+  clearSession, getRefreshToken, getSsoSessionProvider, getToken, markSsoSession, onSessionChange,
+  storeSession,
+} from '../lib/token'
+import { clearSsoHandoff, readSsoHandoff } from '../lib/sso'
 
 interface AuthContextValue {
   user: AuthUser | null
@@ -14,6 +18,11 @@ interface AuthContextValue {
   isAdmin: boolean
   /** Either admin role — enough to reach the admin screen, not enough to act everywhere on it. */
   canAdminister: boolean
+  /** Null until the deployment has answered whether it has a directory to sign in through. */
+  sso: SsoConfig | null
+  /** Why the last trip through the identity provider did not end in a session. */
+  ssoError: string | null
+  dismissSsoError: () => void
   login: (email: string, password: string) => Promise<void>
   applySession: (data: AuthResponse) => void
   changePassword: (currentPassword: string, newPassword: string) => Promise<void>
@@ -49,6 +58,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null)
   const [token, setToken] = useState<string | null>(() => getToken() || null)
   const [isLoading, setIsLoading] = useState(true)
+  const [sso, setSso] = useState<SsoConfig | null>(null)
+  const [ssoError, setSsoError] = useState<string | null>(null)
   const renewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const cancelRenewal = useCallback(() => {
@@ -86,7 +97,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(current => (current ? { ...current, mustChangePassword } : current))
   }), [cancelRenewal, scheduleRenewal])
 
+  // Asked once, and never gated on: the sign-in screen renders a password form either way, and
+  // gains a second button if the answer arrives saying there is a directory behind it.
   useEffect(() => {
+    let cancelled = false
+    getSsoConfig()
+      .then(config => { if (!cancelled) setSso(config) })
+      .catch(() => { /* a deployment without SSO answers this too; the password form still works */ })
+    return () => { cancelled = true }
+  }, [])
+
+  useEffect(() => {
+    // Whatever the identity provider redirected back with decides this page load, so it is read —
+    // and erased from the address bar — before anything else looks at where the browser is.
+    const handoff = readSsoHandoff()
+    if (handoff) clearSsoHandoff()
+
+    if (handoff?.code) {
+      exchangeSsoCode(handoff.code)
+        .then(session => {
+          if (handoff.providerId) markSsoSession(handoff.providerId)
+          applySession(session)
+        })
+        .catch(error => setSsoError(
+          error instanceof Error ? error.message : 'Signing in through your identity provider failed.'))
+        .finally(() => setIsLoading(false))
+      return
+    }
+    if (handoff?.error) {
+      setSsoError(handoff.error)
+    }
+
     const stored = getToken()
     if (!stored) {
       setIsLoading(false)
@@ -131,11 +172,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     applySession(await apiChangePassword(currentPassword, newPassword))
   }, [applySession])
 
+  const dismissSsoError = useCallback(() => setSsoError(null), [])
+
   const logout = useCallback(() => {
     const refreshToken = getRefreshToken()
-    if (refreshToken) revokeSession(refreshToken)
+    // Read before clearing: clearing the session is what forgets where it came from.
+    const sessionProvider = getSsoSessionProvider()
+    const revoked = refreshToken ? revokeSession(refreshToken) : Promise.resolve()
     clearSession()
-  }, [])
+
+    // Ending the session here is not ending the one at the provider. Without this, signing out and
+    // signing back in returns the same person with nothing asked of them, which does not look like
+    // signing out at all. Only for a session that came from the provider now configured, though:
+    // somebody who signed in with a password has no provider session to end, and one left over
+    // from a provider this deployment no longer points at is not ours to end either.
+    const logoutUrl = sso?.logoutUrl
+    if (logoutUrl && sessionProvider && sessionProvider === sso?.providerId) {
+      void revoked.finally(() => window.location.assign(logoutUrl))
+    }
+  }, [sso])
 
   return (
     <AuthContext.Provider value={{
@@ -143,6 +198,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isAuthenticated: !!user,
       isAdmin: user?.role === 'ADMIN',
       canAdminister: user?.role === 'ADMIN' || user?.role === 'ADMIN_READ_ONLY',
+      sso, ssoError, dismissSsoError,
       login, applySession, changePassword, logout,
     }}>
       {children}

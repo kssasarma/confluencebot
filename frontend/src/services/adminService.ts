@@ -18,6 +18,12 @@ export interface AdminUser {
   enabled: boolean
   mustChangePassword: boolean
   createdAt: string
+  /** Where the account came from. An SSO account has no password here to reset. */
+  authProvider: 'LOCAL' | 'SSO'
+  /** Which identity provider it is linked to, or null if none. */
+  ssoProviderId: string | null
+  /** True once the account can sign in through a directory, however it was created. */
+  ssoLinked: boolean
 }
 
 export interface CreateUserResult {
