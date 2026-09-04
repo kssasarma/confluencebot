@@ -1,9 +1,8 @@
 import { useDeferredValue, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Loader2, MessageSquare, Plus, Search, Settings, ShieldCheck, X } from 'lucide-react'
+import { Loader2, MessageSquare, Plus, Search, X } from 'lucide-react'
 import { cn } from '../../lib/cn'
 import { groupByRecency } from '../../lib/time'
-import { useAuth } from '../../context/AuthContext'
 import { useChat } from '../../context/ChatContext'
 import { useConfirm } from '../ui/ConfirmDialog'
 import Button from '../ui/Button'
@@ -11,7 +10,6 @@ import EmptyState from '../ui/EmptyState'
 import IconButton from '../ui/IconButton'
 import { SkeletonRow } from '../ui/Skeleton'
 import SessionItem from './SessionItem'
-import AccountMenu from './AccountMenu'
 
 interface SidebarProps {
   /** Closes the drawer after navigating. Only supplied on small screens. */
@@ -27,7 +25,6 @@ interface SidebarProps {
  */
 export default function Sidebar({ onNavigate }: SidebarProps) {
   const navigate = useNavigate()
-  const { canAdminister } = useAuth()
   const confirm = useConfirm()
   const chat = useChat()
 
@@ -179,29 +176,6 @@ export default function Sidebar({ onNavigate }: SidebarProps) {
           </>
         )}
       </nav>
-
-      <div className="space-y-1 border-t border-border p-2">
-        {canAdminister && (
-          <Link
-            to="/admin"
-            onClick={onNavigate}
-            className="flex items-center gap-2 rounded-lg p-2 text-sm text-muted-foreground hover:bg-surface-hover hover:text-foreground"
-          >
-            <ShieldCheck size={16} aria-hidden="true" />
-            Admin
-          </Link>
-        )}
-        <Link
-          to="/settings"
-          onClick={onNavigate}
-          className="flex items-center gap-2 rounded-lg p-2 text-sm text-muted-foreground hover:bg-surface-hover hover:text-foreground"
-        >
-          <Settings size={16} aria-hidden="true" />
-          Settings
-        </Link>
-
-        <AccountMenu />
-      </div>
     </div>
   )
 }

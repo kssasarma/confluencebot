@@ -10,11 +10,12 @@ import { queryKeys } from '../services/queryKeys'
 /**
  * What reading a transcript established about a conversation.
  *
- *  - `loaded`   — the server returned its messages.
- *  - `unsaved`  — the server has never heard of it, because no question has been asked in it yet.
- *  - `failed`   — the request itself broke, and the reader must be told.
+ *  - `loaded`       — the server returned a non-empty transcript.
+ *  - `loaded-empty` — the server has recorded this conversation, but it holds no messages yet.
+ *  - `unsaved`      — the server has never heard of it, because no question has been asked in it.
+ *  - `failed`       — the request itself broke, and the reader must be told.
  */
-export type TranscriptOutcome = 'loaded' | 'unsaved' | 'failed'
+export type TranscriptOutcome = 'loaded' | 'loaded-empty' | 'unsaved' | 'failed'
 
 /**
  * How long buffered tokens may wait when no animation frame arrives.
@@ -188,9 +189,14 @@ export function useChatController({
 
     try {
       const loaded = await fetchTranscript(chatId)
-      if (untouched()) setMessagesByChat(previous => ({ ...previous, [chatId]: loaded }))
+      const applied = untouched()
+      if (applied) setMessagesByChat(previous => ({ ...previous, [chatId]: loaded }))
       clearLoadError(chatId)
-      return 'loaded'
+      // Whether this is a draft depends on what the transcript actually held, not on
+      // `messagesRef` reflecting it — that ref only catches up once React re-renders, and the
+      // caller's `.then` can run before that happens. A conversation the reader already asked
+      // something in while this was in flight (`!applied`) is never empty, whatever `loaded` says.
+      return applied && loaded.length === 0 ? 'loaded-empty' : 'loaded'
     } catch (error) {
       // A conversation reaches the database only when it carries its first answer, so a 404 here
       // is not a failure: it is a conversation nobody has asked anything in yet. Reporting it as

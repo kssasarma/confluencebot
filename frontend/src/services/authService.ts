@@ -1,6 +1,6 @@
 import { API_BASE } from '../config/env'
 import { apiFetch, apiJson, jsonBody, toApiError } from './http'
-import type { AuthResponse } from '../types'
+import type { AuthResponse, UserInfoResponse } from '../types'
 
 /**
  * Sign-in and token rotation.
@@ -44,3 +44,7 @@ export const changePassword = (currentPassword: string, newPassword: string): Pr
     method: 'POST',
     ...jsonBody({ currentPassword, newPassword }),
   })
+
+/** Self-service only — there is no endpoint to change email. */
+export const updateName = (name: string): Promise<UserInfoResponse> =>
+  apiJson<UserInfoResponse>('/auth/name', { method: 'PATCH', ...jsonBody({ name }) })

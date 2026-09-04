@@ -28,10 +28,12 @@ interface MenuProps {
   actions: MenuAction[]
   placement?: 'bottom end' | 'bottom start' | 'top end' | 'top start'
   className?: string
+  /** Non-interactive content above the actions — identity, status, anything that isn't a command. */
+  header?: ReactNode
 }
 
 export default function Menu({
-  trigger, actions, placement = 'bottom end', className,
+  trigger, actions, placement = 'bottom end', className, header,
 }: MenuProps) {
   return (
     <HeadlessMenu as="div" className={cn('relative inline-block', className)}>
@@ -46,6 +48,7 @@ export default function Menu({
           anchor={{ to: placement, gap: 6 }}
           className="z-dropdown w-52 rounded-xl border border-border bg-surface p-1 shadow-overlay focus:outline-none"
         >
+          {header && <div className="border-b border-border px-2.5 py-2">{header}</div>}
           {actions.map(action => (
             <Fragment key={action.label}>
               {action.separated && <div className="my-1 h-px bg-border" role="none" />}

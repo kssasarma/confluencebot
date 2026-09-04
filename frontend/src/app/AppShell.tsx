@@ -9,6 +9,7 @@ import { useResizable } from '../hooks/useResizable'
 import { useHotkeys } from '../hooks/useHotkeys'
 import Sidebar from '../components/sidebar/Sidebar'
 const CommandPalette = lazy(() => import('../components/palette/CommandPalette'))
+import ProfileMenu from '../components/layout/ProfileMenu'
 import ErrorBoundary from '../components/ui/ErrorBoundary'
 import IconButton from '../components/ui/IconButton'
 import Spinner from '../components/ui/Spinner'
@@ -92,16 +93,26 @@ export default function AppShell() {
       <div className="flex min-w-0 flex-1 flex-col">
         {!online && <OfflineBanner />}
 
-        {!isDesktop && (
-          <div className="flex items-center gap-2 border-b border-border px-2 py-2">
-            <IconButton
-              label="Open conversations"
-              icon={<MenuIcon size={18} />}
-              onClick={() => setDrawerOpen(true)}
-            />
-            <span className="text-sm font-semibold text-foreground">Confluence Bot</span>
+        {/*
+          Always present, on every breakpoint: it is the only place identity, role and account
+          actions live now, so a reader on the admin screen or in settings still has a way to see
+          who they are signed in as and to sign out without navigating back to the chat list.
+        */}
+        <div className="flex items-center gap-2 border-b border-border px-2 py-2">
+          {!isDesktop && (
+            <>
+              <IconButton
+                label="Open conversations"
+                icon={<MenuIcon size={18} />}
+                onClick={() => setDrawerOpen(true)}
+              />
+              <span className="text-sm font-semibold text-foreground">Confluence Bot</span>
+            </>
+          )}
+          <div className="ml-auto">
+            <ProfileMenu />
           </div>
-        )}
+        </div>
 
         <main className="min-h-0 flex-1">
           <ErrorBoundary>

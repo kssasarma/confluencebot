@@ -1,14 +1,16 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, Ban, Check, Play, RefreshCw, RotateCcw, UserPlus } from 'lucide-react'
+import { ArrowLeft, Ban, Check, Mail, Play, RefreshCw, RotateCcw, Trash2, UserPlus } from 'lucide-react'
 import {
-  createUser, ingestPage, ingestSpace, listJobs, listUsers, retriggerJob, setUserEnabled,
-  setUserRole, type AdminRole, type AdminUser, type IngestionJob,
+  createUser, deleteUser, ingestPage, ingestSpace, listJobs, listUsers, resendWelcome,
+  retriggerJob, setUserEnabled, setUserRoles, type AdminRole, type AdminUser, type IngestionJob,
 } from '../services/adminService'
 import { useAuth } from '../context/AuthContext'
 import { queryKeys } from '../services/queryKeys'
 import { toMessage } from '../lib/errors'
+import { toggleRole } from '../lib/roles'
+import { useConfirm } from '../components/ui/ConfirmDialog'
 import { useToast } from '../components/ui/Toast'
 import { useDocumentTitle } from '../hooks/useDocumentTitle'
 import { absoluteTime } from '../lib/time'
@@ -25,10 +27,48 @@ type Tab = 'users' | 'ingestion'
 const ROLE_LABELS: Record<AdminRole, string> = {
   ADMIN: 'Admin',
   ADMIN_READ_ONLY: 'Admin (read-only)',
+  INGESTOR: 'Ingestor',
   USER: 'User',
 }
 
 const ROLES = Object.keys(ROLE_LABELS) as AdminRole[]
+
+/** A row of pills toggling membership in `selected`. Used for both creating and re-assigning. */
+function RoleToggleGroup({
+  selected, onToggle, disabled,
+}: {
+  selected: AdminRole[]
+  onToggle: (role: AdminRole) => void
+  disabled?: boolean
+}) {
+  return (
+    <div className="flex flex-wrap gap-1.5" role="group" aria-label="Roles">
+      {ROLES.map(role => {
+        const active = selected.includes(role)
+        return (
+          <button
+            key={role}
+            type="button"
+            role="checkbox"
+            aria-checked={active}
+            aria-label={ROLE_LABELS[role]}
+            disabled={disabled}
+            onClick={() => onToggle(role)}
+            className={cn(
+              'rounded-full border px-2.5 py-1 text-2xs font-medium transition-colors',
+              'disabled:cursor-not-allowed disabled:opacity-50',
+              active
+                ? 'border-primary bg-primary-soft text-primary-emphasis'
+                : 'border-border text-muted-foreground hover:bg-surface-hover',
+            )}
+          >
+            {ROLE_LABELS[role]}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
 
 /**
  * User management and ingestion control.
@@ -37,13 +77,20 @@ const ROLES = Object.keys(ROLE_LABELS) as AdminRole[]
  * in the initial bundle taxes every other user for a screen they cannot open.
  */
 export default function AdminRoute() {
-  const [tab, setTab] = useState<Tab>('users')
-  const { isAdmin } = useAuth()
+  const { canManageUsers, canIngest } = useAuth()
   useDocumentTitle('Admin')
 
-  // Ingestion is a full-admin power, so a read-only admin is not shown a tab whose every control
-  // the API would refuse. Onboarding is the whole screen for them.
-  const tabs: Tab[] = isAdmin ? ['users', 'ingestion'] : ['users']
+  // Each tab is its own power: a read-only admin manages users but not ingestion, an ingestor
+  // triggers ingestion but cannot see the users tab, and a full admin gets both.
+  const tabs: Tab[] = []
+  if (canManageUsers) tabs.push('users')
+  if (canIngest) tabs.push('ingestion')
+
+  const [tab, setTab] = useState<Tab>('users')
+  // `useAuth` resolves after this component's first render, so `tabs` is empty on mount and a
+  // `useState` initialiser computed from it would freeze on 'users' forever. Falling back here
+  // instead keeps the active tab correct once the session — and with it, `tabs` — settles.
+  const activeTab = tabs.includes(tab) ? tab : (tabs[0] ?? 'users')
 
   return (
     <div className="h-full overflow-y-auto">
@@ -63,11 +110,11 @@ export default function AdminRoute() {
             <button
               key={name}
               role="tab"
-              aria-selected={tab === name}
+              aria-selected={activeTab === name}
               onClick={() => setTab(name)}
               className={cn(
                 'rounded-lg px-4 py-2 text-sm font-medium capitalize transition-colors',
-                tab === name
+                activeTab === name
                   ? 'bg-primary text-primary-foreground'
                   : 'text-muted-foreground hover:bg-surface-hover',
               )}
@@ -78,30 +125,41 @@ export default function AdminRoute() {
         </div>
 
         <div role="tabpanel">
-          {tab === 'users' || !isAdmin ? <UsersTab /> : <IngestionTab />}
+          {activeTab === 'ingestion' ? <IngestionTab /> : <UsersTab />}
         </div>
       </div>
     </div>
   )
 }
 
+interface WelcomeEmailResult {
+  action: 'created' | 'resent'
+  email: string
+  tempPassword: string
+  emailSent: boolean
+}
+
 function UsersTab() {
   const queryClient = useQueryClient()
   const toast = useToast()
+  const confirm = useConfirm()
   const { isAdmin, user: signedIn } = useAuth()
 
   const [email, setEmail] = useState('')
-  const [role, setRole] = useState<AdminRole>('USER')
-  const [created, setCreated] = useState<{ email: string; tempPassword: string } | null>(null)
+  const [roles, setRoles] = useState<AdminRole[]>(['USER'])
+  const [welcomeResult, setWelcomeResult] = useState<WelcomeEmailResult | null>(null)
 
   const users = useQuery({ queryKey: queryKeys.adminUsers, queryFn: listUsers })
 
   const create = useMutation({
-    mutationFn: () => createUser(email.trim(), role),
+    mutationFn: () => createUser(email.trim(), roles),
     onSuccess: result => {
-      setCreated({ email: result.user.email, tempPassword: result.tempPassword })
+      setWelcomeResult({
+        action: 'created', email: result.user.email,
+        tempPassword: result.tempPassword, emailSent: result.emailSent,
+      })
       setEmail('')
-      setRole('USER')
+      setRoles(['USER'])
       void queryClient.invalidateQueries({ queryKey: queryKeys.adminUsers })
     },
     onError: error => toast.error('Could not create the user', toMessage(error, 'Please try again.')),
@@ -118,32 +176,87 @@ function UsersTab() {
     onError: error => toast.error('Could not update the user', toMessage(error, 'Please try again.')),
   })
 
-  const changeRole = useMutation({
-    mutationFn: ({ user, next }: { user: AdminUser; next: AdminRole }) => setUserRole(user.id, next),
+  const changeRoles = useMutation({
+    mutationFn: ({ user, next }: { user: AdminUser; next: AdminRole[] }) => setUserRoles(user.id, next),
     onSuccess: updated => {
       applyUser(updated)
-      toast.success('Role updated', `${updated.email} is now ${ROLE_LABELS[updated.role]}.`)
+      toast.success('Roles updated', `${updated.email} is now ${updated.roles.map(r => ROLE_LABELS[r]).join(', ')}.`)
     },
-    onError: error => toast.error('Could not change the role', toMessage(error, 'Please try again.')),
+    onError: error => toast.error('Could not change the roles', toMessage(error, 'Please try again.')),
   })
+
+  const resend = useMutation({
+    mutationFn: (user: AdminUser) => resendWelcome(user.id),
+    onSuccess: (result, user) => {
+      applyUser(result.user)
+      setWelcomeResult({
+        action: 'resent', email: user.email,
+        tempPassword: result.tempPassword, emailSent: result.emailSent,
+      })
+    },
+    onError: error => toast.error('Could not resend the welcome email', toMessage(error, 'Please try again.')),
+  })
+
+  const remove = useMutation({
+    mutationFn: (user: AdminUser) => deleteUser(user.id),
+    onSuccess: (_result, user) => {
+      queryClient.setQueryData<AdminUser[]>(queryKeys.adminUsers, current =>
+        current?.filter(u => u.id !== user.id))
+      toast.success('User deleted', `${user.email} and everything scoped to their account is gone.`)
+    },
+    onError: error => toast.error('Could not delete the user', toMessage(error, 'Please try again.')),
+  })
+
+  async function handleResend(user: AdminUser) {
+    const confirmed = await confirm({
+      title: `Resend welcome email to ${user.email}?`,
+      description: 'This issues a brand new temporary password — the old one, if any, stops working.',
+      confirmLabel: 'Resend',
+    })
+    if (confirmed) resend.mutate(user)
+  }
+
+  async function handleDelete(user: AdminUser) {
+    const confirmed = await confirm({
+      title: `Delete ${user.email}?`,
+      description: 'This permanently deletes the account and every chat, session and preference tied to it. This cannot be undone.',
+      confirmLabel: 'Delete',
+      tone: 'danger',
+    })
+    if (confirmed) remove.mutate(user)
+  }
 
   return (
     <div className="space-y-6">
-      {created && (
+      {welcomeResult && (
         <div role="status" className="rounded-lg border border-success/40 bg-success-soft p-4 text-sm">
-          <p className="mb-1 font-medium text-success-emphasis">User created</p>
-          <p className="text-muted-foreground">
-            Email: <span className="font-mono text-foreground">{created.email}</span>
+          <p className="mb-1 font-medium text-success-emphasis">
+            {welcomeResult.action === 'created' ? 'User created' : 'Welcome email resent'}
           </p>
-          <p className="text-muted-foreground">
-            Temporary password:{' '}
-            <span className="font-mono text-foreground">{created.tempPassword}</span>
-          </p>
-          <p className="mt-1 text-2xs text-muted-foreground">
-            Share this over a secure channel. It is shown once, and the user must change it at
-            first sign-in.
-          </p>
-          <Button size="sm" variant="ghost" className="mt-2" onClick={() => setCreated(null)}>
+          {welcomeResult.emailSent ? (
+            <p className="text-muted-foreground">
+              Sign-in instructions were emailed to{' '}
+              <span className="font-mono text-foreground">{welcomeResult.email}</span>. No need to
+              share a password yourself.
+            </p>
+          ) : (
+            <>
+              <p className="text-muted-foreground">
+                Email: <span className="font-mono text-foreground">{welcomeResult.email}</span>
+              </p>
+              <p className="text-muted-foreground">
+                Temporary password:{' '}
+                <span className="font-mono text-foreground">{welcomeResult.tempPassword}</span>
+              </p>
+              <p className="mt-1 text-2xs text-muted-foreground">
+                We couldn't email this — mail may not be configured or reachable right now. Share
+                it over a secure channel; it is shown once, and the user must change it at first
+                sign-in. Once mail is working again, use "Resend welcome email" instead of sharing
+                passwords by hand.
+              </p>
+            </>
+          )}
+          <Button size="sm" variant="ghost" className="mt-2" onClick={() => setWelcomeResult(null)}>
             Dismiss
           </Button>
         </div>
@@ -165,17 +278,8 @@ function UsersTab() {
         </div>
 
         <div className="flex flex-col gap-1.5">
-          <label htmlFor="new-user-role" className="text-sm font-medium text-foreground">Role</label>
-          <select
-            id="new-user-role"
-            value={role}
-            onChange={event => setRole(event.target.value as AdminRole)}
-            className="h-10 rounded-lg border border-border bg-surface px-3 text-sm text-foreground"
-          >
-            {ROLES.map(name => (
-              <option key={name} value={name}>{ROLE_LABELS[name]}</option>
-            ))}
-          </select>
+          <span className="text-sm font-medium text-foreground">Roles</span>
+          <RoleToggleGroup selected={roles} onToggle={role => setRoles(current => toggleRole(current, role))} />
         </div>
 
         <Button type="submit" loading={create.isPending} disabled={!email.trim()}>
@@ -200,7 +304,8 @@ function UsersTab() {
             <thead>
               <tr className="border-b border-border text-left">
                 <th scope="col" className="pb-2 font-medium text-muted-foreground">Email</th>
-                <th scope="col" className="pb-2 font-medium text-muted-foreground">Role</th>
+                <th scope="col" className="pb-2 font-medium text-muted-foreground">Name</th>
+                <th scope="col" className="pb-2 font-medium text-muted-foreground">Roles</th>
                 <th scope="col" className="pb-2 font-medium text-muted-foreground">Status</th>
                 <th scope="col" className="pb-2 font-medium text-muted-foreground">Must change password</th>
                 <th scope="col" className="pb-2"><span className="sr-only">Actions</span></th>
@@ -210,31 +315,28 @@ function UsersTab() {
               {users.data?.map(user => (
                 <tr key={user.id} className="text-foreground">
                   <td className="py-2.5 pr-4 font-mono text-2xs">{user.email}</td>
+                  <td className="py-2.5 pr-4 text-2xs text-muted-foreground">{user.name ?? '—'}</td>
                   <td className="py-2.5 pr-4">
                     {isAdmin && signedIn?.email !== user.email ? (
-                      <>
-                        <label htmlFor={`role-${user.id}`} className="sr-only">
-                          Role for {user.email}
-                        </label>
-                        <select
-                          id={`role-${user.id}`}
-                          value={user.role}
-                          onChange={event =>
-                            changeRole.mutate({ user, next: event.target.value as AdminRole })}
-                          disabled={changeRole.isPending}
-                          className="h-8 rounded-lg border border-border bg-surface px-2 text-2xs text-foreground disabled:opacity-50"
-                        >
-                          {ROLES.map(name => (
-                            <option key={name} value={name}>{ROLE_LABELS[name]}</option>
-                          ))}
-                        </select>
-                      </>
+                      <RoleToggleGroup
+                        selected={user.roles}
+                        disabled={changeRoles.isPending}
+                        onToggle={role => {
+                          const next = toggleRole(user.roles, role)
+                          if (next !== user.roles) changeRoles.mutate({ user, next })
+                        }}
+                      />
                     ) : (
-                      // Your own row stays a label: the request that strips your own admin is the
-                      // last one you are allowed to make, so the API refuses it and so does this.
-                      <Badge tone={user.role === 'USER' ? 'info' : 'accent'}>
-                        {ROLE_LABELS[user.role] ?? user.role}
-                      </Badge>
+                      // Your own row stays a set of labels: the request that strips your own admin
+                      // is the last one you are allowed to make, so the API refuses it and so does
+                      // this.
+                      <div className="flex flex-wrap gap-1">
+                        {user.roles.map(userRole => (
+                          <Badge key={userRole} tone={userRole === 'USER' ? 'info' : 'accent'}>
+                            {ROLE_LABELS[userRole] ?? userRole}
+                          </Badge>
+                        ))}
+                      </div>
                     )}
                   </td>
                   <td className="py-2.5 pr-4">
@@ -246,15 +348,36 @@ function UsersTab() {
                     {user.mustChangePassword ? 'Yes' : 'No'}
                   </td>
                   <td className="py-2.5 text-right">
-                    {isAdmin && signedIn?.email !== user.email && (
-                      <IconButton
-                        size="sm"
-                        label={user.enabled ? `Disable ${user.email}` : `Enable ${user.email}`}
-                        icon={user.enabled ? <Ban size={14} /> : <Check size={14} />}
-                        onClick={() => toggle.mutate(user)}
-                        disabled={toggle.isPending}
-                      />
-                    )}
+                    <div className="flex justify-end gap-1">
+                      {isAdmin && user.mustChangePassword && (
+                        <IconButton
+                          size="sm"
+                          label={`Resend welcome email to ${user.email}`}
+                          icon={<Mail size={14} />}
+                          onClick={() => handleResend(user)}
+                          disabled={resend.isPending}
+                        />
+                      )}
+                      {isAdmin && signedIn?.email !== user.email && (
+                        <>
+                          <IconButton
+                            size="sm"
+                            label={user.enabled ? `Disable ${user.email}` : `Enable ${user.email}`}
+                            icon={user.enabled ? <Ban size={14} /> : <Check size={14} />}
+                            onClick={() => toggle.mutate(user)}
+                            disabled={toggle.isPending}
+                          />
+                          <IconButton
+                            size="sm"
+                            variant="danger"
+                            label={`Delete ${user.email}`}
+                            icon={<Trash2 size={14} />}
+                            onClick={() => handleDelete(user)}
+                            disabled={remove.isPending}
+                          />
+                        </>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}

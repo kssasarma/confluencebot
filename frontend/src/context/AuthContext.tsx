@@ -1,8 +1,8 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
-import type { AuthUser, AuthResponse } from '../types'
+import type { AuthUser, AuthResponse, UserRole } from '../types'
 import {
   login as apiLogin, getMe, changePassword as apiChangePassword,
-  refreshSession, revokeSession,
+  refreshSession, revokeSession, updateName as apiUpdateName,
 } from '../services/authService'
 import { clearSession, getRefreshToken, getToken, onSessionChange, storeSession } from '../lib/token'
 
@@ -12,11 +12,16 @@ interface AuthContextValue {
   isLoading: boolean
   isAuthenticated: boolean
   isAdmin: boolean
-  /** Either admin role — enough to reach the admin screen, not enough to act everywhere on it. */
+  /** ADMIN or ADMIN_READ_ONLY — enough to see and onboard users. */
+  canManageUsers: boolean
+  /** ADMIN or INGESTOR — enough to trigger and retrigger ingestion jobs. */
+  canIngest: boolean
+  /** Any role with a reason to open the admin screen at all. */
   canAdminister: boolean
   login: (email: string, password: string) => Promise<void>
   applySession: (data: AuthResponse) => void
   changePassword: (currentPassword: string, newPassword: string) => Promise<void>
+  updateName: (name: string) => Promise<void>
   logout: () => void
 }
 
@@ -40,7 +45,8 @@ function toAuthUser(data: AuthResponse, token: string): AuthUser {
   return {
     userId: data.userId!,
     email: data.email!,
-    role: data.role as AuthUser['role'],
+    name: data.name ?? null,
+    roles: (data.roles ?? []) as UserRole[],
     mustChangePassword,
   }
 }
@@ -131,19 +137,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     applySession(await apiChangePassword(currentPassword, newPassword))
   }, [applySession])
 
+  // Unlike changePassword, this never touches tokens: a name is not security-sensitive and other
+  // sessions have no reason to be revoked over it.
+  const updateName = useCallback(async (name: string) => {
+    const data = await apiUpdateName(name)
+    setUser(current => (current ? { ...current, name: data.name } : current))
+  }, [])
+
   const logout = useCallback(() => {
     const refreshToken = getRefreshToken()
     if (refreshToken) revokeSession(refreshToken)
     clearSession()
   }, [])
 
+  const isAdmin = user?.roles.includes('ADMIN') ?? false
+  const canManageUsers = isAdmin || (user?.roles.includes('ADMIN_READ_ONLY') ?? false)
+  const canIngest = isAdmin || (user?.roles.includes('INGESTOR') ?? false)
+
   return (
     <AuthContext.Provider value={{
       user, token, isLoading,
       isAuthenticated: !!user,
-      isAdmin: user?.role === 'ADMIN',
-      canAdminister: user?.role === 'ADMIN' || user?.role === 'ADMIN_READ_ONLY',
-      login, applySession, changePassword, logout,
+      isAdmin,
+      canManageUsers,
+      canIngest,
+      canAdminister: canManageUsers || canIngest,
+      login, applySession, changePassword, updateName, logout,
     }}>
       {children}
     </AuthContext.Provider>

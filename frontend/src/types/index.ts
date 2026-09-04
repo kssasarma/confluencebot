@@ -1,18 +1,32 @@
+/** A user may hold more than one of these at once. */
+export type UserRole = 'ADMIN' | 'ADMIN_READ_ONLY' | 'INGESTOR' | 'USER'
+
 export interface AuthUser {
   userId: number
   email: string
-  role: 'ADMIN' | 'ADMIN_READ_ONLY' | 'USER'
+  /** Self-service and separate from email; null until the user sets one. */
+  name: string | null
+  roles: UserRole[]
   mustChangePassword: boolean
 }
 
 export interface AuthResponse {
   userId?: number
   email?: string
-  role?: string
+  name?: string | null
+  roles?: string[]
   token?: string
   refreshToken?: string
   mustChangePassword?: boolean
   error?: string
+}
+
+export interface UserInfoResponse {
+  userId: number
+  email: string
+  name: string | null
+  roles: string[]
+  mustChangePassword: boolean
 }
 
 export type ResponseStyle = 'concise' | 'balanced' | 'detailed'
