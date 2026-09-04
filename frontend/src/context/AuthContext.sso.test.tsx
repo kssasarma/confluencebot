@@ -48,7 +48,7 @@ describe('AuthProvider — returning from the identity provider', () => {
   beforeEach(() => {
     localStorage.clear()
     mockGetSsoConfig.mockResolvedValue({
-      enabled: true, providerName: 'OpenText',
+      enabled: true, providerId: 'otds', providerName: 'OpenText',
       authorizationUrl: '/api/oauth2/authorization/otds', logoutUrl: null,
     })
     mockExchange.mockReset()
@@ -58,7 +58,7 @@ describe('AuthProvider — returning from the identity provider', () => {
   afterEach(() => window.history.replaceState(null, '', '/'))
 
   it('redeems the code and stores the session it buys', async () => {
-    window.history.replaceState(null, '', '/sso/callback#sso_code=one-time-code')
+    window.history.replaceState(null, '', '/sso/callback#sso_code=one-time-code&sso_provider=otds')
     mockExchange.mockResolvedValue(session())
 
     render(<AuthProvider><Probe /></AuthProvider>)
@@ -69,15 +69,17 @@ describe('AuthProvider — returning from the identity provider', () => {
     expect(localStorage.getItem(REFRESH_KEY)).toBe('refresh-token')
   })
 
-  it('remembers that this session came from the provider', () => {
-    // Which is a different question from whether the account could have used it: an account
-    // linked to the directory but signed in with a password has no provider session to end.
-    window.history.replaceState(null, '', '/sso/callback#sso_code=one-time-code')
+  it('remembers which provider this session came from', () => {
+    // Which is a different question from whether the account could have used one: an account
+    // linked to a directory but signed in with a password has no provider session to end. The
+    // provider's id rather than a flag, so a deployment re-pointed elsewhere signs people out at
+    // the directory they actually came from.
+    window.history.replaceState(null, '', '/sso/callback#sso_code=one-time-code&sso_provider=entra')
     mockExchange.mockResolvedValue(session())
 
     render(<AuthProvider><Probe /></AuthProvider>)
 
-    return waitFor(() => expect(localStorage.getItem(SSO_SESSION_KEY)).toBe('true'))
+    return waitFor(() => expect(localStorage.getItem(SSO_SESSION_KEY)).toBe('entra'))
   })
 
   it('leaves a password session unmarked', async () => {

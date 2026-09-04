@@ -32,15 +32,22 @@ describe('readSsoHandoff', () => {
   })
 
   it('reads the one-time code the provider sent back', () => {
-    land('/sso/callback#sso_code=abc123')
+    land('/sso/callback#sso_code=abc123&sso_provider=otds')
 
-    expect(readSsoHandoff()).toEqual({ code: 'abc123', error: undefined })
+    expect(readSsoHandoff()).toEqual({ code: 'abc123', error: undefined, providerId: 'otds' })
+  })
+
+  it('reads whichever provider answered, without assuming one', () => {
+    land('/sso/callback#sso_code=abc123&sso_provider=keycloak')
+
+    expect(readSsoHandoff()?.providerId).toBe('keycloak')
   })
 
   it('reads a failure message, spaces and all', () => {
     land('/sso/callback#sso_error=This+account+has+been+disabled.')
 
-    expect(readSsoHandoff()).toEqual({ code: undefined, error: 'This account has been disabled.' })
+    expect(readSsoHandoff())
+      .toEqual({ code: undefined, error: 'This account has been disabled.', providerId: undefined })
   })
 
   it('decodes a percent-encoded message', () => {

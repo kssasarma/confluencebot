@@ -49,6 +49,7 @@ public class SsoServiceImpl implements SsoService {
         }
         return new SsoStatusResponse(
                 true,
+                properties.providerId(),
                 properties.providerName(),
                 properties.authorizationRequestUri(),
                 StringUtils.hasText(properties.logoutUri()) ? properties.logoutUri() : null);

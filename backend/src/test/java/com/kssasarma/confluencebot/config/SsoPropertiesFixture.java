@@ -16,6 +16,7 @@ import java.util.Set;
 public final class SsoPropertiesFixture {
 
     private boolean enabled = true;
+    private String providerId = "otds";
     private String providerName = "OpenText";
     private String issuerUri = "";
     private String clientId = "confluence-bot";
@@ -41,12 +42,13 @@ public final class SsoPropertiesFixture {
     /** The shape a deployment gets when it sets nothing but the two endpoints and a client. */
     public static SsoPropertiesFixture withExplicitEndpoints() {
         return new SsoPropertiesFixture()
-                .authorizationUri("https://otds.example.com/otdsws/oauth2/auth")
-                .tokenUri("https://otds.example.com/otdsws/oauth2/token")
-                .jwkSetUri("https://otds.example.com/otdsws/oauth2/jwks");
+                .authorizationUri("https://idp.example.com/oauth2/auth")
+                .tokenUri("https://idp.example.com/oauth2/token")
+                .jwkSetUri("https://idp.example.com/oauth2/jwks");
     }
 
     public SsoPropertiesFixture enabled(boolean value) { this.enabled = value; return this; }
+    public SsoPropertiesFixture providerId(String value) { this.providerId = value; return this; }
     public SsoPropertiesFixture providerName(String value) { this.providerName = value; return this; }
     public SsoPropertiesFixture issuerUri(String value) { this.issuerUri = value; return this; }
     public SsoPropertiesFixture clientId(String value) { this.clientId = value; return this; }
@@ -66,9 +68,9 @@ public final class SsoPropertiesFixture {
     public SsoPropertiesFixture codeTtl(Duration value) { this.codeTtl = value; return this; }
 
     public SsoProperties build() {
-        return new SsoProperties(enabled, providerName, issuerUri, clientId, clientSecret, scopes,
-                redirectUri, clientAuthenticationMethod, authorizationUri, tokenUri, userInfoUri,
-                jwkSetUri, userNameAttribute, emailClaims, defaultRoles, loginSuccessUri, logoutUri,
-                codeTtl);
+        return new SsoProperties(enabled, providerId, providerName, issuerUri, clientId,
+                clientSecret, scopes, redirectUri, clientAuthenticationMethod, authorizationUri,
+                tokenUri, userInfoUri, jwkSetUri, userNameAttribute, emailClaims, defaultRoles,
+                loginSuccessUri, logoutUri, codeTtl);
     }
 }

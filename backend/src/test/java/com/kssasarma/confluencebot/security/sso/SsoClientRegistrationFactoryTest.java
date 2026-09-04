@@ -12,38 +12,43 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * How the {@code app.sso.*} block becomes the registration Spring Security drives OTDS from.
+ * How the {@code app.sso.*} block becomes the registration Spring Security drives the provider
+ * from.
  *
- * <p>Everything asserted here fails at runtime as a redirect into an OpenText error page with no
- * detail on this side of it, which is a bad place to learn that a client secret was blank or a
+ * <p>Everything asserted here fails at runtime as a redirect into someone else's error page with
+ * no detail on this side of it, which is a bad place to learn that a client secret was blank or a
  * grant type wrong. The tests that matter most are therefore the ones about what a half-filled
  * configuration does: refusing to start, with a message naming the missing property, beats
  * starting and failing per-user later.
+ *
+ * <p>No vendor appears in these assertions on purpose. What is built here is an OAuth 2.0 client
+ * against a server described by the standard, and a test that only passed for one product would
+ * be the first sign the abstraction had leaked.
  */
-class OtdsClientRegistrationFactoryTest {
+class SsoClientRegistrationFactoryTest {
 
     @Test
     void explicitEndpointsAreUsedVerbatimAndNoMetadataIsFetched() {
         // No network here at all: an unreachable issuer would fail this test if discovery ran.
-        ClientRegistration registration = OtdsClientRegistrationFactory.create(
+        ClientRegistration registration = SsoClientRegistrationFactory.create(
                 SsoPropertiesFixture.withExplicitEndpoints()
-                        .issuerUri("https://unreachable.invalid/otdsws/oauth2")
+                        .issuerUri("https://unreachable.invalid/oauth2")
                         .build());
 
         assertThat(registration.getRegistrationId()).isEqualTo("otds");
         assertThat(registration.getProviderDetails().getAuthorizationUri())
-                .isEqualTo("https://otds.example.com/otdsws/oauth2/auth");
+                .isEqualTo("https://idp.example.com/oauth2/auth");
         assertThat(registration.getProviderDetails().getTokenUri())
-                .isEqualTo("https://otds.example.com/otdsws/oauth2/token");
+                .isEqualTo("https://idp.example.com/oauth2/token");
         assertThat(registration.getProviderDetails().getJwkSetUri())
-                .isEqualTo("https://otds.example.com/otdsws/oauth2/jwks");
+                .isEqualTo("https://idp.example.com/oauth2/jwks");
         assertThat(registration.getProviderDetails().getIssuerUri())
-                .isEqualTo("https://unreachable.invalid/otdsws/oauth2");
+                .isEqualTo("https://unreachable.invalid/oauth2");
     }
 
     @Test
     void theFlowIsAlwaysAuthorizationCode() {
-        ClientRegistration registration = OtdsClientRegistrationFactory.create(
+        ClientRegistration registration = SsoClientRegistrationFactory.create(
                 SsoPropertiesFixture.withExplicitEndpoints().build());
 
         // The only grant that never lets this application see the user's directory password, and
@@ -55,7 +60,7 @@ class OtdsClientRegistrationFactoryTest {
     @Test
     void aClientWithNoSecretAuthenticatesAsPublicWhateverTheConfiguredMethodSays() {
         // Left as client_secret_basic, which is the default and which a public client cannot do.
-        ClientRegistration registration = OtdsClientRegistrationFactory.create(
+        ClientRegistration registration = SsoClientRegistrationFactory.create(
                 SsoPropertiesFixture.withExplicitEndpoints().clientSecret("").build());
 
         assertThat(registration.getClientAuthenticationMethod()).isEqualTo(ClientAuthenticationMethod.NONE);
@@ -63,7 +68,7 @@ class OtdsClientRegistrationFactoryTest {
 
     @Test
     void theConfiguredClientAuthenticationMethodIsHonouredWhenThereIsASecret() {
-        ClientRegistration registration = OtdsClientRegistrationFactory.create(
+        ClientRegistration registration = SsoClientRegistrationFactory.create(
                 SsoPropertiesFixture.withExplicitEndpoints()
                         .clientAuthenticationMethod("client_secret_post")
                         .build());
@@ -74,7 +79,7 @@ class OtdsClientRegistrationFactoryTest {
 
     @Test
     void anUnknownClientAuthenticationMethodIsRejectedByName() {
-        assertThatThrownBy(() -> OtdsClientRegistrationFactory.create(
+        assertThatThrownBy(() -> SsoClientRegistrationFactory.create(
                 SsoPropertiesFixture.withExplicitEndpoints()
                         .clientAuthenticationMethod("magic")
                         .build()))
@@ -84,7 +89,7 @@ class OtdsClientRegistrationFactoryTest {
 
     @Test
     void aMissingClientIdIsRefusedBeforeAnythingElseIsRead() {
-        assertThatThrownBy(() -> OtdsClientRegistrationFactory.create(
+        assertThatThrownBy(() -> SsoClientRegistrationFactory.create(
                 SsoPropertiesFixture.withExplicitEndpoints().clientId("").build()))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("app.sso.client-id");
@@ -92,7 +97,7 @@ class OtdsClientRegistrationFactoryTest {
 
     @Test
     void neitherAnIssuerNorEndpointsIsRefusedWithBothWaysOutNamed() {
-        assertThatThrownBy(() -> OtdsClientRegistrationFactory.create(
+        assertThatThrownBy(() -> SsoClientRegistrationFactory.create(
                 SsoPropertiesFixture.aProvider().build()))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContainingAll("app.sso.issuer-uri", "app.sso.authorization-uri");
@@ -102,9 +107,9 @@ class OtdsClientRegistrationFactoryTest {
     void anAuthorizationUriWithNoTokenUriIsNotEnoughToSkipDiscovery() {
         // Half a handshake. Falling through to discovery with an empty issuer is the failure this
         // guards: the message would then be about a missing issuer, not the missing token URL.
-        assertThatThrownBy(() -> OtdsClientRegistrationFactory.create(
+        assertThatThrownBy(() -> SsoClientRegistrationFactory.create(
                 SsoPropertiesFixture.aProvider()
-                        .authorizationUri("https://otds.example.com/otdsws/oauth2/auth")
+                        .authorizationUri("https://idp.example.com/oauth2/auth")
                         .build()))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("app.sso.token-uri");
@@ -112,7 +117,7 @@ class OtdsClientRegistrationFactoryTest {
 
     @Test
     void explicitEndpointsWithNothingToVerifyTheIdentityAgainstAreRefused() {
-        assertThatThrownBy(() -> OtdsClientRegistrationFactory.create(
+        assertThatThrownBy(() -> SsoClientRegistrationFactory.create(
                 SsoPropertiesFixture.withExplicitEndpoints().jwkSetUri("").build()))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContainingAll("app.sso.jwk-set-uri", "app.sso.user-info-uri");
@@ -122,9 +127,9 @@ class OtdsClientRegistrationFactoryTest {
     void discoveryAgainstAnUnreachableIssuerFailsWithTheWayOutOfIt() {
         // Loopback on a port nothing listens on: refused immediately, with no DNS lookup and no
         // proxy in the way, so this asserts the error handling rather than a network timeout.
-        assertThatThrownBy(() -> OtdsClientRegistrationFactory.create(
+        assertThatThrownBy(() -> SsoClientRegistrationFactory.create(
                 SsoPropertiesFixture.aProvider()
-                        .issuerUri("http://127.0.0.1:1/otdsws/oauth2")
+                        .issuerUri("http://127.0.0.1:1/oauth2")
                         .build()))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("app.sso.authorization-uri");
@@ -132,7 +137,7 @@ class OtdsClientRegistrationFactoryTest {
 
     @Test
     void theProviderNameIsCarriedThroughAsTheClientName() {
-        ClientRegistration registration = OtdsClientRegistrationFactory.create(
+        ClientRegistration registration = SsoClientRegistrationFactory.create(
                 SsoPropertiesFixture.withExplicitEndpoints()
                         .providerName("OpenText Directory Services")
                         .scopes(List.of("openid", "email"))
@@ -140,5 +145,26 @@ class OtdsClientRegistrationFactoryTest {
 
         assertThat(registration.getClientName()).isEqualTo("OpenText Directory Services");
         assertThat(registration.getScopes()).containsExactlyInAnyOrder("openid", "email");
+    }
+
+    @Test
+    void theRegistrationIdIsWhicheverTheDeploymentChose() {
+        // It is the last segment of the redirect URL registered with the provider, so a deployment
+        // has to be able to pick it — and nothing in this codebase may assume any one value.
+        assertThat(SsoClientRegistrationFactory.create(
+                SsoPropertiesFixture.withExplicitEndpoints().providerId("entra").build())
+                .getRegistrationId()).isEqualTo("entra");
+
+        assertThat(SsoClientRegistrationFactory.create(
+                SsoPropertiesFixture.withExplicitEndpoints().providerId("keycloak").build())
+                .getRegistrationId()).isEqualTo("keycloak");
+    }
+
+    @Test
+    void aBlankProviderIdIsRefusedBecauseItWouldEmptyTheCallbackUrl() {
+        assertThatThrownBy(() -> SsoClientRegistrationFactory.create(
+                SsoPropertiesFixture.withExplicitEndpoints().providerId("").build()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("app.sso.provider-id");
     }
 }

@@ -2,7 +2,10 @@ package com.kssasarma.confluencebot.auth;
 
 import com.kssasarma.confluencebot.user.User;
 
-/** The half of single sign-on that has nothing to do with OAuth: what happens once OTDS agrees. */
+/**
+ * The half of single sign-on that has nothing to do with OAuth: what happens once the provider
+ * agrees.
+ */
 public interface SsoService {
 
     /** What the sign-in screen shows, and where its button goes. Safe to call unauthenticated. */

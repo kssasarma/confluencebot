@@ -10,11 +10,14 @@ export const TOKEN_KEY = 'cb_token'
 export const REFRESH_KEY = 'cb_refresh'
 
 /**
- * Whether *this* session was started through the identity provider.
+ * Which identity provider started *this* session, if one did.
  *
- * Not the same question as whether the account could have been. An administrator whose account is
- * linked to the directory but who just signed in with a password has no provider session to end,
+ * Not the same question as whether the account could have used one. An administrator whose account
+ * is linked to a directory but who just signed in with a password has no provider session to end,
  * and bouncing them through the provider's sign-out screen on their way out would be baffling.
+ *
+ * The provider's id rather than a flag, so that a deployment which later points at a different
+ * provider — or offers more than one — signs people out at the one they actually came from.
  */
 export const SSO_SESSION_KEY = 'cb_sso'
 
@@ -24,10 +27,12 @@ const listeners = new Set<SessionListener>()
 
 export const getToken = (): string => localStorage.getItem(TOKEN_KEY) ?? ''
 export const getRefreshToken = (): string | null => localStorage.getItem(REFRESH_KEY)
-export const isSsoSession = (): boolean => localStorage.getItem(SSO_SESSION_KEY) === 'true'
+/** The provider this session came from, or null for a password session. */
+export const getSsoSessionProvider = (): string | null => localStorage.getItem(SSO_SESSION_KEY)
 
 /** Called once, where a directory sign-in is redeemed. Survives token rotation; dies with the session. */
-export const markSsoSession = (): void => localStorage.setItem(SSO_SESSION_KEY, 'true')
+export const markSsoSession = (providerId: string): void =>
+  localStorage.setItem(SSO_SESSION_KEY, providerId)
 
 export const authHeader = (): Record<string, string> => {
   const token = getToken()

@@ -5,9 +5,9 @@ import jakarta.persistence.*;
 import java.time.Instant;
 
 /**
- * The hand-off between the end of an OTDS sign-in and the single-page app.
+ * The hand-off between the end of a single sign-on and the single-page app.
  *
- * <p>OTDS finishes by redirecting a browser, and a redirect can only carry what fits in a URL —
+ * <p>A provider finishes by redirecting a browser, and a redirect can only carry what fits in a URL —
  * but a URL is the one place an access and refresh token pair must not be: it survives in browser
  * history, and in the {@code Referer} of the next request the page makes. So the redirect carries
  * this instead: a random, single-use, one-minute credential that buys exactly one token pair over

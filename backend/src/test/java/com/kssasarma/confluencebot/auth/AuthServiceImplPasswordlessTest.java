@@ -58,8 +58,9 @@ class AuthServiceImplPasswordlessTest {
         User ssoOnly = new User();
         ssoOnly.setEmail("jane@corp.example");
         ssoOnly.setRoles(Set.of(UserRole.USER));
-        ssoOnly.setAuthProvider(AuthProvider.OTDS);
-        ssoOnly.setExternalId("otds-subject");
+        ssoOnly.setAuthProvider(AuthProvider.SSO);
+        ssoOnly.setSsoProviderId("otds");
+        ssoOnly.setExternalId("a-subject");
         ssoOnly.setPassword(null);
         when(userRepository.findById(any())).thenReturn(Optional.of(ssoOnly));
 

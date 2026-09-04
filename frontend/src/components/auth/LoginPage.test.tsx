@@ -30,6 +30,7 @@ describe('LoginPage', () => {
   function ssoConfig(overrides: Partial<SsoConfig> = {}): SsoConfig {
     return {
       enabled: true,
+      providerId: 'otds',
       providerName: 'OpenText',
       authorizationUrl: '/api/oauth2/authorization/otds',
       logoutUrl: null,
@@ -45,8 +46,25 @@ describe('LoginPage', () => {
     expect(await screen.findByRole('button', { name: /continue with opentext/i })).toBeInTheDocument()
   })
 
+  it('names whichever provider the deployment configured, not a hardcoded one', async () => {
+    // The same build serves a customer on OpenText and one on Entra ID; only the API answer
+    // differs. A vendor name compiled into the bundle would be the coupling this guards against.
+    mockGetSsoConfig.mockResolvedValue(ssoConfig({
+      providerId: 'entra',
+      providerName: 'Microsoft Entra ID',
+      authorizationUrl: '/api/oauth2/authorization/entra',
+    }))
+
+    renderWithProviders(<LoginPage />)
+
+    expect(await screen.findByRole('button', { name: /continue with microsoft entra id/i }))
+      .toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /opentext/i })).not.toBeInTheDocument()
+  })
+
   it('shows only the password form when there is no directory behind this deployment', async () => {
-    mockGetSsoConfig.mockResolvedValue(ssoConfig({ enabled: false, providerName: null, authorizationUrl: null }))
+    mockGetSsoConfig.mockResolvedValue(
+      ssoConfig({ enabled: false, providerId: null, providerName: null, authorizationUrl: null }))
 
     renderWithProviders(<LoginPage />)
 
