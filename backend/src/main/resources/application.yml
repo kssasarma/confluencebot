@@ -119,6 +119,8 @@ chat:
   # inherited from the chat model above, which is what this pass used before it was configurable.
   rerank:
     enabled: ${CHAT_RERANK_LLM_ENABLED:true}
+    # native calls POST /rerank; chat-completions asks the configured chat model for a JSON order.
+    transport: ${RERANK_TRANSPORT:native}
     base-url: ${RERANK_BASE_URL:}
     api-key: ${RERANK_API_KEY:}
     model: ${RERANK_MODEL:}

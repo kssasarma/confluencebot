@@ -1,5 +1,6 @@
 package com.kssasarma.confluencebot.config;
 
+import com.kssasarma.confluencebot.rag.service.ChatCompletionRerankClient;
 import com.kssasarma.confluencebot.rag.service.LiteLlmRerankClient;
 import com.kssasarma.confluencebot.rag.service.RerankClient;
 import io.micrometer.observation.ObservationRegistry;
@@ -9,6 +10,7 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -44,20 +46,29 @@ public class ChatRerankConfiguration {
 
     private static final Logger log = LoggerFactory.getLogger(ChatRerankConfiguration.class);
 
-    /** Calls a native rerank API, rather than treating cross-encoders as chat-completion models. */
+    /** Selects either the provider's native rerank API or a chat-completions ranking prompt. */
     @Bean
     public RerankClient rerankClient(
             RestClient.Builder restClientBuilder,
             ChatRerankProperties properties,
+            @Qualifier("rerankChatClient") ObjectProvider<ChatClient> rerankChatClient,
             @Value("${spring.ai.openai.base-url:}") String sharedBaseUrl,
             @Value("${spring.ai.openai.api-key:}") String sharedApiKey,
             @Value("${spring.ai.openai.chat.base-url:}") String chatBaseUrl,
             @Value("${spring.ai.openai.chat.api-key:}") String chatApiKey,
             @Value("${spring.ai.openai.chat.options.model:}") String chatModel) {
+        String model = inherit(properties.model(), chatModel);
+        if (properties.transport() == ChatRerankProperties.Transport.CHAT_COMPLETIONS) {
+            if (!StringUtils.hasText(model)) {
+                throw new IllegalStateException("No re-rank model configured: set RERANK_MODEL or CHAT_MODEL.");
+            }
+            log.info("Re-ranking with model '{}' through chat completions", model);
+            return new ChatCompletionRerankClient(rerankChatClient.getObject());
+        }
+
         String baseUrl = inherit(properties.baseUrl(), chatBaseUrl, sharedBaseUrl);
         String apiKey = StringUtils.hasText(properties.apiKey())
                 ? properties.apiKey() : inherit(chatApiKey, sharedApiKey);
-        String model = inherit(properties.model(), chatModel);
         if (!StringUtils.hasText(baseUrl)) {
             throw new IllegalStateException("No re-rank endpoint configured: set RERANK_BASE_URL or CHAT_BASE_URL.");
         }

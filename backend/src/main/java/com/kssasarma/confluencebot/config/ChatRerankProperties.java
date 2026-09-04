@@ -35,6 +35,13 @@ public record ChatRerankProperties(
          *  {@code chat.retrieval.rerank-mmr-lambda}, which is arithmetic and costs nothing. */
         @DefaultValue("true") boolean enabled,
 
+        /**
+         * How the configured model is invoked. {@link Transport#NATIVE} calls the provider's
+         * {@code /rerank} endpoint; {@link Transport#CHAT_COMPLETIONS} asks an OpenAI-compatible
+         * chat model for a JSON permutation of the excerpts.
+         */
+        @DefaultValue("NATIVE") Transport transport,
+
         /** Endpoint for the re-rank call. Empty inherits the chat endpoint. */
         @DefaultValue("") String baseUrl,
 
@@ -56,6 +63,11 @@ public record ChatRerankProperties(
          *  model call for no change. */
         @DefaultValue("64") @Positive Integer maxTokens
 ) {
+
+    public enum Transport {
+        NATIVE,
+        CHAT_COMPLETIONS
+    }
 
     /**
      * Whether re-ranking must talk to somewhere other than where answers come from.

@@ -228,6 +228,7 @@ CHAT_MODEL=gpt-4.1
 
 RERANK_BASE_URL=https://litellm.example/v1
 RERANK_MODEL=mmarco-rerank                # LiteLLM model alias configured with mode: rerank
+# RERANK_TRANSPORT=native                  # the default: POST /rerank
 ```
 
 Re-ranking is the one most worth moving. It is a single native `POST /rerank` call with a query and
@@ -235,6 +236,16 @@ the candidate excerpts — not a chat-completion call. Set `RERANK_MODEL` to the
 configuration has `mode: rerank`; set `RERANK_BASE_URL` to the LiteLLM proxy base URL (normally
 ending in `/v1`). If the call fails or is refused by its circuit breaker, retrieval keeps the MMR
 ordering and the answer is unaffected.
+
+To use an OpenAI-compatible chat model for this pass instead, set
+`RERANK_TRANSPORT=chat-completions`. The app then calls `/chat/completions` using the configured
+`RERANK_*` connection/model (or the `CHAT_*` values it inherits) and asks for a JSON permutation
+of the excerpts. For example, to use the same model and endpoint that answer questions:
+
+```dotenv
+RERANK_TRANSPORT=chat-completions
+RERANK_MODEL=gpt-4.1
+```
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
@@ -251,9 +262,10 @@ ordering and the answer is unaffected.
 | `EMBED_BASE_URL` | | `AI_BASE_URL` | Endpoint that produces embeddings |
 | `EMBED_API_KEY` | | `AI_API_KEY` | Key for the embedding endpoint |
 | `EMBED_MODEL` | | `openai/snowflake-arctic` | Embedding model name (must produce 1024-dim vectors) |
-| `RERANK_BASE_URL` | | `CHAT_BASE_URL` | LiteLLM/API base URL; the app calls its `/rerank` endpoint |
-| `RERANK_API_KEY` | | `CHAT_API_KEY` | Key for the re-ranking endpoint |
-| `RERANK_MODEL` | | `CHAT_MODEL` | Native rerank model or LiteLLM rerank alias (for example `mmarco-rerank`) |
+| `RERANK_BASE_URL` | | `CHAT_BASE_URL` | Re-ranking API base URL; used for `/rerank` or `/chat/completions`, according to transport |
+| `RERANK_API_KEY` | | `CHAT_API_KEY` | Key for the re-ranking connection |
+| `RERANK_MODEL` | | `CHAT_MODEL` | Native rerank alias in `native` mode, or chat-completions model in `chat-completions` mode |
+| `RERANK_TRANSPORT` | | `native` | `native` calls `/rerank`; `chat-completions` prompts the configured chat model for the excerpt order |
 | `RERANK_TEMPERATURE` | | `0.0` | Ranking should be repeatable, so lower than the answer model |
 | `RERANK_MAX_TOKENS` | | `64` | A permutation needs few tokens; raise it for a reasoning model |
 | `CHAT_RERANK_LLM_ENABLED` | | `true` | Off: keep the MMR order and skip the re-rank call entirely |

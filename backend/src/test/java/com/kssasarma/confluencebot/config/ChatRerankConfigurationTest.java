@@ -7,6 +7,8 @@ import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.web.client.RestClient;
+import com.kssasarma.confluencebot.rag.service.ChatCompletionRerankClient;
+import com.kssasarma.confluencebot.rag.service.LiteLlmRerankClient;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -50,9 +52,17 @@ class ChatRerankConfigurationTest {
     void withNoReRankSettingsAtAllTheAnswerModelKeepsDoingTheRanking() {
         // The behaviour this pass had before it could be configured: same endpoint, same model.
         runner.run(context -> {
+            assertThat(context.getBean("rerankClient")).isInstanceOf(LiteLlmRerankClient.class);
             assertThat(context.getBean("rerankChatClient")).isSameAs(answerEndpointClient);
             assertThat(defaultOptions().getModel()).isEqualTo("big-writer");
         });
+    }
+
+    @Test
+    void chatCompletionsTransportUsesTheChatClientAdapter() {
+        runner.withPropertyValues("chat.rerank.transport=chat-completions").run(context ->
+                assertThat(context.getBean("rerankClient"))
+                        .isInstanceOf(ChatCompletionRerankClient.class));
     }
 
     @Test
@@ -100,6 +110,7 @@ class ChatRerankConfigurationTest {
             ChatRerankProperties properties = context.getBean(ChatRerankProperties.class);
 
             assertThat(properties.enabled()).isTrue();
+            assertThat(properties.transport()).isEqualTo(ChatRerankProperties.Transport.NATIVE);
             assertThat(properties.maxTokens()).isEqualTo(64);
             assertThat(properties.temperature()).isEqualTo(0.0);
             assertThat(properties.hasOwnConnection()).isFalse();
