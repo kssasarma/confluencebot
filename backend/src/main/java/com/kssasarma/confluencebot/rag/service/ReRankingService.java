@@ -9,13 +9,11 @@ import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
@@ -43,7 +41,7 @@ public class ReRankingService {
 
     private static final Logger log = LoggerFactory.getLogger(ReRankingService.class);
 
-    private final ChatClient chatClient;
+    private final RerankClient rerankClient;
     private final CircuitBreaker circuitBreaker;
     private final Bulkhead bulkhead;
     private final boolean llmRerankEnabled;
@@ -54,11 +52,11 @@ public class ReRankingService {
     @Value("${chat.retrieval.rerank-fusion-weight:0.5}")
     private double fusionWeight;
 
-    public ReRankingService(@Qualifier("rerankChatClient") ChatClient rerankChatClient,
+    public ReRankingService(RerankClient rerankClient,
                              ChatRerankProperties rerankProperties,
                              @Qualifier("rerankCircuitBreaker") CircuitBreaker circuitBreaker,
                              @Qualifier("rerankBulkhead") Bulkhead bulkhead) {
-        this.chatClient = rerankChatClient;
+        this.rerankClient = rerankClient;
         this.llmRerankEnabled = rerankProperties.enabled();
         this.circuitBreaker = circuitBreaker;
         this.bulkhead = bulkhead;
@@ -142,21 +140,14 @@ public class ReRankingService {
     // ── LLM re-rank ──────────────────────────────────────────────────────────
 
     private List<RetrievedChunk> llmRerank(String query, List<RetrievedChunk> candidates) {
-        String prompt = buildRerankPrompt(query, candidates);
         try {
-            String response = bulkhead.executeSupplier(
+            List<Integer> zeroBasedOrder = bulkhead.executeSupplier(
                 () -> circuitBreaker.executeSupplier(
-                    () -> chatClient.prompt().user(prompt).call().content()
+                    () -> rerankClient.rerank(query, candidates.stream()
+                            .map(RetrievedChunk::getContent).toList())
                 )
             );
-            List<Integer> order = parseOrder(response, candidates.size());
-            if (order.isEmpty()) {
-                // Costs a call per question and changes nothing, so it is worth being able to see:
-                // usually a model that explains itself, or one whose reply hit the token ceiling.
-                log.debug("LLM re-rank reply was not an order, keeping MMR order: {}",
-                        truncate(response, 200));
-            }
-            return applyOrder(candidates, order);
+            return applyZeroBasedOrder(candidates, zeroBasedOrder);
         } catch (CallNotPermittedException e) {
             log.warn("LLM re-rank skipped — circuit breaker open: {}", e.getMessage());
             return candidates;
@@ -169,46 +160,20 @@ public class ReRankingService {
         }
     }
 
-    private static String buildRerankPrompt(String query, List<RetrievedChunk> candidates) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("Rank these documentation excerpts by how directly and completely they answer the question.\n");
-        sb.append("Question: ").append(query).append("\n\n");
-        for (int i = 0; i < candidates.size(); i++) {
-            sb.append('[').append(i + 1).append("] ")
-              .append(truncate(candidates.get(i).getContent(), 500))
-              .append("\n\n");
-        }
-        sb.append("Respond with ONLY the excerpt numbers in order from most to least relevant, comma-separated (e.g. \"3,1,2\"). No other text.");
-        return sb.toString();
-    }
-
-    private static List<Integer> parseOrder(String response, int expectedCount) {
-        if (response == null || response.isBlank()) return List.of();
-        try {
-            return Arrays.stream(response.trim().split("[,\\s]+"))
-                .filter(s -> !s.isBlank())
-                .map(Integer::parseInt)
-                .limit(expectedCount)
-                .toList();
-        } catch (NumberFormatException e) {
-            return List.of();
-        }
-    }
-
-    /** Reorders {@code candidates} per {@code order} (1-based); anything the LLM didn't mention
+    /** Reorders {@code candidates} per {@code order} (zero-based); anything the provider didn't mention
      * keeps its MMR position, appended after the ordered ones. */
-    private static List<RetrievedChunk> applyOrder(List<RetrievedChunk> candidates,
-                                                    List<Integer> order) {
+    private static List<RetrievedChunk> applyZeroBasedOrder(List<RetrievedChunk> candidates,
+                                                             List<Integer> order) {
         if (order.isEmpty()) return candidates;
         List<RetrievedChunk> reordered = new ArrayList<>();
         Set<Integer> used = new HashSet<>();
         for (int idx : order) {
-            if (idx >= 1 && idx <= candidates.size() && used.add(idx)) {
-                reordered.add(candidates.get(idx - 1));
+            if (idx >= 0 && idx < candidates.size() && used.add(idx)) {
+                reordered.add(candidates.get(idx));
             }
         }
         for (int i = 0; i < candidates.size(); i++) {
-            if (!used.contains(i + 1)) reordered.add(candidates.get(i));
+            if (!used.contains(i)) reordered.add(candidates.get(i));
         }
         return reordered;
     }

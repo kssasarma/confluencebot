@@ -226,15 +226,15 @@ CHAT_BASE_URL=https://api.openai.com/v1   # answers come from somewhere else
 CHAT_API_KEY=sk-...
 CHAT_MODEL=gpt-4.1
 
-RERANK_MODEL=qwen2.5:3b                   # local, and much cheaper than the answer model
+RERANK_BASE_URL=https://litellm.example/v1
+RERANK_MODEL=mmarco-rerank                # LiteLLM model alias configured with mode: rerank
 ```
 
-Re-ranking is the one most worth moving. It is a single short call that emits a handful of tokens,
-it runs before the first token of the answer is streamed, and every question pays for it — so the
-model that writes well is rarely the one that should be doing it. Set `RERANK_MODEL` alone to keep
-it on the same server, or `RERANK_BASE_URL` too to move it elsewhere. If the call fails, is refused
-by its circuit breaker, or returns something that is not an order, retrieval keeps the MMR ordering
-and the answer is unaffected.
+Re-ranking is the one most worth moving. It is a single native `POST /rerank` call with a query and
+the candidate excerpts — not a chat-completion call. Set `RERANK_MODEL` to the LiteLLM alias whose
+configuration has `mode: rerank`; set `RERANK_BASE_URL` to the LiteLLM proxy base URL (normally
+ending in `/v1`). If the call fails or is refused by its circuit breaker, retrieval keeps the MMR
+ordering and the answer is unaffected.
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
@@ -251,9 +251,9 @@ and the answer is unaffected.
 | `EMBED_BASE_URL` | | `AI_BASE_URL` | Endpoint that produces embeddings |
 | `EMBED_API_KEY` | | `AI_API_KEY` | Key for the embedding endpoint |
 | `EMBED_MODEL` | | `openai/snowflake-arctic` | Embedding model name (must produce 1024-dim vectors) |
-| `RERANK_BASE_URL` | | `CHAT_BASE_URL` | Endpoint that re-ranks retrieved excerpts |
+| `RERANK_BASE_URL` | | `CHAT_BASE_URL` | LiteLLM/API base URL; the app calls its `/rerank` endpoint |
 | `RERANK_API_KEY` | | `CHAT_API_KEY` | Key for the re-ranking endpoint |
-| `RERANK_MODEL` | | `CHAT_MODEL` | Model that re-ranks retrieved excerpts |
+| `RERANK_MODEL` | | `CHAT_MODEL` | Native rerank model or LiteLLM rerank alias (for example `mmarco-rerank`) |
 | `RERANK_TEMPERATURE` | | `0.0` | Ranking should be repeatable, so lower than the answer model |
 | `RERANK_MAX_TOKENS` | | `64` | A permutation needs few tokens; raise it for a reasoning model |
 | `CHAT_RERANK_LLM_ENABLED` | | `true` | Off: keep the MMR order and skip the re-rank call entirely |

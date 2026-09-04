@@ -1,5 +1,7 @@
 package com.kssasarma.confluencebot.config;
 
+import com.kssasarma.confluencebot.rag.service.LiteLlmRerankClient;
+import com.kssasarma.confluencebot.rag.service.RerankClient;
 import io.micrometer.observation.ObservationRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -11,6 +13,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.util.StringUtils;
+import org.springframework.web.client.RestClient;
 
 /**
  * The model access used to order retrieved excerpts by how well they answer the question.
@@ -40,6 +43,31 @@ import org.springframework.util.StringUtils;
 public class ChatRerankConfiguration {
 
     private static final Logger log = LoggerFactory.getLogger(ChatRerankConfiguration.class);
+
+    /** Calls a native rerank API, rather than treating cross-encoders as chat-completion models. */
+    @Bean
+    public RerankClient rerankClient(
+            RestClient.Builder restClientBuilder,
+            ChatRerankProperties properties,
+            @Value("${spring.ai.openai.base-url:}") String sharedBaseUrl,
+            @Value("${spring.ai.openai.api-key:}") String sharedApiKey,
+            @Value("${spring.ai.openai.chat.base-url:}") String chatBaseUrl,
+            @Value("${spring.ai.openai.chat.api-key:}") String chatApiKey,
+            @Value("${spring.ai.openai.chat.options.model:}") String chatModel) {
+        String baseUrl = inherit(properties.baseUrl(), chatBaseUrl, sharedBaseUrl);
+        String apiKey = StringUtils.hasText(properties.apiKey())
+                ? properties.apiKey() : inherit(chatApiKey, sharedApiKey);
+        String model = inherit(properties.model(), chatModel);
+        if (!StringUtils.hasText(baseUrl)) {
+            throw new IllegalStateException("No re-rank endpoint configured: set RERANK_BASE_URL or CHAT_BASE_URL.");
+        }
+        if (!StringUtils.hasText(model)) {
+            throw new IllegalStateException("No re-rank model configured: set RERANK_MODEL or CHAT_MODEL.");
+        }
+        log.info("Re-ranking with model '{}' through native endpoint {}/rerank", model,
+                baseUrl.replaceAll("/+$", ""));
+        return new LiteLlmRerankClient(restClientBuilder, baseUrl, apiKey, model);
+    }
 
     /**
      * @param answerChatClientBuilder the auto-configured builder — prototype-scoped, so overriding

@@ -6,6 +6,7 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.web.client.RestClient;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -40,6 +41,7 @@ class ChatRerankConfigurationTest {
                 given(answerEndpointBuilder.build()).willReturn(answerEndpointClient);
                 return answerEndpointBuilder;
             })
+            .withBean(RestClient.Builder.class, RestClient::builder)
             .withPropertyValues(CHAT_MODEL + "=big-writer",
                     "spring.ai.openai.base-url=http://gpu-box:11434/v1",
                     "spring.ai.openai.api-key=shared-key");
@@ -123,12 +125,13 @@ class ChatRerankConfigurationTest {
         new ApplicationContextRunner()
                 .withUserConfiguration(RerankConfigurationUnderTest.class)
                 .withBean(ChatClient.Builder.class, () -> answerEndpointBuilder)
+                .withBean(RestClient.Builder.class, RestClient::builder)
                 .withPropertyValues("chat.rerank.api-key=orphaned-key")
                 .run(context -> assertThat(context)
                         .hasFailed()
                         .getFailure()
                         .rootCause()
-                        .hasMessageContaining("RERANK_BASE_URL"));
+                        .hasMessageContaining("endpoint"));
     }
 
     @Test
