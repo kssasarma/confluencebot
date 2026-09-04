@@ -6,6 +6,7 @@ import com.kssasarma.confluencebot.user.RefreshToken;
 import com.kssasarma.confluencebot.user.RefreshTokenRepository;
 import com.kssasarma.confluencebot.user.User;
 import com.kssasarma.confluencebot.user.UserRepository;
+import com.kssasarma.confluencebot.user.UserRole;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.BadCredentialsException;
@@ -108,7 +109,7 @@ public class AuthServiceImpl implements AuthService {
         refreshTokenRepository.save(refreshToken);
 
         return new AuthResponse(
-                user.getId(), user.getEmail(), user.getRole().name(),
+                user.getId(), user.getEmail(), UserRole.namesOf(user.getRoles()),
                 accessToken, refreshToken.getToken(), user.isMustChangePassword(), null);
     }
 }

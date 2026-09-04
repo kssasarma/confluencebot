@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
-import type { AuthUser, AuthResponse } from '../types'
+import type { AuthUser, AuthResponse, UserRole } from '../types'
 import {
   login as apiLogin, getMe, changePassword as apiChangePassword,
   refreshSession, revokeSession,
@@ -12,7 +12,11 @@ interface AuthContextValue {
   isLoading: boolean
   isAuthenticated: boolean
   isAdmin: boolean
-  /** Either admin role — enough to reach the admin screen, not enough to act everywhere on it. */
+  /** ADMIN or ADMIN_READ_ONLY — enough to see and onboard users. */
+  canManageUsers: boolean
+  /** ADMIN or INGESTOR — enough to trigger and retrigger ingestion jobs. */
+  canIngest: boolean
+  /** Any role with a reason to open the admin screen at all. */
   canAdminister: boolean
   login: (email: string, password: string) => Promise<void>
   applySession: (data: AuthResponse) => void
@@ -40,7 +44,7 @@ function toAuthUser(data: AuthResponse, token: string): AuthUser {
   return {
     userId: data.userId!,
     email: data.email!,
-    role: data.role as AuthUser['role'],
+    roles: (data.roles ?? []) as UserRole[],
     mustChangePassword,
   }
 }
@@ -137,12 +141,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     clearSession()
   }, [])
 
+  const isAdmin = user?.roles.includes('ADMIN') ?? false
+  const canManageUsers = isAdmin || (user?.roles.includes('ADMIN_READ_ONLY') ?? false)
+  const canIngest = isAdmin || (user?.roles.includes('INGESTOR') ?? false)
+
   return (
     <AuthContext.Provider value={{
       user, token, isLoading,
       isAuthenticated: !!user,
-      isAdmin: user?.role === 'ADMIN',
-      canAdminister: user?.role === 'ADMIN' || user?.role === 'ADMIN_READ_ONLY',
+      isAdmin,
+      canManageUsers,
+      canIngest,
+      canAdminister: canManageUsers || canIngest,
       login, applySession, changePassword, logout,
     }}>
       {children}

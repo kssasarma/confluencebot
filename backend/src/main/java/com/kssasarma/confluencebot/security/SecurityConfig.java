@@ -53,7 +53,10 @@ public class SecurityConfig {
                                 "/swagger-ui/**",
                                 "/swagger-ui.html"
                         ).permitAll()
-                        .requestMatchers("/api/admin/**").hasRole("ADMIN")
+                        // Method security on AdminController is the real gate per endpoint; this
+                        // must admit everyone it admits, or a read-only admin is bounced here
+                        // before that finer-grained check ever runs.
+                        .requestMatchers("/api/admin/**").hasAnyRole("ADMIN", "ADMIN_READ_ONLY")
                         .anyRequest().authenticated()
                 )
                 .authenticationProvider(authenticationProvider())

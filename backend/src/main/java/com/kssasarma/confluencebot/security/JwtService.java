@@ -1,6 +1,7 @@
 package com.kssasarma.confluencebot.security;
 
 import com.kssasarma.confluencebot.user.User;
+import com.kssasarma.confluencebot.user.UserRole;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
@@ -30,7 +31,7 @@ public class JwtService {
                 .subject(user.getEmail())
                 .claims(Map.of(
                         "userId", user.getId(),
-                        "role", user.getRole().name(),
+                        "roles", UserRole.namesOf(user.getRoles()),
                         "mustChangePassword", user.isMustChangePassword()
                 ))
                 .issuedAt(new Date())

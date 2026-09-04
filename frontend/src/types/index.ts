@@ -1,14 +1,17 @@
+/** A user may hold more than one of these at once. */
+export type UserRole = 'ADMIN' | 'ADMIN_READ_ONLY' | 'INGESTOR' | 'USER'
+
 export interface AuthUser {
   userId: number
   email: string
-  role: 'ADMIN' | 'ADMIN_READ_ONLY' | 'USER'
+  roles: UserRole[]
   mustChangePassword: boolean
 }
 
 export interface AuthResponse {
   userId?: number
   email?: string
-  role?: string
+  roles?: string[]
   token?: string
   refreshToken?: string
   mustChangePassword?: boolean

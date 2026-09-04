@@ -2,7 +2,7 @@ import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render } from '@testing-library/react'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { Link, MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { AuthProvider } from '../context/AuthContext'
 import { ChatProvider } from '../context/ChatContext'
@@ -75,6 +75,39 @@ function renderRoute(route: string) {
             <AuthProvider>
               <MemoryRouter initialEntries={[route]}>
                 <ChatProvider>
+                  <Routes>
+                    <Route index element={<NewChatRedirect />} />
+                    <Route path="chat/:chatId" element={<ChatRoute />} />
+                  </Routes>
+                </ChatProvider>
+              </MemoryRouter>
+            </AuthProvider>
+          </ConfirmProvider>
+        </ToastProvider>
+      </ThemeProvider>
+    </QueryClientProvider>,
+  )
+}
+
+/** Same stack as {@link renderRoute}, plus one link per id so a test can navigate between chats. */
+function renderRouteWithNav(route: string, linkedChatIds: string[]) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false, gcTime: 0 }, mutations: { retry: false } },
+  })
+
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <ThemeProvider>
+        <ToastProvider>
+          <ConfirmProvider>
+            <AuthProvider>
+              <MemoryRouter initialEntries={[route]}>
+                <ChatProvider>
+                  <nav>
+                    {linkedChatIds.map(chatId => (
+                      <Link key={chatId} to={`/chat/${chatId}`}>Open {chatId}</Link>
+                    ))}
+                  </nav>
                   <Routes>
                     <Route index element={<NewChatRedirect />} />
                     <Route path="chat/:chatId" element={<ChatRoute />} />
@@ -197,6 +230,52 @@ describe('opening a new chat', () => {
     expect(
       screen.queryByRole('button', { name: /steps to deploy to production/i }),
     ).not.toBeInTheDocument()
+  })
+
+  it('does not resurrect the greeting when returning to a conversation after visiting a new one', async () => {
+    // Reported symptom: reopening an old conversation left the welcome greeting on screen,
+    // crowding out the real transcript. This drives the exact round trip that would expose it —
+    // a saved conversation, away to a brand-new empty one, and back — within a single tab session
+    // (the scenario a full reload cannot reproduce, since every id starts unvisited either way).
+    const savedChatId = '1c8a4b0e-1d5f-4a3e-9c2b-7f0d5f4a1b2c'
+    const draftChatId = '2d9b5c1f-2e6f-4b4f-8d3c-8f1e6b5c4d3e'
+
+    fetchMock.mockImplementation(async input => {
+      const url = String(input)
+      if (url.includes(savedChatId) && TRANSCRIPT_URL.test(url)) {
+        return json([
+          {
+            id: 1, role: 'USER', content: 'Where are the runbooks?',
+            sources: [], followUpQuestions: [], citations: [], confidence: null,
+            createdAt: '2026-09-01T10:00:00Z',
+          },
+          {
+            id: 2, role: 'ASSISTANT', content: 'In the SRE space.',
+            sources: [], followUpQuestions: [], citations: [], confidence: 0.9,
+            createdAt: '2026-09-01T10:00:01Z',
+          },
+        ])
+      }
+      // The other conversation is one the server has never heard of — a fresh, empty draft.
+      if (TRANSCRIPT_URL.test(url)) return json({ detail: 'not found' }, 404)
+      return stubBackground(url) ?? json({}, 404)
+    })
+
+    renderRouteWithNav(`/chat/${savedChatId}`, [draftChatId, savedChatId])
+
+    expect(await screen.findByText(/in the sre space/i)).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('link', { name: `Open ${draftChatId}` }))
+    expect(await screen.findByRole('heading', { name: /how may i help you/i })).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('link', { name: `Open ${savedChatId}` }))
+
+    expect(await screen.findByText(/in the sre space/i)).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: /how may i help you/i })).not.toBeInTheDocument()
+    // Exactly one instance each — reopening must not have appended a second copy of either the
+    // transcript or the greeting alongside it.
+    expect(screen.getAllByText(/in the sre space/i)).toHaveLength(1)
+    expect(screen.getAllByText(/where are the runbooks/i)).toHaveLength(1)
   })
 
   it('still reports a genuine failure to read a conversation', async () => {

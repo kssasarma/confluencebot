@@ -1,6 +1,7 @@
 package com.kssasarma.confluencebot.auth;
 
 import com.kssasarma.confluencebot.user.User;
+import com.kssasarma.confluencebot.user.UserRole;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -41,8 +42,8 @@ public class AuthController {
     @Operation(summary = "Describe the signed-in user")
     @GetMapping("/me")
     public UserInfoResponse me(@AuthenticationPrincipal User user) {
-        return new UserInfoResponse(user.getId(), user.getEmail(), user.getRole().name(),
-                user.isMustChangePassword());
+        return new UserInfoResponse(user.getId(), user.getEmail(),
+                UserRole.namesOf(user.getRoles()), user.isMustChangePassword());
     }
 
     @Operation(summary = "Change the password and re-issue tokens")

@@ -20,8 +20,10 @@ import org.springframework.web.bind.annotation.*;
 
 import java.security.SecureRandom;
 import java.util.Base64;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 @Tag(name = "Admin", description = "User management — admin only")
 @RestController
@@ -55,13 +57,13 @@ public class AdminController {
                     .body(ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, "Email already in use"));
         }
 
-        UserRole role;
+        Set<UserRole> roles;
         try {
-            role = request.role() != null ? UserRole.valueOf(request.role().toUpperCase()) : UserRole.USER;
+            roles = parseRoles(request.roles());
         } catch (IllegalArgumentException e) {
-            logger.warn("Admin {} attempted to create user with invalid role: {}", auth.getName(), request.role());
+            logger.warn("Admin {} attempted to create user with invalid roles: {}", auth.getName(), request.roles());
             return ResponseEntity.badRequest()
-                    .body(ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, "Invalid role: " + request.role()));
+                    .body(ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, "Invalid role in: " + request.roles()));
         }
 
         String tempPassword = (request.tempPassword() != null && !request.tempPassword().isBlank())
@@ -71,11 +73,11 @@ public class AdminController {
         User user = new User();
         user.setEmail(request.email());
         user.setPassword(passwordEncoder.encode(tempPassword));
-        user.setRole(role);
+        user.setRoles(roles);
         user.setMustChangePassword(true);
 
         User saved = userRepository.save(user);
-        logger.info("Admin {} created new user {} with role {}", auth.getName(), request.email(), role);
+        logger.info("Admin {} created new user {} with roles {}", auth.getName(), request.email(), roles);
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(Map.of("user", AdminUserResponse.from(saved), "tempPassword", tempPassword));
     }
@@ -99,43 +101,53 @@ public class AdminController {
                 .orElse(ResponseEntity.notFound().build());
     }
 
-    @Operation(summary = "Modify a user's role (promote or demote)")
-    @PatchMapping("/users/{id}/role")
+    @Operation(summary = "Replace a user's roles (promote, demote, or grant an additional role)")
+    @PatchMapping("/users/{id}/roles")
     @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<?> updateRole(@PathVariable Long id, @RequestBody Map<String, String> body, Authentication auth) {
-        String newRoleStr = body.get("role");
-        if (newRoleStr == null || newRoleStr.isBlank()) {
+    public ResponseEntity<?> updateRoles(@PathVariable Long id, @RequestBody Map<String, List<String>> body, Authentication auth) {
+        List<String> requested = body.get("roles");
+        if (requested == null || requested.isEmpty()) {
             return ResponseEntity.badRequest()
-                    .body(ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, "Role field is required"));
+                    .body(ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, "roles must contain at least one role"));
         }
 
-        UserRole newRole;
+        Set<UserRole> newRoles;
         try {
-            newRole = UserRole.valueOf(newRoleStr.toUpperCase());
+            newRoles = parseRoles(requested);
         } catch (IllegalArgumentException e) {
-            logger.warn("Admin {} attempted to set invalid role: {}", auth.getName(), newRoleStr);
+            logger.warn("Admin {} attempted to set invalid roles: {}", auth.getName(), requested);
             return ResponseEntity.badRequest()
-                    .body(ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, "Invalid role: " + newRoleStr));
+                    .body(ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, "Invalid role in: " + requested));
         }
 
         return userRepository.findById(id)
                 .map(u -> {
-                    UserRole oldRole = u.getRole();
+                    Set<UserRole> oldRoles = u.getRoles();
 
                     // Self-demotion is the one change nobody can undo for you: the request that
                     // strips your own ADMIN is also the last one you are authorised to make here.
-                    if (newRole != UserRole.ADMIN && u.getEmail().equals(auth.getName())) {
-                        logger.warn("Admin {} attempted to demote themselves to {}", auth.getName(), newRole);
+                    if (!newRoles.contains(UserRole.ADMIN) && u.getEmail().equals(auth.getName())) {
+                        logger.warn("Admin {} attempted to remove their own ADMIN role", auth.getName());
                         return ResponseEntity.badRequest().body((Object) ProblemDetail.forStatusAndDetail(
-                                HttpStatus.BAD_REQUEST, "You cannot demote your own account; ask another admin"));
+                                HttpStatus.BAD_REQUEST, "You cannot remove your own admin role; ask another admin"));
                     }
 
-                    u.setRole(newRole);
+                    u.setRoles(newRoles);
                     User saved = userRepository.save(u);
-                    logger.info("Admin {} changed role for user {} (id={}) from {} to {}", auth.getName(), u.getEmail(), id, oldRole, newRole);
+                    logger.info("Admin {} changed roles for user {} (id={}) from {} to {}", auth.getName(), u.getEmail(), id, oldRoles, newRoles);
                     return ResponseEntity.ok((Object) AdminUserResponse.from(saved));
                 })
                 .orElse(ResponseEntity.notFound().build());
+    }
+
+    /** Defaults to {@code {USER}} when the caller sends no roles at all. */
+    private Set<UserRole> parseRoles(List<String> raw) {
+        if (raw == null || raw.isEmpty()) return Set.of(UserRole.USER);
+        Set<UserRole> parsed = new LinkedHashSet<>();
+        for (String value : raw) {
+            parsed.add(UserRole.valueOf(value.toUpperCase()));
+        }
+        return parsed;
     }
 
     private String generateTempPassword() {

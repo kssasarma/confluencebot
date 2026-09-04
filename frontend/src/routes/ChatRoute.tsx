@@ -172,8 +172,15 @@ export default function ChatRoute() {
         Keyed by conversation as well, so that starting another new chat replays the entrance
         animation. Two empty conversations are identical to look at; the movement is what says
         one has been replaced by the other.
+
+        The key is namespaced rather than the bare `chatId` the `ErrorBoundary` above uses: the two
+        are siblings, and a shared key on siblings — even of different element types — is a
+        duplicate key as far as React's reconciler is concerned. That collision showed up as a
+        conversation with a real transcript still showing the greeting underneath it after the
+        reader had switched away and back: React mismatched which committed DOM node belonged to
+        which of the two identically-keyed elements, so removing the greeting outlived its own key.
       */}
-      {showWelcome && <WelcomeSuggestions key={chatId} onSelect={ask} />}
+      {showWelcome && <WelcomeSuggestions key={`welcome-${chatId}`} onSelect={ask} />}
 
       {showPreferences && (
         <ChatPreferencesDialog chatId={chatId} onClose={() => setShowPreferences(false)} />

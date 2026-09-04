@@ -112,7 +112,7 @@ public class IngestionController {
                                     }
                                     """)))
     })
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'INGESTOR')")
     @PostMapping("/space")
     public ResponseEntity<IngestionJobResponse> ingestSpace(
             @RequestBody(required = false) IngestRequest request) {
@@ -166,7 +166,7 @@ public class IngestionController {
                                     }
                                     """)))
     })
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'INGESTOR')")
     @PostMapping("/page/{pageId}")
     public ResponseEntity<IngestionJobResponse> ingestPage(
             @Parameter(description = "Confluence numeric page ID", example = "131073")
@@ -226,7 +226,7 @@ public class IngestionController {
                     content = @Content(mediaType = MediaType.APPLICATION_PROBLEM_JSON_VALUE,
                             schema = @Schema(implementation = ProblemDetail.class)))
     })
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'INGESTOR')")
     @PostMapping("/jobs/{jobId}/retrigger")
     public ResponseEntity<?> retriggerJob(
             @Parameter(description = "UUID of the failed job to resubmit")

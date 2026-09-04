@@ -7,7 +7,9 @@ import org.springframework.security.core.userdetails.UserDetails;
 
 import java.time.Instant;
 import java.util.Collection;
-import java.util.List;
+import java.util.Collections;
+import java.util.LinkedHashSet;
+import java.util.Set;
 
 @Entity
 @Table(name = "users")
@@ -22,9 +24,17 @@ public class User implements UserDetails {
     @Column(nullable = false)
     private String password;
 
+    /**
+     * A user's roles, not a role: {@link #setRoles} is the only mutator, and it always replaces
+     * the whole set. Eagerly fetched because {@link #getAuthorities()} is read by the security
+     * filter chain on every request, well outside any transaction the caller controls — a lazy
+     * collection there fails with a {@code LazyInitializationException} instead of degrading.
+     */
+    @ElementCollection(fetch = FetchType.EAGER)
+    @CollectionTable(name = "user_roles", joinColumns = @JoinColumn(name = "user_id"))
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false)
-    private UserRole role = UserRole.USER;
+    @Column(name = "role", nullable = false)
+    private Set<UserRole> roles = new LinkedHashSet<>(Set.of(UserRole.USER));
 
     @Column(nullable = false)
     private boolean enabled = true;
@@ -42,7 +52,9 @@ public class User implements UserDetails {
     void onUpdate() { this.updatedAt = Instant.now(); }
 
     @Override public Collection<? extends GrantedAuthority> getAuthorities() {
-        return List.of(new SimpleGrantedAuthority("ROLE_" + role.name()));
+        return roles.stream()
+                .map(role -> new SimpleGrantedAuthority("ROLE_" + role.name()))
+                .toList();
     }
     @Override public String getPassword() { return password; }
     @Override public String getUsername() { return email; }
@@ -50,13 +62,29 @@ public class User implements UserDetails {
 
     public Long getId() { return id; }
     public String getEmail() { return email; }
-    public UserRole getRole() { return role; }
+
+    /** Read-only view; go through {@link #setRoles} to change membership. */
+    public Set<UserRole> getRoles() { return Collections.unmodifiableSet(roles); }
+
+    public boolean hasRole(UserRole role) { return roles.contains(role); }
+
     public boolean isMustChangePassword() { return mustChangePassword; }
     public Instant getCreatedAt() { return createdAt; }
 
     public void setEmail(String email) { this.email = email; }
     public void setPassword(String password) { this.password = password; }
-    public void setRole(UserRole role) { this.role = role; }
+
+    /**
+     * Replaces the full set of roles. A user with no roles could authenticate but do nothing —
+     * that state is refused here rather than accepted and left for every caller to guard against.
+     */
+    public void setRoles(Set<UserRole> roles) {
+        if (roles == null || roles.isEmpty()) {
+            throw new IllegalArgumentException("A user must have at least one role");
+        }
+        this.roles = new LinkedHashSet<>(roles);
+    }
+
     public void setEnabled(boolean enabled) { this.enabled = enabled; }
     public void setMustChangePassword(boolean mustChangePassword) { this.mustChangePassword = mustChangePassword; }
 }

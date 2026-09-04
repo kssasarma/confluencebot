@@ -9,12 +9,12 @@ import { apiJson, jsonBody } from './http'
  * layer exists to do.
  */
 
-export type AdminRole = 'ADMIN' | 'ADMIN_READ_ONLY' | 'USER'
+export type AdminRole = 'ADMIN' | 'ADMIN_READ_ONLY' | 'INGESTOR' | 'USER'
 
 export interface AdminUser {
   id: number
   email: string
-  role: AdminRole
+  roles: AdminRole[]
   enabled: boolean
   mustChangePassword: boolean
   createdAt: string
@@ -45,19 +45,19 @@ export const listUsers = (): Promise<AdminUser[]> => apiJson<AdminUser[]>('/admi
 
 export const createUser = (
   email: string,
-  role: string,
+  roles: AdminRole[],
   tempPassword?: string,
 ): Promise<CreateUserResult> =>
   apiJson<CreateUserResult>('/admin/users', {
     method: 'POST',
-    ...jsonBody({ email, role, tempPassword }),
+    ...jsonBody({ email, roles, tempPassword }),
   })
 
 export const setUserEnabled = (id: number, enabled: boolean): Promise<AdminUser> =>
   apiJson<AdminUser>(`/admin/users/${id}/enabled`, { method: 'PATCH', ...jsonBody({ enabled }) })
 
-export const setUserRole = (id: number, role: AdminRole): Promise<AdminUser> =>
-  apiJson<AdminUser>(`/admin/users/${id}/role`, { method: 'PATCH', ...jsonBody({ role }) })
+export const setUserRoles = (id: number, roles: AdminRole[]): Promise<AdminUser> =>
+  apiJson<AdminUser>(`/admin/users/${id}/roles`, { method: 'PATCH', ...jsonBody({ roles }) })
 
 export const ingestSpace = (spaceKey: string, force = false): Promise<IngestionJob> =>
   apiJson<IngestionJob>('/ingest/space', { method: 'POST', ...jsonBody({ spaceKey, force }) })
