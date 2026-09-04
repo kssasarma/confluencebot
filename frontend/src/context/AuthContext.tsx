@@ -2,7 +2,7 @@ import { createContext, useContext, useState, useEffect, useCallback, useRef, ty
 import type { AuthUser, AuthResponse, UserRole } from '../types'
 import {
   login as apiLogin, getMe, changePassword as apiChangePassword,
-  refreshSession, revokeSession,
+  refreshSession, revokeSession, updateName as apiUpdateName,
 } from '../services/authService'
 import { clearSession, getRefreshToken, getToken, onSessionChange, storeSession } from '../lib/token'
 
@@ -21,6 +21,7 @@ interface AuthContextValue {
   login: (email: string, password: string) => Promise<void>
   applySession: (data: AuthResponse) => void
   changePassword: (currentPassword: string, newPassword: string) => Promise<void>
+  updateName: (name: string) => Promise<void>
   logout: () => void
 }
 
@@ -44,6 +45,7 @@ function toAuthUser(data: AuthResponse, token: string): AuthUser {
   return {
     userId: data.userId!,
     email: data.email!,
+    name: data.name ?? null,
     roles: (data.roles ?? []) as UserRole[],
     mustChangePassword,
   }
@@ -135,6 +137,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     applySession(await apiChangePassword(currentPassword, newPassword))
   }, [applySession])
 
+  // Unlike changePassword, this never touches tokens: a name is not security-sensitive and other
+  // sessions have no reason to be revoked over it.
+  const updateName = useCallback(async (name: string) => {
+    const data = await apiUpdateName(name)
+    setUser(current => (current ? { ...current, name: data.name } : current))
+  }, [])
+
   const logout = useCallback(() => {
     const refreshToken = getRefreshToken()
     if (refreshToken) revokeSession(refreshToken)
@@ -153,7 +162,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       canManageUsers,
       canIngest,
       canAdminister: canManageUsers || canIngest,
-      login, applySession, changePassword, logout,
+      login, applySession, changePassword, updateName, logout,
     }}>
       {children}
     </AuthContext.Provider>

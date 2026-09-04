@@ -198,4 +198,29 @@ class AuthServiceImplTest {
         assertThat(response.token()).isEqualTo("post-change-token");
         assertThat(response.roles()).containsExactly("USER");
     }
+
+    // ── updateName ───────────────────────────────────────────────────────────
+
+    @Test
+    void updateName_setsTrimmedNameAndReturnsIt() {
+        User managed = userWithRoles(7L, "user@example.com", Set.of(UserRole.USER));
+        when(userRepository.findById(7L)).thenReturn(Optional.of(managed));
+
+        UserInfoResponse response = service.updateName(managed, new UpdateNameRequest("  Ada Lovelace  "));
+
+        assertThat(managed.getName()).isEqualTo("Ada Lovelace");
+        assertThat(response.name()).isEqualTo("Ada Lovelace");
+        assertThat(response.email()).isEqualTo("user@example.com");
+    }
+
+    @Test
+    void updateName_replacesAnyExistingName() {
+        User managed = userWithRoles(8L, "user@example.com", Set.of(UserRole.USER));
+        managed.setName("Old Name");
+        when(userRepository.findById(8L)).thenReturn(Optional.of(managed));
+
+        service.updateName(managed, new UpdateNameRequest("New Name"));
+
+        assertThat(managed.getName()).isEqualTo("New Name");
+    }
 }

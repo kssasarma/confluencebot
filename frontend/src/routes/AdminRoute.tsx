@@ -1,15 +1,16 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, Ban, Check, Play, RefreshCw, RotateCcw, UserPlus } from 'lucide-react'
+import { ArrowLeft, Ban, Check, Mail, Play, RefreshCw, RotateCcw, Trash2, UserPlus } from 'lucide-react'
 import {
-  createUser, ingestPage, ingestSpace, listJobs, listUsers, retriggerJob, setUserEnabled,
-  setUserRoles, type AdminRole, type AdminUser, type IngestionJob,
+  createUser, deleteUser, ingestPage, ingestSpace, listJobs, listUsers, resendWelcome,
+  retriggerJob, setUserEnabled, setUserRoles, type AdminRole, type AdminUser, type IngestionJob,
 } from '../services/adminService'
 import { useAuth } from '../context/AuthContext'
 import { queryKeys } from '../services/queryKeys'
 import { toMessage } from '../lib/errors'
 import { toggleRole } from '../lib/roles'
+import { useConfirm } from '../components/ui/ConfirmDialog'
 import { useToast } from '../components/ui/Toast'
 import { useDocumentTitle } from '../hooks/useDocumentTitle'
 import { absoluteTime } from '../lib/time'
@@ -131,21 +132,32 @@ export default function AdminRoute() {
   )
 }
 
+interface WelcomeEmailResult {
+  action: 'created' | 'resent'
+  email: string
+  tempPassword: string
+  emailSent: boolean
+}
+
 function UsersTab() {
   const queryClient = useQueryClient()
   const toast = useToast()
+  const confirm = useConfirm()
   const { isAdmin, user: signedIn } = useAuth()
 
   const [email, setEmail] = useState('')
   const [roles, setRoles] = useState<AdminRole[]>(['USER'])
-  const [created, setCreated] = useState<{ email: string; tempPassword: string; emailSent: boolean } | null>(null)
+  const [welcomeResult, setWelcomeResult] = useState<WelcomeEmailResult | null>(null)
 
   const users = useQuery({ queryKey: queryKeys.adminUsers, queryFn: listUsers })
 
   const create = useMutation({
     mutationFn: () => createUser(email.trim(), roles),
     onSuccess: result => {
-      setCreated({ email: result.user.email, tempPassword: result.tempPassword, emailSent: result.emailSent })
+      setWelcomeResult({
+        action: 'created', email: result.user.email,
+        tempPassword: result.tempPassword, emailSent: result.emailSent,
+      })
       setEmail('')
       setRoles(['USER'])
       void queryClient.invalidateQueries({ queryKey: queryKeys.adminUsers })
@@ -173,33 +185,78 @@ function UsersTab() {
     onError: error => toast.error('Could not change the roles', toMessage(error, 'Please try again.')),
   })
 
+  const resend = useMutation({
+    mutationFn: (user: AdminUser) => resendWelcome(user.id),
+    onSuccess: (result, user) => {
+      applyUser(result.user)
+      setWelcomeResult({
+        action: 'resent', email: user.email,
+        tempPassword: result.tempPassword, emailSent: result.emailSent,
+      })
+    },
+    onError: error => toast.error('Could not resend the welcome email', toMessage(error, 'Please try again.')),
+  })
+
+  const remove = useMutation({
+    mutationFn: (user: AdminUser) => deleteUser(user.id),
+    onSuccess: (_result, user) => {
+      queryClient.setQueryData<AdminUser[]>(queryKeys.adminUsers, current =>
+        current?.filter(u => u.id !== user.id))
+      toast.success('User deleted', `${user.email} and everything scoped to their account is gone.`)
+    },
+    onError: error => toast.error('Could not delete the user', toMessage(error, 'Please try again.')),
+  })
+
+  async function handleResend(user: AdminUser) {
+    const confirmed = await confirm({
+      title: `Resend welcome email to ${user.email}?`,
+      description: 'This issues a brand new temporary password — the old one, if any, stops working.',
+      confirmLabel: 'Resend',
+    })
+    if (confirmed) resend.mutate(user)
+  }
+
+  async function handleDelete(user: AdminUser) {
+    const confirmed = await confirm({
+      title: `Delete ${user.email}?`,
+      description: 'This permanently deletes the account and every chat, session and preference tied to it. This cannot be undone.',
+      confirmLabel: 'Delete',
+      tone: 'danger',
+    })
+    if (confirmed) remove.mutate(user)
+  }
+
   return (
     <div className="space-y-6">
-      {created && (
+      {welcomeResult && (
         <div role="status" className="rounded-lg border border-success/40 bg-success-soft p-4 text-sm">
-          <p className="mb-1 font-medium text-success-emphasis">User created</p>
-          {created.emailSent ? (
+          <p className="mb-1 font-medium text-success-emphasis">
+            {welcomeResult.action === 'created' ? 'User created' : 'Welcome email resent'}
+          </p>
+          {welcomeResult.emailSent ? (
             <p className="text-muted-foreground">
               Sign-in instructions were emailed to{' '}
-              <span className="font-mono text-foreground">{created.email}</span>. No need to
+              <span className="font-mono text-foreground">{welcomeResult.email}</span>. No need to
               share a password yourself.
             </p>
           ) : (
             <>
               <p className="text-muted-foreground">
-                Email: <span className="font-mono text-foreground">{created.email}</span>
+                Email: <span className="font-mono text-foreground">{welcomeResult.email}</span>
               </p>
               <p className="text-muted-foreground">
                 Temporary password:{' '}
-                <span className="font-mono text-foreground">{created.tempPassword}</span>
+                <span className="font-mono text-foreground">{welcomeResult.tempPassword}</span>
               </p>
               <p className="mt-1 text-2xs text-muted-foreground">
-                We couldn't email this — mail may not be configured. Share it over a secure
-                channel; it is shown once, and the user must change it at first sign-in.
+                We couldn't email this — mail may not be configured or reachable right now. Share
+                it over a secure channel; it is shown once, and the user must change it at first
+                sign-in. Once mail is working again, use "Resend welcome email" instead of sharing
+                passwords by hand.
               </p>
             </>
           )}
-          <Button size="sm" variant="ghost" className="mt-2" onClick={() => setCreated(null)}>
+          <Button size="sm" variant="ghost" className="mt-2" onClick={() => setWelcomeResult(null)}>
             Dismiss
           </Button>
         </div>
@@ -247,6 +304,7 @@ function UsersTab() {
             <thead>
               <tr className="border-b border-border text-left">
                 <th scope="col" className="pb-2 font-medium text-muted-foreground">Email</th>
+                <th scope="col" className="pb-2 font-medium text-muted-foreground">Name</th>
                 <th scope="col" className="pb-2 font-medium text-muted-foreground">Roles</th>
                 <th scope="col" className="pb-2 font-medium text-muted-foreground">Status</th>
                 <th scope="col" className="pb-2 font-medium text-muted-foreground">Must change password</th>
@@ -257,6 +315,7 @@ function UsersTab() {
               {users.data?.map(user => (
                 <tr key={user.id} className="text-foreground">
                   <td className="py-2.5 pr-4 font-mono text-2xs">{user.email}</td>
+                  <td className="py-2.5 pr-4 text-2xs text-muted-foreground">{user.name ?? '—'}</td>
                   <td className="py-2.5 pr-4">
                     {isAdmin && signedIn?.email !== user.email ? (
                       <RoleToggleGroup
@@ -289,15 +348,36 @@ function UsersTab() {
                     {user.mustChangePassword ? 'Yes' : 'No'}
                   </td>
                   <td className="py-2.5 text-right">
-                    {isAdmin && signedIn?.email !== user.email && (
-                      <IconButton
-                        size="sm"
-                        label={user.enabled ? `Disable ${user.email}` : `Enable ${user.email}`}
-                        icon={user.enabled ? <Ban size={14} /> : <Check size={14} />}
-                        onClick={() => toggle.mutate(user)}
-                        disabled={toggle.isPending}
-                      />
-                    )}
+                    <div className="flex justify-end gap-1">
+                      {isAdmin && user.mustChangePassword && (
+                        <IconButton
+                          size="sm"
+                          label={`Resend welcome email to ${user.email}`}
+                          icon={<Mail size={14} />}
+                          onClick={() => handleResend(user)}
+                          disabled={resend.isPending}
+                        />
+                      )}
+                      {isAdmin && signedIn?.email !== user.email && (
+                        <>
+                          <IconButton
+                            size="sm"
+                            label={user.enabled ? `Disable ${user.email}` : `Enable ${user.email}`}
+                            icon={user.enabled ? <Ban size={14} /> : <Check size={14} />}
+                            onClick={() => toggle.mutate(user)}
+                            disabled={toggle.isPending}
+                          />
+                          <IconButton
+                            size="sm"
+                            variant="danger"
+                            label={`Delete ${user.email}`}
+                            icon={<Trash2 size={14} />}
+                            onClick={() => handleDelete(user)}
+                            disabled={remove.isPending}
+                          />
+                        </>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}

@@ -23,7 +23,7 @@ class SmtpEmailServiceTest {
     void sendWelcomeEmail_success_returnsTrueAndIncludesCredentials() {
         SmtpEmailService service = new SmtpEmailService(mailSender, "noreply@example.com", "https://bot.example.com");
 
-        boolean result = service.sendWelcomeEmail("new@example.com", "temp-pass-123");
+        boolean result = service.sendWelcomeEmail("new@example.com", "admin@example.com", "temp-pass-123");
 
         assertThat(result).isTrue();
         ArgumentCaptor<SimpleMailMessage> captor = ArgumentCaptor.forClass(SimpleMailMessage.class);
@@ -35,11 +35,44 @@ class SmtpEmailServiceTest {
     }
 
     @Test
+    void sendWelcomeEmail_ccsTheOnboardingAdmin() {
+        SmtpEmailService service = new SmtpEmailService(mailSender, "noreply@example.com", "");
+
+        service.sendWelcomeEmail("new@example.com", "admin@example.com", "temp-pass-123");
+
+        ArgumentCaptor<SimpleMailMessage> captor = ArgumentCaptor.forClass(SimpleMailMessage.class);
+        verify(mailSender).send(captor.capture());
+        assertThat(captor.getValue().getCc()).containsExactly("admin@example.com");
+    }
+
+    @Test
+    void sendWelcomeEmail_adminIsTheNewUser_skipsDuplicateCc() {
+        SmtpEmailService service = new SmtpEmailService(mailSender, "noreply@example.com", "");
+
+        service.sendWelcomeEmail("new@example.com", "new@example.com", "temp-pass-123");
+
+        ArgumentCaptor<SimpleMailMessage> captor = ArgumentCaptor.forClass(SimpleMailMessage.class);
+        verify(mailSender).send(captor.capture());
+        assertThat(captor.getValue().getCc()).isNull();
+    }
+
+    @Test
+    void sendWelcomeEmail_blankCc_omitsCcHeader() {
+        SmtpEmailService service = new SmtpEmailService(mailSender, "noreply@example.com", "");
+
+        service.sendWelcomeEmail("new@example.com", "", "temp-pass-123");
+
+        ArgumentCaptor<SimpleMailMessage> captor = ArgumentCaptor.forClass(SimpleMailMessage.class);
+        verify(mailSender).send(captor.capture());
+        assertThat(captor.getValue().getCc()).isNull();
+    }
+
+    @Test
     void sendWelcomeEmail_relayThrows_returnsFalseInsteadOfPropagating() {
         SmtpEmailService service = new SmtpEmailService(mailSender, "noreply@example.com", "");
         doThrow(new MailSendException("relay unreachable")).when(mailSender).send(any(SimpleMailMessage.class));
 
-        boolean result = service.sendWelcomeEmail("new@example.com", "temp-pass-123");
+        boolean result = service.sendWelcomeEmail("new@example.com", "admin@example.com", "temp-pass-123");
 
         assertThat(result).isFalse();
     }
@@ -48,7 +81,7 @@ class SmtpEmailServiceTest {
     void sendWelcomeEmail_noBaseUrlConfigured_omitsSignInLine() {
         SmtpEmailService service = new SmtpEmailService(mailSender, "noreply@example.com", "");
 
-        service.sendWelcomeEmail("new@example.com", "temp-pass-123");
+        service.sendWelcomeEmail("new@example.com", "admin@example.com", "temp-pass-123");
 
         ArgumentCaptor<SimpleMailMessage> captor = ArgumentCaptor.forClass(SimpleMailMessage.class);
         verify(mailSender).send(captor.capture());

@@ -1,16 +1,22 @@
 package com.kssasarma.confluencebot.api;
 
+import com.kssasarma.confluencebot.api.dto.AdminUserEventResponse;
 import com.kssasarma.confluencebot.api.dto.AdminUserRequest;
 import com.kssasarma.confluencebot.api.dto.AdminUserResponse;
 import com.kssasarma.confluencebot.email.EmailService;
+import com.kssasarma.confluencebot.user.AdminUserEvent;
+import com.kssasarma.confluencebot.user.AdminUserEventRepository;
+import com.kssasarma.confluencebot.user.RefreshTokenRepository;
 import com.kssasarma.confluencebot.user.User;
 import com.kssasarma.confluencebot.user.UserRepository;
 import com.kssasarma.confluencebot.user.UserRole;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
@@ -42,12 +48,14 @@ class AdminControllerTest {
     @Mock private UserRepository userRepository;
     @Mock private PasswordEncoder passwordEncoder;
     @Mock private EmailService emailService;
+    @Mock private AdminUserEventRepository eventRepository;
+    @Mock private RefreshTokenRepository refreshTokenRepository;
 
     private AdminController controller;
 
     @BeforeEach
     void setUp() {
-        controller = new AdminController(userRepository, passwordEncoder, emailService);
+        controller = new AdminController(userRepository, passwordEncoder, emailService, eventRepository, refreshTokenRepository);
     }
 
     private static Authentication asAdmin(String email) {
@@ -101,17 +109,35 @@ class AdminControllerTest {
     }
 
     @Test
-    void createUser_emailSendSucceeds_reportsEmailSentTrue() {
+    void createUser_emailSendSucceeds_reportsEmailSentTrueAndRecordsEvent() {
         when(userRepository.existsByEmail("new@example.com")).thenReturn(false);
         when(passwordEncoder.encode(any())).thenReturn("hashed");
         when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(emailService.sendWelcomeEmail(eq("new@example.com"), any())).thenReturn(true);
+        when(emailService.sendWelcomeEmail(eq("new@example.com"), any(), any())).thenReturn(true);
 
         ResponseEntity<?> response = controller.createUser(
                 new AdminUserRequest("new@example.com", null, null), asAdmin("admin@example.com"));
 
         Map<String, Object> body = bodyOf(response);
         assertThat(body.get("emailSent")).isEqualTo(true);
+
+        ArgumentCaptor<AdminUserEvent> event = ArgumentCaptor.forClass(AdminUserEvent.class);
+        verify(eventRepository).save(event.capture());
+        assertThat(event.getValue().getEventType()).isEqualTo(AdminUserEvent.EventType.CREATED);
+        assertThat(event.getValue().getAdminEmail()).isEqualTo("admin@example.com");
+        assertThat(event.getValue().getTargetEmail()).isEqualTo("new@example.com");
+        assertThat(event.getValue().getEmailSent()).isTrue();
+    }
+
+    @Test
+    void createUser_ccsTheOnboardingAdminOnTheWelcomeEmail() {
+        when(userRepository.existsByEmail("new@example.com")).thenReturn(false);
+        when(passwordEncoder.encode(any())).thenReturn("hashed");
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        controller.createUser(new AdminUserRequest("new@example.com", null, null), asAdmin("admin@example.com"));
+
+        verify(emailService).sendWelcomeEmail(eq("new@example.com"), eq("admin@example.com"), any());
     }
 
     @Test
@@ -119,7 +145,7 @@ class AdminControllerTest {
         when(userRepository.existsByEmail("new@example.com")).thenReturn(false);
         when(passwordEncoder.encode(any())).thenReturn("hashed");
         when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(emailService.sendWelcomeEmail(eq("new@example.com"), any())).thenReturn(false);
+        when(emailService.sendWelcomeEmail(eq("new@example.com"), any(), any())).thenReturn(false);
 
         ResponseEntity<?> response = controller.createUser(
                 new AdminUserRequest("new@example.com", null, null), asAdmin("admin@example.com"));
@@ -310,5 +336,96 @@ class AdminControllerTest {
 
         ProblemDetail detail = bodyOf(response);
         assertThat(detail.getDetail()).contains("SUPERUSER");
+    }
+
+    // ── resendWelcome ────────────────────────────────────────────────────────
+
+    @Test
+    void resendWelcome_existingUser_issuesFreshPasswordAndRecordsEvent() {
+        User other = userWithRoles(2L, "other@example.com", Set.of(UserRole.USER));
+        when(userRepository.findById(2L)).thenReturn(Optional.of(other));
+        when(passwordEncoder.encode(any())).thenReturn("hashed-new");
+        when(userRepository.save(other)).thenReturn(other);
+        when(emailService.sendWelcomeEmail(eq("other@example.com"), eq("admin@example.com"), any())).thenReturn(true);
+
+        ResponseEntity<?> response = controller.resendWelcome(2L, asAdmin("admin@example.com"));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(other.isMustChangePassword()).isTrue();
+        Map<String, Object> body = bodyOf(response);
+        assertThat(body.get("emailSent")).isEqualTo(true);
+        assertThat(body.get("tempPassword")).isNotNull();
+
+        ArgumentCaptor<AdminUserEvent> event = ArgumentCaptor.forClass(AdminUserEvent.class);
+        verify(eventRepository).save(event.capture());
+        assertThat(event.getValue().getEventType()).isEqualTo(AdminUserEvent.EventType.RESENT);
+
+        // The old password must stop working the moment a new one is generated — any session
+        // still alive under it should not survive a resend, same as changePassword enforces.
+        verify(refreshTokenRepository).revokeAllByUserId(2L);
+    }
+
+    @Test
+    void resendWelcome_unknownUser_returnsNotFound() {
+        when(userRepository.findById(99L)).thenReturn(Optional.empty());
+
+        ResponseEntity<?> response = controller.resendWelcome(99L, asAdmin("admin@example.com"));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        verify(emailService, never()).sendWelcomeEmail(any(), any(), any());
+    }
+
+    // ── deleteUser ───────────────────────────────────────────────────────────
+
+    @Test
+    void deleteUser_deletingSelf_isRefused() {
+        User self = userWithRoles(1L, "admin@example.com", Set.of(UserRole.ADMIN));
+        when(userRepository.findById(1L)).thenReturn(Optional.of(self));
+
+        ResponseEntity<?> response = controller.deleteUser(1L, asAdmin("admin@example.com"));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        verify(userRepository, never()).delete(any());
+    }
+
+    @Test
+    void deleteUser_deletingSomeoneElse_cascadesAndRecordsEvent() {
+        User other = userWithRoles(2L, "other@example.com", Set.of(UserRole.USER));
+        when(userRepository.findById(2L)).thenReturn(Optional.of(other));
+
+        ResponseEntity<?> response = controller.deleteUser(2L, asAdmin("admin@example.com"));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
+        verify(userRepository).delete(other);
+
+        ArgumentCaptor<AdminUserEvent> event = ArgumentCaptor.forClass(AdminUserEvent.class);
+        verify(eventRepository).save(event.capture());
+        assertThat(event.getValue().getEventType()).isEqualTo(AdminUserEvent.EventType.DELETED);
+        assertThat(event.getValue().getTargetEmail()).isEqualTo("other@example.com");
+    }
+
+    @Test
+    void deleteUser_unknownUser_returnsNotFound() {
+        when(userRepository.findById(99L)).thenReturn(Optional.empty());
+
+        ResponseEntity<?> response = controller.deleteUser(99L, asAdmin("admin@example.com"));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        verify(userRepository, never()).delete(any());
+    }
+
+    // ── listAuditEvents ──────────────────────────────────────────────────────
+
+    @Test
+    void listAuditEvents_returnsEventsMostRecentFirst() {
+        User target = userWithRoles(2L, "other@example.com", Set.of(UserRole.USER));
+        AdminUserEvent event = AdminUserEvent.of(AdminUserEvent.EventType.CREATED, "admin@example.com", target, true);
+        when(eventRepository.findAllByOrderByCreatedAtDesc(any()))
+                .thenReturn(new PageImpl<>(List.of(event)));
+
+        ResponseEntity<List<AdminUserEventResponse>> response = controller.listAuditEvents(0, 50);
+
+        assertThat(response.getBody()).hasSize(1);
+        assertThat(response.getBody().get(0).targetEmail()).isEqualTo("other@example.com");
     }
 }

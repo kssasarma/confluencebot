@@ -24,6 +24,10 @@ public class User implements UserDetails {
     @Column(nullable = false)
     private String password;
 
+    /** Self-service, unlike email. Null until the user sets one — see {@code name IS NULL} gating. */
+    @Column
+    private String name;
+
     /**
      * A user's roles, not a role: {@link #setRoles} is the only mutator, and it always replaces
      * the whole set. Eagerly fetched because {@link #getAuthorities()} is read by the security
@@ -62,6 +66,7 @@ public class User implements UserDetails {
 
     public Long getId() { return id; }
     public String getEmail() { return email; }
+    public String getName() { return name; }
 
     /** Read-only view; go through {@link #setRoles} to change membership. */
     public Set<UserRole> getRoles() { return Collections.unmodifiableSet(roles); }
@@ -73,6 +78,7 @@ public class User implements UserDetails {
 
     public void setEmail(String email) { this.email = email; }
     public void setPassword(String password) { this.password = password; }
+    public void setName(String name) { this.name = name; }
 
     /**
      * Replaces the full set of roles. A user with no roles could authenticate but do nothing —

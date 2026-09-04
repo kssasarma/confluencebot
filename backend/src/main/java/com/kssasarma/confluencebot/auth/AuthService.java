@@ -13,4 +13,6 @@ public interface AuthService {
     void logout(RefreshRequest request);
 
     AuthResponse changePassword(User user, ChangePasswordRequest request);
+
+    UserInfoResponse updateName(User user, UpdateNameRequest request);
 }

@@ -31,6 +31,7 @@ describe('toggleRole', () => {
 interface StubUser {
   id: number
   email: string
+  name?: string | null
   roles: string[]
   enabled: boolean
   mustChangePassword: boolean
@@ -59,7 +60,7 @@ function makeFetchMock(options: { meRoles: string[]; users?: StubUser[]; jobs?: 
         const body = JSON.parse(String(init?.body ?? '{}')) as { email: string; roles?: string[] }
         return json({
           user: {
-            id: 99, email: body.email, roles: body.roles?.length ? body.roles : ['USER'],
+            id: 99, email: body.email, name: null, roles: body.roles?.length ? body.roles : ['USER'],
             enabled: true, mustChangePassword: true, createdAt: '2026-09-04T00:00:00Z',
           },
           tempPassword: 'temp-pass-123',
@@ -72,6 +73,20 @@ function makeFetchMock(options: { meRoles: string[]; users?: StubUser[]; jobs?: 
         const existing = users.find(u => u.id === id)
         const body = JSON.parse(String(init?.body ?? '{}')) as { roles: string[] }
         return json({ ...existing, roles: body.roles })
+      }
+      const resendMatch = url.match(/\/admin\/users\/(\d+)\/resend-welcome$/)
+      if (resendMatch && method === 'POST') {
+        const id = Number(resendMatch[1])
+        const existing = users.find(u => u.id === id)
+        return json({
+          user: { ...existing, mustChangePassword: true },
+          tempPassword: 'resent-pass-456',
+          emailSent,
+        })
+      }
+      const deleteMatch = url.match(/\/admin\/users\/(\d+)$/)
+      if (deleteMatch && method === 'DELETE') {
+        return new Response(null, { status: 204 })
       }
       if (url.includes('/ingest/jobs')) return json(jobs)
 
@@ -228,5 +243,116 @@ describe('AdminRoute user creation', () => {
 
     const banner = await screen.findByRole('status')
     expect(within(banner).getByText('temp-pass-123')).toBeInTheDocument()
+  })
+})
+
+describe('AdminRoute delete user', () => {
+  it('asks for confirmation, then deletes and removes the row', async () => {
+    seedToken()
+    const users: StubUser[] = [
+      { id: 1, email: 'signed-in@example.com', roles: ['ADMIN'], enabled: true, mustChangePassword: false, createdAt: '2026-01-01T00:00:00Z' },
+      { id: 2, email: 'other@example.com', roles: ['USER'], enabled: true, mustChangePassword: false, createdAt: '2026-01-01T00:00:00Z' },
+    ]
+    const fetchMock = makeFetchMock({ meRoles: ['ADMIN'], users })
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderWithProviders(<AdminRoute />, { route: '/admin' })
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Delete other@example.com' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Delete' }))
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/admin/users/2'),
+      expect.objectContaining({ method: 'DELETE' }),
+    ))
+    await waitFor(() => expect(screen.queryByText('other@example.com')).not.toBeInTheDocument())
+  })
+
+  it('cannot be used on the signed-in admin\'s own row', async () => {
+    seedToken()
+    const users: StubUser[] = [
+      { id: 1, email: 'signed-in@example.com', roles: ['ADMIN'], enabled: true, mustChangePassword: false, createdAt: '2026-01-01T00:00:00Z' },
+    ]
+    vi.stubGlobal('fetch', makeFetchMock({ meRoles: ['ADMIN'], users }))
+
+    renderWithProviders(<AdminRoute />, { route: '/admin' })
+
+    const ownRow = (await screen.findByText('signed-in@example.com')).closest('tr')
+    if (!ownRow) throw new Error('expected a table row for the signed-in admin')
+    expect(within(ownRow).queryByRole('button', { name: /delete/i })).not.toBeInTheDocument()
+  })
+
+  it('does not delete when the confirmation is cancelled', async () => {
+    seedToken()
+    const users: StubUser[] = [
+      { id: 2, email: 'other@example.com', roles: ['USER'], enabled: true, mustChangePassword: false, createdAt: '2026-01-01T00:00:00Z' },
+    ]
+    const fetchMock = makeFetchMock({ meRoles: ['ADMIN'], users })
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderWithProviders(<AdminRoute />, { route: '/admin' })
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Delete other@example.com' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Cancel' }))
+
+    expect(screen.getByText('other@example.com')).toBeInTheDocument()
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(false)
+  })
+})
+
+describe('AdminRoute resend welcome email', () => {
+  it('is only offered for a user who has not completed onboarding', async () => {
+    seedToken()
+    const users: StubUser[] = [
+      { id: 2, email: 'pending@example.com', roles: ['USER'], enabled: true, mustChangePassword: true, createdAt: '2026-01-01T00:00:00Z' },
+      { id: 3, email: 'active@example.com', roles: ['USER'], enabled: true, mustChangePassword: false, createdAt: '2026-01-01T00:00:00Z' },
+    ]
+    vi.stubGlobal('fetch', makeFetchMock({ meRoles: ['ADMIN'], users }))
+
+    renderWithProviders(<AdminRoute />, { route: '/admin' })
+
+    await screen.findByText('pending@example.com')
+    expect(screen.getByRole('button', { name: 'Resend welcome email to pending@example.com' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Resend welcome email to active@example.com' })).not.toBeInTheDocument()
+  })
+
+  /**
+   * resendWelcome resets an arbitrary account's password and hands the plaintext back in the
+   * response — restricted server-side to full ADMIN the same as delete/enable/roles. The button
+   * must not even render for a read-only admin, or it dangles a control that always 403s.
+   */
+  it('is not offered to a read-only admin, even for a user who has not completed onboarding', async () => {
+    seedToken()
+    const users: StubUser[] = [
+      { id: 2, email: 'pending@example.com', roles: ['USER'], enabled: true, mustChangePassword: true, createdAt: '2026-01-01T00:00:00Z' },
+    ]
+    vi.stubGlobal('fetch', makeFetchMock({ meRoles: ['ADMIN_READ_ONLY'], users }))
+
+    renderWithProviders(<AdminRoute />, { route: '/admin' })
+
+    await screen.findByText('pending@example.com')
+    expect(screen.queryByRole('button', { name: 'Resend welcome email to pending@example.com' })).not.toBeInTheDocument()
+  })
+
+  it('confirms, then reports the new email was sent', async () => {
+    seedToken()
+    const users: StubUser[] = [
+      { id: 2, email: 'pending@example.com', roles: ['USER'], enabled: true, mustChangePassword: true, createdAt: '2026-01-01T00:00:00Z' },
+    ]
+    const fetchMock = makeFetchMock({ meRoles: ['ADMIN'], users, emailSent: true })
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderWithProviders(<AdminRoute />, { route: '/admin' })
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Resend welcome email to pending@example.com' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Resend' }))
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/admin/users/2/resend-welcome'),
+      expect.objectContaining({ method: 'POST' }),
+    ))
+    const banner = await screen.findByRole('status')
+    expect(within(banner).getByText('Welcome email resent')).toBeInTheDocument()
+    expect(within(banner).getByText(/sign-in instructions were emailed/i)).toBeInTheDocument()
   })
 })

@@ -84,4 +84,15 @@ class UserTest {
         assertThat(user.getPassword()).isEqualTo("hashed");
         assertThat(user.isEnabled()).isFalse();
     }
+
+    @Test
+    void newUser_hasNoNameUntilOneIsSet() {
+        User user = new User();
+
+        assertThat(user.getName()).isNull();
+
+        user.setName("Ada Lovelace");
+
+        assertThat(user.getName()).isEqualTo("Ada Lovelace");
+    }
 }

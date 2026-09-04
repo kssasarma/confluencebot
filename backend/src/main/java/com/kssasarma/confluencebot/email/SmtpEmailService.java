@@ -27,12 +27,15 @@ public class SmtpEmailService implements EmailService {
     }
 
     @Override
-    public boolean sendWelcomeEmail(String toEmail, String tempPassword) {
+    public boolean sendWelcomeEmail(String toEmail, String ccEmail, String tempPassword) {
         SimpleMailMessage message = new SimpleMailMessage();
         if (fromAddress != null && !fromAddress.isBlank()) {
             message.setFrom(fromAddress);
         }
         message.setTo(toEmail);
+        if (ccEmail != null && !ccEmail.isBlank() && !ccEmail.equalsIgnoreCase(toEmail)) {
+            message.setCc(ccEmail);
+        }
         message.setSubject("Your Confluence Bot account is ready");
         message.setText(body(toEmail, tempPassword));
         try {

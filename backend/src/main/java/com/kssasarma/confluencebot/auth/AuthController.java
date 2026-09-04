@@ -42,7 +42,7 @@ public class AuthController {
     @Operation(summary = "Describe the signed-in user")
     @GetMapping("/me")
     public UserInfoResponse me(@AuthenticationPrincipal User user) {
-        return new UserInfoResponse(user.getId(), user.getEmail(),
+        return new UserInfoResponse(user.getId(), user.getEmail(), user.getName(),
                 UserRole.namesOf(user.getRoles()), user.isMustChangePassword());
     }
 
@@ -51,5 +51,12 @@ public class AuthController {
     public AuthResponse changePassword(@AuthenticationPrincipal User user,
                                        @Valid @RequestBody ChangePasswordRequest request) {
         return authService.changePassword(user, request);
+    }
+
+    @Operation(summary = "Set the signed-in user's own display name (email cannot be changed)")
+    @PatchMapping("/name")
+    public UserInfoResponse updateName(@AuthenticationPrincipal User user,
+                                       @Valid @RequestBody UpdateNameRequest request) {
+        return authService.updateName(user, request);
     }
 }

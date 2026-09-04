@@ -14,6 +14,8 @@ export type AdminRole = 'ADMIN' | 'ADMIN_READ_ONLY' | 'INGESTOR' | 'USER'
 export interface AdminUser {
   id: number
   email: string
+  /** Self-service; null until the user sets it. Admins cannot set this on the user's behalf. */
+  name: string | null
   roles: AdminRole[]
   enabled: boolean
   mustChangePassword: boolean
@@ -25,6 +27,18 @@ export interface CreateUserResult {
   tempPassword: string
   /** Whether the welcome email carrying the temp password reached the user. */
   emailSent: boolean
+}
+
+export interface AdminUserEvent {
+  id: number
+  eventType: 'CREATED' | 'RESENT' | 'DELETED'
+  adminEmail: string
+  targetUserId: number | null
+  targetEmail: string
+  /** Comma-joined role names the target held at the time of the event. */
+  roles: string | null
+  emailSent: boolean | null
+  createdAt: string
 }
 
 export interface IngestionJob {
@@ -60,6 +74,16 @@ export const setUserEnabled = (id: number, enabled: boolean): Promise<AdminUser>
 
 export const setUserRoles = (id: number, roles: AdminRole[]): Promise<AdminUser> =>
   apiJson<AdminUser>(`/admin/users/${id}/roles`, { method: 'PATCH', ...jsonBody({ roles }) })
+
+/** Cascades: every chat, session and preference scoped to this user goes with it. */
+export const deleteUser = (id: number): Promise<void> =>
+  apiJson<void>(`/admin/users/${id}`, { method: 'DELETE' })
+
+/** Issues a fresh temp password and re-sends the welcome email — the outage-recovery path. */
+export const resendWelcome = (id: number): Promise<CreateUserResult> =>
+  apiJson<CreateUserResult>(`/admin/users/${id}/resend-welcome`, { method: 'POST' })
+
+export const listAuditEvents = (): Promise<AdminUserEvent[]> => apiJson<AdminUserEvent[]>('/admin/audit')
 
 export const ingestSpace = (spaceKey: string, force = false): Promise<IngestionJob> =>
   apiJson<IngestionJob>('/ingest/space', { method: 'POST', ...jsonBody({ spaceKey, force }) })

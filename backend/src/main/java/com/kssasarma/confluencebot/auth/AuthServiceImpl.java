@@ -97,6 +97,18 @@ public class AuthServiceImpl implements AuthService {
         return issueTokens(managed);
     }
 
+    @Override
+    public UserInfoResponse updateName(User user, UpdateNameRequest request) {
+        User managed = userRepository.findById(user.getId())
+                .orElseThrow(() -> new BadCredentialsException("Invalid email or password"));
+
+        managed.setName(request.name());
+        userRepository.save(managed);
+
+        return new UserInfoResponse(managed.getId(), managed.getEmail(), managed.getName(),
+                UserRole.namesOf(managed.getRoles()), managed.isMustChangePassword());
+    }
+
     // ── Internals ─────────────────────────────────────────────────────────────
 
     private AuthResponse issueTokens(User user) {
@@ -109,7 +121,7 @@ public class AuthServiceImpl implements AuthService {
         refreshTokenRepository.save(refreshToken);
 
         return new AuthResponse(
-                user.getId(), user.getEmail(), UserRole.namesOf(user.getRoles()),
+                user.getId(), user.getEmail(), user.getName(), UserRole.namesOf(user.getRoles()),
                 accessToken, refreshToken.getToken(), user.isMustChangePassword(), null);
     }
 }

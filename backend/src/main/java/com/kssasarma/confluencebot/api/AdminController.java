@@ -1,8 +1,12 @@
 package com.kssasarma.confluencebot.api;
 
+import com.kssasarma.confluencebot.api.dto.AdminUserEventResponse;
 import com.kssasarma.confluencebot.api.dto.AdminUserRequest;
 import com.kssasarma.confluencebot.api.dto.AdminUserResponse;
 import com.kssasarma.confluencebot.email.EmailService;
+import com.kssasarma.confluencebot.user.AdminUserEvent;
+import com.kssasarma.confluencebot.user.AdminUserEventRepository;
+import com.kssasarma.confluencebot.user.RefreshTokenRepository;
 import com.kssasarma.confluencebot.user.User;
 import com.kssasarma.confluencebot.user.UserRepository;
 import com.kssasarma.confluencebot.user.UserRole;
@@ -11,12 +15,16 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.security.SecureRandom;
@@ -36,12 +44,18 @@ public class AdminController {
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final EmailService emailService;
+    private final AdminUserEventRepository eventRepository;
+    private final RefreshTokenRepository refreshTokenRepository;
     private final SecureRandom secureRandom = new SecureRandom();
 
-    public AdminController(UserRepository userRepository, PasswordEncoder passwordEncoder, EmailService emailService) {
+    public AdminController(UserRepository userRepository, PasswordEncoder passwordEncoder,
+                            EmailService emailService, AdminUserEventRepository eventRepository,
+                            RefreshTokenRepository refreshTokenRepository) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
         this.emailService = emailService;
+        this.eventRepository = eventRepository;
+        this.refreshTokenRepository = refreshTokenRepository;
     }
 
     @Operation(summary = "List all users")
@@ -80,11 +94,67 @@ public class AdminController {
         user.setMustChangePassword(true);
 
         User saved = userRepository.save(user);
-        boolean emailSent = emailService.sendWelcomeEmail(request.email(), tempPassword);
+        boolean emailSent = emailService.sendWelcomeEmail(request.email(), auth.getName(), tempPassword);
+        eventRepository.save(AdminUserEvent.of(AdminUserEvent.EventType.CREATED, auth.getName(), saved, emailSent));
         logger.info("Admin {} created new user {} with roles {} (welcome email {})",
                 auth.getName(), request.email(), roles, emailSent ? "sent" : "not sent");
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(Map.of("user", AdminUserResponse.from(saved), "tempPassword", tempPassword, "emailSent", emailSent));
+    }
+
+    @Operation(summary = "Re-send the welcome email with a fresh temporary password")
+    @PostMapping("/users/{id}/resend-welcome")
+    @PreAuthorize("hasRole('ADMIN')")
+    @Transactional
+    public ResponseEntity<?> resendWelcome(@PathVariable Long id, Authentication auth) {
+        return userRepository.findById(id)
+                .map(u -> {
+                    String tempPassword = generateTempPassword();
+                    u.setPassword(passwordEncoder.encode(tempPassword));
+                    u.setMustChangePassword(true);
+                    User saved = userRepository.save(u);
+                    // The old password (and anything issued under it) must stop working the moment
+                    // a new one is generated — the same invariant AuthServiceImpl.changePassword
+                    // enforces for a user changing their own password.
+                    refreshTokenRepository.revokeAllByUserId(saved.getId());
+
+                    boolean emailSent = emailService.sendWelcomeEmail(saved.getEmail(), auth.getName(), tempPassword);
+                    eventRepository.save(AdminUserEvent.of(AdminUserEvent.EventType.RESENT, auth.getName(), saved, emailSent));
+                    logger.info("Admin {} resent welcome email to user {} (id={}, email {})",
+                            auth.getName(), saved.getEmail(), id, emailSent ? "sent" : "not sent");
+
+                    return ResponseEntity.ok((Object) Map.of(
+                            "user", AdminUserResponse.from(saved), "tempPassword", tempPassword, "emailSent", emailSent));
+                })
+                .orElse(ResponseEntity.notFound().build());
+    }
+
+    @Operation(summary = "Delete a user account and everything scoped to it (chats, sessions, preferences)")
+    @DeleteMapping("/users/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
+    @Transactional
+    public ResponseEntity<?> deleteUser(@PathVariable Long id, Authentication auth) {
+        return userRepository.findById(id)
+                .map(u -> {
+                    if (u.getEmail().equals(auth.getName())) {
+                        return ResponseEntity.badRequest().body((Object) ProblemDetail.forStatusAndDetail(
+                                HttpStatus.BAD_REQUEST, "You cannot delete your own account"));
+                    }
+                    eventRepository.save(AdminUserEvent.deleted(auth.getName(), u));
+                    userRepository.delete(u);
+                    logger.info("Admin {} deleted user {} (id={})", auth.getName(), u.getEmail(), id);
+                    return ResponseEntity.noContent().<Object>build();
+                })
+                .orElse(ResponseEntity.notFound().build());
+    }
+
+    @Operation(summary = "List admin actions on user accounts (create, resend, delete), most recent first")
+    @GetMapping("/audit")
+    public ResponseEntity<List<AdminUserEventResponse>> listAuditEvents(
+            @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "50") int size) {
+        Pageable pageable = PageRequest.of(page, Math.min(size, 200));
+        Page<AdminUserEvent> events = eventRepository.findAllByOrderByCreatedAtDesc(pageable);
+        return ResponseEntity.ok(events.map(AdminUserEventResponse::from).getContent());
     }
 
     @Operation(summary = "Enable or disable a user account")

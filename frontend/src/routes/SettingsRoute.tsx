@@ -1,15 +1,70 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowLeft, Check } from 'lucide-react'
 import type { ResponseStyle, UserPreferences } from '../types'
 import { useUserPreferences } from '../hooks/usePreferences'
+import { useAuth } from '../context/AuthContext'
 import { useTheme } from '../context/ThemeContext'
 import { useDocumentTitle } from '../hooks/useDocumentTitle'
+import { useTimedFlag } from '../hooks/useTimedFlag'
 import Button from '../components/ui/Button'
 import EmptyState from '../components/ui/EmptyState'
+import Input from '../components/ui/Input'
 import Switch from '../components/ui/Switch'
 import { SkeletonText } from '../components/ui/Skeleton'
 import { cn } from '../lib/cn'
+
+/** The user's own name — editable; email is the sign-in identity and never is. */
+function ProfileSection() {
+  const { user, updateName } = useAuth()
+  const [name, setName] = useState(user?.name ?? '')
+  const [saving, setSaving] = useState(false)
+  const [justSaved, triggerJustSaved] = useTimedFlag()
+  const [error, setError] = useState('')
+
+  useEffect(() => { setName(user?.name ?? '') }, [user?.name])
+
+  if (!user) return null
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault()
+    if (!name.trim()) { setError('Name cannot be empty'); return }
+    setError('')
+    setSaving(true)
+    try {
+      await updateName(name.trim())
+      triggerJustSaved()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save your name')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <section className="mb-8">
+      <h2 className="mb-3 text-2xs font-semibold uppercase tracking-wider text-muted-foreground">
+        Profile
+      </h2>
+      <form onSubmit={handleSubmit} className="space-y-3">
+        <Input label="Email" value={user.email} disabled hint="Your sign-in email cannot be changed." />
+        <Input label="Name" value={name} onChange={e => setName(e.target.value)} required />
+        {error && <p role="alert" className="text-sm text-danger-emphasis">{error}</p>}
+        <div className="flex items-center gap-3">
+          <Button type="submit" size="sm" loading={saving} disabled={name.trim() === (user.name ?? '')}>
+            Save name
+          </Button>
+          {justSaved && (
+            <span role="status" className="flex items-center gap-1 text-2xs text-success-emphasis">
+              <Check size={13} aria-hidden="true" />
+              Saved
+            </span>
+          )}
+        </div>
+      </form>
+    </section>
+  )
+}
 
 const STYLES: Array<{ value: ResponseStyle; label: string; description: string }> = [
   { value: 'concise', label: 'Concise', description: 'Short, direct answers' },
@@ -27,7 +82,7 @@ export default function SettingsRoute() {
   const { theme, setTheme } = useTheme()
   const { preferences, isLoading, error, save, isSaving } = useUserPreferences()
   const [draft, setDraft] = useState<UserPreferences | null>(null)
-  const [justSaved, setJustSaved] = useState(false)
+  const [justSaved, triggerJustSaved] = useTimedFlag()
 
   useDocumentTitle('Settings')
 
@@ -40,8 +95,7 @@ export default function SettingsRoute() {
       showSources: draft.showSources,
       showConfidence: draft.showConfidence,
     })
-    setJustSaved(true)
-    setTimeout(() => setJustSaved(false), 2000)
+    triggerJustSaved()
   }
 
   return (
@@ -56,6 +110,8 @@ export default function SettingsRoute() {
         </Link>
 
         <h1 className="mb-8 text-xl font-semibold text-foreground">Settings</h1>
+
+        <ProfileSection />
 
         <section className="mb-8">
           <h2 className="mb-3 text-2xs font-semibold uppercase tracking-wider text-muted-foreground">
