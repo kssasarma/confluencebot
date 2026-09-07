@@ -27,8 +27,8 @@ export interface ModalProps {
   /** Optional line under the title. Announced as the dialog's description. */
   description?: string
 
-  /** `md` for a form, `sm` for a confirmation, `lg` for something with a table in it. */
-  size?: 'sm' | 'md' | 'lg'
+  /** `md` for a form, `sm` for a confirmation, `lg`/`xl` for something with a table in it. */
+  size?: 'sm' | 'md' | 'lg' | 'xl'
 
   /**
    * Pins the panel to one fixed height instead of sizing to its content. Use this for a dialog
@@ -52,6 +52,7 @@ const SIZES = {
   sm: 'max-w-sm',
   md: 'max-w-lg',
   lg: 'max-w-3xl',
+  xl: 'max-w-5xl',
 } as const
 
 export default function Modal({

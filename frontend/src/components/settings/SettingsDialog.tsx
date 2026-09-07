@@ -46,7 +46,7 @@ export default function SettingsDialog({ open, onClose }: { open: boolean; onClo
   const activeSection = sections.includes(section) ? section : sections[0]
 
   return (
-    <Modal open={open} onClose={onClose} title="Settings" size="lg" fixedHeight>
+    <Modal open={open} onClose={onClose} title="Settings" size="xl" fixedHeight>
       <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
         <nav
           aria-label="Settings sections"
