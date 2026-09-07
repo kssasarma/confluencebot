@@ -185,6 +185,7 @@ describe('SettingsDialog Admin section', () => {
 
     const otherRow = (await screen.findByText('other@example.com')).closest('tr')
     if (!otherRow) throw new Error('expected a table row for other@example.com')
+    await userEvent.click(within(otherRow).getByRole('button', { name: 'Edit roles for other@example.com' }))
     await userEvent.click(within(otherRow).getByRole('checkbox', { name: 'Ingestor' }))
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(

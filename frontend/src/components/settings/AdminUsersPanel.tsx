@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Ban, Check, Mail, Trash2, UserPlus } from 'lucide-react'
+import { Ban, Check, Mail, Pencil, Trash2, UserPlus } from 'lucide-react'
 import {
   createUser, deleteUser, listUsers, resendWelcome, setUserEnabled, setUserRoles,
   type AdminRole, type AdminUser,
@@ -82,6 +82,7 @@ export default function AdminUsersPanel() {
   const [email, setEmail] = useState('')
   const [roles, setRoles] = useState<AdminRole[]>(['USER'])
   const [welcomeResult, setWelcomeResult] = useState<WelcomeEmailResult | null>(null)
+  const [editingRolesFor, setEditingRolesFor] = useState<number | null>(null)
 
   const users = useQuery({ queryKey: queryKeys.adminUsers, queryFn: listUsers })
 
@@ -251,25 +252,40 @@ export default function AdminUsersPanel() {
                   <td className="py-2.5 pr-4 font-mono text-2xs">{user.email}</td>
                   <td className="py-2.5 pr-4 text-2xs text-muted-foreground">{user.name ?? '—'}</td>
                   <td className="py-2.5 pr-4">
-                    {isAdmin && signedIn?.email !== user.email ? (
-                      <RoleToggleGroup
-                        selected={user.roles}
-                        disabled={changeRoles.isPending}
-                        onToggle={role => {
-                          const next = toggleRole(user.roles, role)
-                          if (next !== user.roles) changeRoles.mutate({ user, next })
-                        }}
-                      />
-                    ) : (
-                      // Your own row stays a set of labels: the request that strips your own admin
-                      // is the last one you are allowed to make, so the API refuses it and so does
-                      // this.
-                      <div className="flex flex-wrap gap-1">
-                        {user.roles.map(userRole => (
-                          <Badge key={userRole} tone={userRole === 'USER' ? 'info' : 'accent'}>
-                            {ROLE_LABELS[userRole] ?? userRole}
-                          </Badge>
-                        ))}
+                    <div className="flex flex-wrap items-center gap-1">
+                      {user.roles.map(userRole => (
+                        <Badge key={userRole} tone={userRole === 'USER' ? 'info' : 'accent'}>
+                          {ROLE_LABELS[userRole] ?? userRole}
+                        </Badge>
+                      ))}
+                      {/* Your own row has no editor: the request that strips your own admin is
+                          the last one you are allowed to make, so the API refuses it and so does
+                          this. */}
+                      {isAdmin && signedIn?.email !== user.email && (
+                        <IconButton
+                          size="sm"
+                          active={editingRolesFor === user.id}
+                          label={
+                            editingRolesFor === user.id
+                              ? `Close role editor for ${user.email}`
+                              : `Edit roles for ${user.email}`
+                          }
+                          icon={<Pencil size={12} />}
+                          onClick={() => setEditingRolesFor(current => (current === user.id ? null : user.id))}
+                          disabled={changeRoles.isPending}
+                        />
+                      )}
+                    </div>
+                    {editingRolesFor === user.id && (
+                      <div className="mt-1.5">
+                        <RoleToggleGroup
+                          selected={user.roles}
+                          disabled={changeRoles.isPending}
+                          onToggle={role => {
+                            const next = toggleRole(user.roles, role)
+                            if (next !== user.roles) changeRoles.mutate({ user, next })
+                          }}
+                        />
                       </div>
                     )}
                   </td>
