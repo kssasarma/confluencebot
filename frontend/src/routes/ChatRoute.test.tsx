@@ -2,7 +2,7 @@ import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render } from '@testing-library/react'
-import { Link, MemoryRouter, Route, Routes } from 'react-router-dom'
+import { Link, MemoryRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { AuthProvider } from '../context/AuthContext'
 import { ChatProvider } from '../context/ChatContext'
@@ -10,7 +10,6 @@ import { ThemeProvider } from '../context/ThemeContext'
 import { ConfirmProvider } from '../components/ui/ConfirmDialog'
 import { ToastProvider } from '../components/ui/Toast'
 import ChatRoute from './ChatRoute'
-import NewChatRedirect from './NewChatRedirect'
 
 /**
  * The conversation route against a real chat provider and a stubbed network.
@@ -62,6 +61,12 @@ function answerStream(answer: string): Response {
   })
 }
 
+/** Surfaces the current path so a test can assert on it without reaching into the router. */
+function LocationDisplay() {
+  const location = useLocation()
+  return <div data-testid="location">{location.pathname}</div>
+}
+
 function renderRoute(route: string) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 }, mutations: { retry: false } },
@@ -75,8 +80,10 @@ function renderRoute(route: string) {
             <AuthProvider>
               <MemoryRouter initialEntries={[route]}>
                 <ChatProvider>
+                  <LocationDisplay />
                   <Routes>
-                    <Route index element={<NewChatRedirect />} />
+                    <Route index element={<Navigate to="/chat" replace />} />
+                    <Route path="chat" element={<ChatRoute />} />
                     <Route path="chat/:chatId" element={<ChatRoute />} />
                   </Routes>
                 </ChatProvider>
@@ -109,7 +116,8 @@ function renderRouteWithNav(route: string, linkedChatIds: string[]) {
                     ))}
                   </nav>
                   <Routes>
-                    <Route index element={<NewChatRedirect />} />
+                    <Route index element={<Navigate to="/chat" replace />} />
+                    <Route path="chat" element={<ChatRoute />} />
                     <Route path="chat/:chatId" element={<ChatRoute />} />
                   </Routes>
                 </ChatProvider>
@@ -138,6 +146,41 @@ describe('opening a new chat', () => {
 
     expect(transcriptCalls()).toEqual([])
     expect(screen.queryByText(/could not load this conversation/i)).not.toBeInTheDocument()
+  })
+
+  it('redirects to /chat, which carries no chat id, before anything is sent', async () => {
+    renderRoute('/')
+
+    await screen.findByRole('textbox', { name: /ask a question/i })
+
+    expect(screen.getByTestId('location')).toHaveTextContent('/chat')
+  })
+
+  it('only gives the conversation a URL once the first message is sent', async () => {
+    fetchMock.mockImplementation(async input => {
+      const url = String(input)
+      if (url.includes('/chat/stream')) return answerStream('In the SRE space.')
+      return stubBackground(url) ?? json({}, 404)
+    })
+
+    renderRoute('/chat')
+    expect(screen.getByTestId('location')).toHaveTextContent('/chat')
+
+    await userEvent.type(
+      await screen.findByRole('textbox', { name: /ask a question/i }),
+      'Where are the runbooks?{Enter}',
+    )
+
+    await waitFor(() =>
+      expect(screen.getByTestId('location').textContent).toMatch(/^\/chat\/[0-9a-f-]{36}$/))
+    expect(await screen.findByText(/in the sre space/i)).toBeInTheDocument()
+  })
+
+  it('shows the welcome screen again on a fresh visit to /chat, never a stale session', async () => {
+    renderRoute('/chat')
+
+    expect(await screen.findByRole('heading', { name: /how may i help you/i })).toBeInTheDocument()
+    expect(transcriptCalls()).toEqual([])
   })
 
   it('centres the question box, with the greeting above it and the suggestions below', async () => {

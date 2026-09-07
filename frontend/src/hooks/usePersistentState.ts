@@ -82,3 +82,36 @@ export function writeSpaceFilter(chatId: string, spaceKey: string | null): void 
     /* A filter that resets on reload is a smaller loss than a thrown render. */
   }
 }
+
+/**
+ * Chat preference overrides picked before a conversation exists on the server.
+ *
+ * The backend only accepts a preferences write once the conversation's row exists, which happens
+ * on the first recorded turn — so a choice made while the composer is still empty has nowhere to
+ * be saved yet. It is kept here, per conversation id, until the id's first turn lands and the
+ * pending value can be replayed as a real save.
+ */
+export function readPendingChatPreferences<T>(chatId: string): T | null {
+  try {
+    const stored = sessionStorage.getItem(`cb_pending_prefs_${chatId}`)
+    return stored ? (JSON.parse(stored) as T) : null
+  } catch {
+    return null
+  }
+}
+
+export function writePendingChatPreferences<T>(chatId: string, preferences: T): void {
+  try {
+    sessionStorage.setItem(`cb_pending_prefs_${chatId}`, JSON.stringify(preferences))
+  } catch {
+    /* Dropping the pending choice is a smaller loss than a thrown render. */
+  }
+}
+
+export function clearPendingChatPreferences(chatId: string): void {
+  try {
+    sessionStorage.removeItem(`cb_pending_prefs_${chatId}`)
+  } catch {
+    /* Nothing to clean up if storage is unavailable. */
+  }
+}
