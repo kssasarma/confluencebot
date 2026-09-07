@@ -96,8 +96,15 @@ const SSE_SENTINEL = '[DONE]'
  * is not a dead end: the request falls back to the plain JSON endpoint and the whole answer is
  * delivered as a single token, so the conversation still works.
  */
+export interface ChatQueryRequest {
+  chatId: string
+  question: string
+  /** Restricts retrieval to one Confluence space; omit to search every ingested space. */
+  spaceKey?: string | null
+}
+
 export async function streamChatMessage(
-  request: { chatId: string; question: string },
+  request: ChatQueryRequest,
   handlers: ChatStreamHandlers,
   signal?: AbortSignal,
 ): Promise<void> {
@@ -122,7 +129,7 @@ export async function streamChatMessage(
 }
 
 async function requestWholeAnswer(
-  request: { chatId: string; question: string },
+  request: ChatQueryRequest,
   signal?: AbortSignal,
 ): Promise<ChatAnswer> {
   const response = await apiFetch('/chat', {

@@ -176,7 +176,7 @@ public class ChatServiceImpl implements ChatService {
         // transcript records the same original, so nobody is later shown words they did not write.
         String retrievalQuery = queryRewriter.rewriteForRetrieval(query.question(), context);
 
-        List<RetrievedChunk> chunks = hybridSearchService.search(retrievalQuery);
+        List<RetrievedChunk> chunks = hybridSearchService.search(retrievalQuery, query.spaceKey());
         if (chunks.isEmpty()) {
             log.warn("No relevant documents found for query: {}", retrievalQuery);
             return RetrievalOutcome.empty();

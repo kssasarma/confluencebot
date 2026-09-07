@@ -6,12 +6,14 @@ import com.kssasarma.confluencebot.confluence.dto.SpaceMetadata;
 import com.kssasarma.confluencebot.confluence.parser.ParsedSection;
 import com.kssasarma.confluencebot.confluence.parser.StorageFormatParser;
 import com.kssasarma.confluencebot.config.ConfluenceProperties;
+import com.kssasarma.confluencebot.domain.ConfluencePageEntity;
 import com.kssasarma.confluencebot.ingestion.chunking.SemanticChunkingStrategy;
 import com.kssasarma.confluencebot.ingestion.chunking.SemanticChunkingStrategy.ChunkedContent;
 import com.kssasarma.confluencebot.repository.ConfluencePageRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.ai.vectorstore.VectorStore;
@@ -88,6 +90,27 @@ class IngestionServiceImplTest {
 
         assertThat(result.pagesProcessed()).isEqualTo(1);
         assertThat(result.chunksStored()).isEqualTo(1);
+    }
+
+    @Test
+    void ingestSpace_pageProcessed_tracksTheSpaceNameFromMetadata() {
+        ConfluencePageDetail page = page("p2", "Guide", 5);
+        when(confluenceClient.fetchSpaceMetadata("ENG")).thenReturn(SPACE_WITH_DESC);
+        when(confluenceClient.fetchAllPages("ENG")).thenReturn(List.of(page));
+        when(pageRepository.findVersionByPageId("p2")).thenReturn(null);
+        when(parser.parse(anyString()))
+                .thenReturn(List.of(new ParsedSection("Intro", "Some text")));
+        when(chunkingStrategy.chunk(any(), eq("Guide")))
+                .thenReturn(List.of(new ChunkedContent("chunk one", "TEXT")));
+        when(pageRepository.findById("p2")).thenReturn(Optional.empty());
+        when(pageRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        service.ingestSpace("ENG");
+
+        ArgumentCaptor<ConfluencePageEntity> saved = ArgumentCaptor.forClass(ConfluencePageEntity.class);
+        verify(pageRepository).save(saved.capture());
+        assertThat(saved.getValue().getSpaceKey()).isEqualTo("ENG");
+        assertThat(saved.getValue().getSpaceName()).isEqualTo("Engineering");
     }
 
     @Test

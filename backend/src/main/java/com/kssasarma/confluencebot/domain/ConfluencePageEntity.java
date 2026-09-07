@@ -17,6 +17,9 @@ public class ConfluencePageEntity {
     @Column(name = "space_key", length = 50, nullable = false)
     private String spaceKey;
 
+    @Column(name = "space_name")
+    private String spaceName;
+
     @Column(name = "title", nullable = false)
     private String title;
 
@@ -34,11 +37,12 @@ public class ConfluencePageEntity {
 
     protected ConfluencePageEntity() {}
 
-    public static ConfluencePageEntity newPage(String pageId, String spaceKey,
+    public static ConfluencePageEntity newPage(String pageId, String spaceKey, String spaceName,
                                                 String title, String pageUrl) {
         ConfluencePageEntity e = new ConfluencePageEntity();
         e.pageId = pageId;
         e.spaceKey = spaceKey;
+        e.spaceName = spaceName;
         e.title = title;
         e.pageUrl = pageUrl;
         e.ingestedAt = OffsetDateTime.now();
@@ -47,12 +51,14 @@ public class ConfluencePageEntity {
 
     public String getPageId() { return pageId; }
     public String getSpaceKey() { return spaceKey; }
+    public String getSpaceName() { return spaceName; }
     public String getTitle() { return title; }
     public String getPageUrl() { return pageUrl; }
     public int getVersion() { return version; }
     public int getChunkCount() { return chunkCount; }
     public OffsetDateTime getIngestedAt() { return ingestedAt; }
 
+    public void setSpaceName(String spaceName) { this.spaceName = spaceName; }
     public void setVersion(int version) { this.version = version; }
     public void setChunkCount(int chunkCount) { this.chunkCount = chunkCount; }
     public void setIngestedAt(OffsetDateTime ingestedAt) { this.ingestedAt = ingestedAt; }

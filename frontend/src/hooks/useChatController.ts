@@ -34,9 +34,9 @@ export interface ChatController {
 
   /** Reads a conversation's transcript. Resolves with what the server turned out to hold. */
   loadTranscript: (chatId: string) => Promise<TranscriptOutcome>
-  sendMessage: (chatId: string, question: string) => Promise<void>
+  sendMessage: (chatId: string, question: string, spaceKey?: string | null) => Promise<void>
   /** Re-asks the question that produced a failed answer, replacing it in place. */
-  retry: (chatId: string) => Promise<void>
+  retry: (chatId: string, spaceKey?: string | null) => Promise<void>
   stopStreaming: () => void
   discardChat: (chatId: string) => void
 }
@@ -260,7 +260,7 @@ export function useChatController({
   }, [flushNow, patchMessage])
 
   const runStream = useCallback(async (
-    chatId: string, question: string, answerId: string,
+    chatId: string, question: string, answerId: string, spaceKey?: string | null,
   ) => {
     setStreamingChatId(chatId)
 
@@ -269,7 +269,7 @@ export function useChatController({
 
     try {
       await streamChatMessage(
-        { chatId, question },
+        { chatId, question, spaceKey: spaceKey ?? undefined },
         {
           onSources: (sources: Source[]) => patchMessage(chatId, answerId, { sources }),
           onToken: (delta: string) => queueToken(chatId, answerId, delta),
@@ -291,7 +291,7 @@ export function useChatController({
     }
   }, [completeAnswer, failAnswer, onTitleRefined, patchMessage, queryClient, queueToken])
 
-  const sendMessage = useCallback(async (chatId: string, text: string) => {
+  const sendMessage = useCallback(async (chatId: string, text: string, spaceKey?: string | null) => {
     const question = text.trim()
     if (!question || streamingChatId) return
 
@@ -309,7 +309,7 @@ export function useChatController({
       ],
     }))
 
-    await runStream(chatId, question, answerId)
+    await runStream(chatId, question, answerId, spaceKey)
   }, [clearLoadError, runStream, streamingChatId])
 
   /**
@@ -319,7 +319,7 @@ export function useChatController({
    * in the transcript — and the question is read back from the transcript rather than remembered
    * in a ref, which keeps retry working after a reload or a chat switch.
    */
-  const retry = useCallback(async (chatId: string) => {
+  const retry = useCallback(async (chatId: string, spaceKey?: string | null) => {
     if (streamingChatId) return
 
     clearLoadError(chatId)
@@ -339,7 +339,7 @@ export function useChatController({
         : message),
     }))
 
-    await runStream(chatId, question.content, answerId)
+    await runStream(chatId, question.content, answerId, spaceKey)
   }, [clearLoadError, runStream, streamingChatId])
 
   const stopStreaming = useCallback(() => abortRef.current?.abort(), [])

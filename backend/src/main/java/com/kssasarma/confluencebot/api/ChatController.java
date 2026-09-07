@@ -68,7 +68,8 @@ public class ChatController {
                     Confluence chunks, and calls the configured LLM with the retrieved context. \
                     Returns the answer and the Confluence pages used as sources, each with a \
                     direct section-anchor URL. Supply a chatId to have the exchange recorded in \
-                    the caller's transcript.
+                    the caller's transcript. Supply a spaceKey (see GET /api/spaces) to restrict \
+                    retrieval to a single Confluence space; omit it to search every ingested space.
                     """)
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Answer generated successfully",
@@ -103,7 +104,8 @@ public class ChatController {
     @PostMapping(produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<ChatApiResponse> chat(@AuthenticationPrincipal User user,
                                                 @Valid @RequestBody ChatRequest request) {
-        return ResponseEntity.ok(chatService.chat(new ChatQuery(request.question(), request.chatId(), user)));
+        return ResponseEntity.ok(chatService.chat(
+                new ChatQuery(request.question(), request.chatId(), request.spaceKey(), user)));
     }
 
     @Operation(
@@ -124,7 +126,7 @@ public class ChatController {
         SseEmitter emitter = new SseEmitter(streamTimeout.toMillis());
         SseChatStreamAdapter adapter =
                 new SseChatStreamAdapter(emitter, streamScheduler, heartbeatInterval, lingerGrace);
-        ChatQuery query = new ChatQuery(request.question(), request.chatId(), user);
+        ChatQuery query = new ChatQuery(request.question(), request.chatId(), request.spaceKey(), user);
 
         try {
             // Retrieval and generation are long and blocking; keep them off the servlet thread.
