@@ -1,10 +1,12 @@
 import { Suspense, lazy, useEffect, useState } from 'react'
-import { Outlet, useLocation } from 'react-router-dom'
+import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { Dialog, DialogPanel, Transition, TransitionChild } from '@headlessui/react'
-import { Menu as MenuIcon, WifiOff } from 'lucide-react'
+import { Menu as MenuIcon, PanelLeftOpen, Plus, WifiOff } from 'lucide-react'
 import { cn } from '../lib/cn'
+import { APP_TITLE } from '../config/env'
 import { useIsDesktop } from '../hooks/useMediaQuery'
 import { useOnlineStatus } from '../hooks/useOnlineStatus'
+import { usePersistentState } from '../hooks/usePersistentState'
 import { useResizable } from '../hooks/useResizable'
 import { useHotkeys } from '../hooks/useHotkeys'
 import { useTheme } from '../context/ThemeContext'
@@ -36,11 +38,13 @@ export default function AppShell() {
   const isDesktop = useIsDesktop()
   const online = useOnlineStatus()
   const location = useLocation()
+  const navigate = useNavigate()
   const { theme, setTheme } = useTheme()
 
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [collapsed, setCollapsed] = usePersistentState('cb_sidebar_collapsed', false, isBoolean)
   const sidebar = useResizable(SIDEBAR)
 
   // A drawer left open across a navigation would cover the page the reader just asked for.
@@ -53,27 +57,42 @@ export default function AppShell() {
   return (
     <div className="flex h-dvh overflow-hidden bg-background">
       {isDesktop ? (
-        <>
-          <aside
-            style={{ width: sidebar.width }}
-            className="h-full shrink-0 border-r border-border"
-          >
-            <Sidebar />
-          </aside>
+        collapsed ? (
+          <div className="flex h-full w-12 shrink-0 flex-col items-center gap-1 border-r border-border py-2">
+            <IconButton
+              label={`Expand ${APP_TITLE} sidebar`}
+              icon={<PanelLeftOpen size={18} />}
+              onClick={() => setCollapsed(false)}
+            />
+            <IconButton
+              label="New chat"
+              icon={<Plus size={18} />}
+              onClick={() => navigate('/chat')}
+            />
+          </div>
+        ) : (
+          <>
+            <aside
+              style={{ width: sidebar.width }}
+              className="h-full shrink-0 border-r border-border"
+            >
+              <Sidebar onCollapse={() => setCollapsed(true)} />
+            </aside>
 
-          <div
-            {...sidebar.handleProps}
-            className={cn(
-              'group relative -ml-1 w-2 shrink-0 cursor-col-resize',
-              // The hit area is 8px wide; the visible line is 2px, centred inside it. A handle
-              // the width of its own graphic is a handle nobody can grab.
-              'before:absolute before:inset-y-0 before:left-1/2 before:w-0.5 before:-translate-x-1/2',
-              'before:bg-transparent before:transition-colors hover:before:bg-primary/40',
-              'focus-visible:before:bg-primary',
-              sidebar.isDragging && 'before:bg-primary',
-            )}
-          />
-        </>
+            <div
+              {...sidebar.handleProps}
+              className={cn(
+                'group relative -ml-1 w-2 shrink-0 cursor-col-resize',
+                // The hit area is 8px wide; the visible line is 2px, centred inside it. A handle
+                // the width of its own graphic is a handle nobody can grab.
+                'before:absolute before:inset-y-0 before:left-1/2 before:w-0.5 before:-translate-x-1/2',
+                'before:bg-transparent before:transition-colors hover:before:bg-primary/40',
+                'focus-visible:before:bg-primary',
+                sidebar.isDragging && 'before:bg-primary',
+              )}
+            />
+          </>
+        )
       ) : (
         <Transition show={drawerOpen}>
           <Dialog onClose={() => setDrawerOpen(false)} className="relative z-drawer">
@@ -112,7 +131,7 @@ export default function AppShell() {
                 icon={<MenuIcon size={18} />}
                 onClick={() => setDrawerOpen(true)}
               />
-              <span className="text-sm font-semibold text-foreground">Confluence Bot</span>
+              <span className="text-sm font-semibold text-foreground">{APP_TITLE}</span>
             </>
           )}
           <div className="ml-auto flex items-center gap-2">
@@ -174,4 +193,8 @@ function OfflineBanner() {
       You are offline. Answers will work again once you reconnect.
     </div>
   )
+}
+
+function isBoolean(value: unknown): value is boolean {
+  return typeof value === 'boolean'
 }
