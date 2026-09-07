@@ -9,6 +9,7 @@ import { useResizable } from '../hooks/useResizable'
 import { useHotkeys } from '../hooks/useHotkeys'
 import Sidebar from '../components/sidebar/Sidebar'
 const CommandPalette = lazy(() => import('../components/palette/CommandPalette'))
+const SettingsDialog = lazy(() => import('../components/settings/SettingsDialog'))
 import ProfileMenu from '../components/layout/ProfileMenu'
 import Footer from '../components/layout/Footer'
 import ErrorBoundary from '../components/ui/ErrorBoundary'
@@ -36,6 +37,7 @@ export default function AppShell() {
 
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const sidebar = useResizable(SIDEBAR)
 
   // A drawer left open across a navigation would cover the page the reader just asked for.
@@ -111,7 +113,7 @@ export default function AppShell() {
             </>
           )}
           <div className="ml-auto">
-            <ProfileMenu />
+            <ProfileMenu onOpenSettings={() => setSettingsOpen(true)} />
           </div>
         </div>
 
@@ -135,7 +137,17 @@ export default function AppShell() {
       {/* Rendered only once opened, so the chunk is fetched on first use rather than on load. */}
       {paletteOpen && (
         <Suspense fallback={null}>
-          <CommandPalette open onClose={() => setPaletteOpen(false)} />
+          <CommandPalette
+            open
+            onClose={() => setPaletteOpen(false)}
+            onOpenSettings={() => setSettingsOpen(true)}
+          />
+        </Suspense>
+      )}
+
+      {settingsOpen && (
+        <Suspense fallback={null}>
+          <SettingsDialog open onClose={() => setSettingsOpen(false)} />
         </Suspense>
       )}
     </div>
