@@ -57,6 +57,15 @@ export interface IngestionJob {
   errorMessage: string | null
 }
 
+export interface IngestionJobPage {
+  jobs: IngestionJob[]
+  page: number
+  size: number
+  totalElements: number
+  totalPages: number
+  hasNext: boolean
+}
+
 export const listUsers = (): Promise<AdminUser[]> => apiJson<AdminUser[]>('/admin/users')
 
 export const createUser = (
@@ -91,7 +100,10 @@ export const ingestSpace = (spaceKey: string, force = false): Promise<IngestionJ
 export const ingestPage = (pageId: string): Promise<IngestionJob> =>
   apiJson<IngestionJob>(`/ingest/page/${pageId}`, { method: 'POST' })
 
-export const listJobs = (): Promise<IngestionJob[]> => apiJson<IngestionJob[]>('/ingest/jobs')
+export const JOB_HISTORY_PAGE_SIZE = 10
+
+export const listJobs = (page = 0, size = JOB_HISTORY_PAGE_SIZE): Promise<IngestionJobPage> =>
+  apiJson<IngestionJobPage>(`/ingest/jobs?page=${page}&size=${size}`)
 
 export const getJob = (jobId: string): Promise<IngestionJob> =>
   apiJson<IngestionJob>(`/ingest/jobs/${jobId}`)
