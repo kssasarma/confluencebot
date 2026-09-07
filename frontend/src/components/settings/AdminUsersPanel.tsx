@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Ban, Check, Mail, Pencil, Trash2, UserPlus } from 'lucide-react'
 import {
-  createUser, deleteUser, listUsers, resendWelcome, setUserEnabled, setUserRoles,
+  createUser, deleteUser, listUsers, resendWelcome, setUserBusinessUnit, setUserEnabled, setUserRoles,
   type AdminRole, type AdminUser,
 } from '../../services/adminService'
 import { useAuth } from '../../context/AuthContext'
@@ -12,6 +12,7 @@ import { toggleRole } from '../../lib/roles'
 import { useConfirm } from '../ui/ConfirmDialog'
 import { useToast } from '../ui/Toast'
 import { cn } from '../../lib/cn'
+import AdminAnalyticsPanel from './AdminAnalyticsPanel'
 import Badge from '../ui/Badge'
 import Button from '../ui/Button'
 import EmptyState from '../ui/EmptyState'
@@ -81,13 +82,16 @@ export default function AdminUsersPanel() {
 
   const [email, setEmail] = useState('')
   const [roles, setRoles] = useState<AdminRole[]>(['USER'])
+  const [businessUnit, setBusinessUnit] = useState('')
   const [welcomeResult, setWelcomeResult] = useState<WelcomeEmailResult | null>(null)
   const [editingRolesFor, setEditingRolesFor] = useState<number | null>(null)
+  const [editingBuFor, setEditingBuFor] = useState<number | null>(null)
+  const [buDraft, setBuDraft] = useState('')
 
   const users = useQuery({ queryKey: queryKeys.adminUsers, queryFn: listUsers })
 
   const create = useMutation({
-    mutationFn: () => createUser(email.trim(), roles),
+    mutationFn: () => createUser(email.trim(), roles, undefined, businessUnit.trim() || undefined),
     onSuccess: result => {
       setWelcomeResult({
         action: 'created', email: result.user.email,
@@ -95,6 +99,7 @@ export default function AdminUsersPanel() {
       })
       setEmail('')
       setRoles(['USER'])
+      setBusinessUnit('')
       void queryClient.invalidateQueries({ queryKey: queryKeys.adminUsers })
     },
     onError: error => toast.error('Could not create the user', toMessage(error, 'Please try again.')),
@@ -119,6 +124,20 @@ export default function AdminUsersPanel() {
     },
     onError: error => toast.error('Could not change the roles', toMessage(error, 'Please try again.')),
   })
+
+  const changeBusinessUnit = useMutation({
+    mutationFn: ({ user, next }: { user: AdminUser; next: string }) => setUserBusinessUnit(user.id, next),
+    onSuccess: updated => {
+      applyUser(updated)
+      setEditingBuFor(null)
+    },
+    onError: error => toast.error('Could not update the business unit', toMessage(error, 'Please try again.')),
+  })
+
+  function startEditingBu(user: AdminUser) {
+    setBuDraft(user.businessUnit ?? '')
+    setEditingBuFor(current => (current === user.id ? null : user.id))
+  }
 
   const resend = useMutation({
     mutationFn: (user: AdminUser) => resendWelcome(user.id),
@@ -163,6 +182,10 @@ export default function AdminUsersPanel() {
 
   return (
     <div className="space-y-6">
+      {/* Onboarding/usage analytics are a full-admin thing — a read-only admin can see and manage
+          users here, but not how much the deployment is being used or by whom. */}
+      {isAdmin && <AdminAnalyticsPanel />}
+
       {welcomeResult && (
         <div role="status" className="rounded-lg border border-success/40 bg-success-soft p-4 text-sm">
           <p className="mb-1 font-medium text-success-emphasis">
@@ -217,6 +240,15 @@ export default function AdminUsersPanel() {
           <RoleToggleGroup selected={roles} onToggle={role => setRoles(current => toggleRole(current, role))} />
         </div>
 
+        <div className="min-w-[10rem]">
+          <Input
+            label="Business unit"
+            value={businessUnit}
+            onChange={event => setBusinessUnit(event.target.value)}
+            placeholder="Optional"
+          />
+        </div>
+
         <Button type="submit" loading={create.isPending} disabled={!email.trim()}>
           <UserPlus size={15} aria-hidden="true" />
           Add user
@@ -240,6 +272,7 @@ export default function AdminUsersPanel() {
               <tr className="border-b border-border text-left">
                 <th scope="col" className="pb-2 font-medium text-muted-foreground">Email</th>
                 <th scope="col" className="pb-2 font-medium text-muted-foreground">Name</th>
+                <th scope="col" className="pb-2 font-medium text-muted-foreground">Business unit</th>
                 <th scope="col" className="pb-2 font-medium text-muted-foreground">Roles</th>
                 <th scope="col" className="pb-2 font-medium text-muted-foreground">Status</th>
                 <th scope="col" className="pb-2 font-medium text-muted-foreground">Must change password</th>
@@ -251,6 +284,44 @@ export default function AdminUsersPanel() {
                 <tr key={user.id} className="text-foreground">
                   <td className="py-2.5 pr-4 font-mono text-2xs">{user.email}</td>
                   <td className="py-2.5 pr-4 text-2xs text-muted-foreground">{user.name ?? '—'}</td>
+                  <td className="py-2.5 pr-4">
+                    <div className="flex items-center gap-1">
+                      <span className="text-2xs text-muted-foreground">{user.businessUnit ?? '—'}</span>
+                      {isAdmin && (
+                        <IconButton
+                          size="sm"
+                          active={editingBuFor === user.id}
+                          label={
+                            editingBuFor === user.id
+                              ? `Close business unit editor for ${user.email}`
+                              : `Edit business unit for ${user.email}`
+                          }
+                          icon={<Pencil size={12} />}
+                          onClick={() => startEditingBu(user)}
+                          disabled={changeBusinessUnit.isPending}
+                        />
+                      )}
+                    </div>
+                    {editingBuFor === user.id && (
+                      <form
+                        className="mt-1.5 flex items-center gap-1.5"
+                        onSubmit={event => {
+                          event.preventDefault()
+                          changeBusinessUnit.mutate({ user, next: buDraft.trim() })
+                        }}
+                      >
+                        <Input
+                          aria-label={`Business unit for ${user.email}`}
+                          value={buDraft}
+                          onChange={event => setBuDraft(event.target.value)}
+                          placeholder="e.g. Engineering"
+                        />
+                        <Button type="submit" size="sm" loading={changeBusinessUnit.isPending}>
+                          Save
+                        </Button>
+                      </form>
+                    )}
+                  </td>
                   <td className="py-2.5 pr-4">
                     <div className="flex flex-wrap items-center gap-1">
                       {user.roles.map(userRole => (

@@ -1,11 +1,14 @@
 package com.kssasarma.confluencebot.api;
 
+import com.kssasarma.confluencebot.api.dto.AdminAnalyticsResponse;
 import com.kssasarma.confluencebot.api.dto.AdminUserEventResponse;
 import com.kssasarma.confluencebot.api.dto.AdminUserRequest;
 import com.kssasarma.confluencebot.api.dto.AdminUserResponse;
 import com.kssasarma.confluencebot.email.EmailService;
 import com.kssasarma.confluencebot.user.AdminUserEvent;
 import com.kssasarma.confluencebot.user.AdminUserEventRepository;
+import com.kssasarma.confluencebot.user.ChatMessageRepository;
+import com.kssasarma.confluencebot.user.ChatMessageRole;
 import com.kssasarma.confluencebot.user.RefreshTokenRepository;
 import com.kssasarma.confluencebot.user.User;
 import com.kssasarma.confluencebot.user.UserRepository;
@@ -28,11 +31,14 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.security.SecureRandom;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.Base64;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 @Tag(name = "Admin", description = "User management — admin only")
 @RestController
@@ -41,21 +47,27 @@ import java.util.Set;
 public class AdminController {
 
     private static final Logger logger = LoggerFactory.getLogger(AdminController.class);
+    private static final int ANALYTICS_WINDOW_DAYS = 30;
+    private static final int TOP_USERS_LIMIT = 10;
+
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final EmailService emailService;
     private final AdminUserEventRepository eventRepository;
     private final RefreshTokenRepository refreshTokenRepository;
+    private final ChatMessageRepository chatMessageRepository;
     private final SecureRandom secureRandom = new SecureRandom();
 
     public AdminController(UserRepository userRepository, PasswordEncoder passwordEncoder,
                             EmailService emailService, AdminUserEventRepository eventRepository,
-                            RefreshTokenRepository refreshTokenRepository) {
+                            RefreshTokenRepository refreshTokenRepository,
+                            ChatMessageRepository chatMessageRepository) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
         this.emailService = emailService;
         this.eventRepository = eventRepository;
         this.refreshTokenRepository = refreshTokenRepository;
+        this.chatMessageRepository = chatMessageRepository;
     }
 
     @Operation(summary = "List all users")
@@ -92,6 +104,9 @@ public class AdminController {
         user.setPassword(passwordEncoder.encode(tempPassword));
         user.setRoles(roles);
         user.setMustChangePassword(true);
+        if (request.businessUnit() != null && !request.businessUnit().isBlank()) {
+            user.setBusinessUnit(request.businessUnit().strip());
+        }
 
         User saved = userRepository.save(user);
         boolean emailSent = emailService.sendWelcomeEmail(request.email(), onboarderLabel(auth), tempPassword);
@@ -213,6 +228,74 @@ public class AdminController {
                     return ResponseEntity.ok((Object) AdminUserResponse.from(saved));
                 })
                 .orElse(ResponseEntity.notFound().build());
+    }
+
+    @Operation(summary = "Set or clear a user's business unit",
+            description = "Reporting only — never used for access control. An empty or missing "
+                    + "value clears it.")
+    @PatchMapping("/users/{id}/business-unit")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<?> setBusinessUnit(@PathVariable Long id, @RequestBody Map<String, String> body,
+                                             Authentication auth) {
+        return userRepository.findById(id)
+                .map(u -> {
+                    String businessUnit = body.get("businessUnit");
+                    u.setBusinessUnit(businessUnit == null || businessUnit.isBlank() ? null : businessUnit.strip());
+                    User saved = userRepository.save(u);
+                    logger.info("Admin {} set business unit for user {} (id={}) to {}",
+                            auth.getName(), u.getEmail(), id, saved.getBusinessUnit());
+                    return ResponseEntity.ok((Object) AdminUserResponse.from(saved));
+                })
+                .orElse(ResponseEntity.notFound().build());
+    }
+
+    @Operation(summary = "Onboarding and usage analytics",
+            description = """
+                    Admin-only reporting: how many accounts exist and by which role, recent \
+                    onboarding activity (created/resent/deleted, and email delivery failures) over \
+                    the last 30 days, and how much the chatbot is actually used — question counts \
+                    only, never the questions themselves — broken down by top users and by \
+                    business unit.
+                    """)
+    @GetMapping("/analytics")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<AdminAnalyticsResponse> analytics() {
+        Instant cutoff = Instant.now().minus(ANALYTICS_WINDOW_DAYS, ChronoUnit.DAYS);
+
+        List<User> allUsers = userRepository.findAll();
+        List<AdminAnalyticsResponse.RoleCount> usersByRole = allUsers.stream()
+                .flatMap(u -> u.getRoles().stream())
+                .collect(Collectors.groupingBy(UserRole::name, Collectors.counting()))
+                .entrySet().stream()
+                .map(e -> new AdminAnalyticsResponse.RoleCount(e.getKey(), e.getValue()))
+                .sorted((a, b) -> a.role().compareTo(b.role()))
+                .toList();
+
+        AdminAnalyticsResponse.OnboardingStats onboarding = new AdminAnalyticsResponse.OnboardingStats(
+                allUsers.size(),
+                usersByRole,
+                eventRepository.countByEventTypeAndCreatedAtAfter(AdminUserEvent.EventType.CREATED, cutoff),
+                eventRepository.countByEventTypeAndCreatedAtAfter(AdminUserEvent.EventType.RESENT, cutoff),
+                eventRepository.countByEventTypeAndCreatedAtAfter(AdminUserEvent.EventType.DELETED, cutoff),
+                eventRepository.countByEmailSentFalseAndCreatedAtAfter(cutoff));
+
+        List<AdminAnalyticsResponse.UserQuestionCount> topUsers =
+                chatMessageRepository.topUsersByQuestionCount(PageRequest.of(0, TOP_USERS_LIMIT)).stream()
+                        .map(row -> new AdminAnalyticsResponse.UserQuestionCount(
+                                row.getEmail(), row.getName(), row.getQuestionCount()))
+                        .toList();
+
+        List<AdminAnalyticsResponse.BusinessUnitQuestionCount> byBusinessUnit =
+                chatMessageRepository.questionCountsByBusinessUnit().stream()
+                        .map(row -> new AdminAnalyticsResponse.BusinessUnitQuestionCount(
+                                row.getBusinessUnit(), row.getQuestionCount()))
+                        .toList();
+
+        AdminAnalyticsResponse.UsageStats usage = new AdminAnalyticsResponse.UsageStats(
+                chatMessageRepository.countByRole(ChatMessageRole.USER),
+                topUsers, byBusinessUnit);
+
+        return ResponseEntity.ok(new AdminAnalyticsResponse(onboarding, usage));
     }
 
     /** Defaults to {@code {USER}} when the caller sends no roles at all. */
