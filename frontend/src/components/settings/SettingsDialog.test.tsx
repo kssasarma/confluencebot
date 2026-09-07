@@ -312,7 +312,7 @@ describe('SettingsDialog Ingestion section job history', () => {
 
   it('paginates through job history using Next and Previous', async () => {
     seedToken()
-    const jobs = Array.from({ length: 15 }, (_, i) => stubJob(`job-${i}`, `SPACE${i}`))
+    const jobs = Array.from({ length: 8 }, (_, i) => stubJob(`job-${i}`, `SPACE${i}`))
     const fetchMock = makeFetchMock({ meRoles: ['INGESTOR'], jobs })
     vi.stubGlobal('fetch', fetchMock)
 
@@ -321,7 +321,7 @@ describe('SettingsDialog Ingestion section job history', () => {
     await userEvent.click(screen.getByRole('button', { name: /job history/i }))
 
     expect(await screen.findByText('SPACE0')).toBeInTheDocument()
-    expect(screen.queryByText('SPACE10')).not.toBeInTheDocument()
+    expect(screen.queryByText('SPACE5')).not.toBeInTheDocument()
     expect(screen.getByText(/page 1 of 2/i)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Previous' })).toBeDisabled()
 
@@ -331,7 +331,7 @@ describe('SettingsDialog Ingestion section job history', () => {
       expect.stringContaining('page=1'),
       expect.anything(),
     ))
-    expect(await screen.findByText('SPACE10')).toBeInTheDocument()
+    expect(await screen.findByText('SPACE5')).toBeInTheDocument()
     expect(screen.queryByText('SPACE0')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled()
   })
