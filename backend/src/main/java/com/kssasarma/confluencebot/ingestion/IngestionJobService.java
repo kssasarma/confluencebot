@@ -4,12 +4,13 @@ import com.kssasarma.confluencebot.domain.IngestionJobEntity;
 import com.kssasarma.confluencebot.domain.IngestionJobStatus;
 import com.kssasarma.confluencebot.domain.IngestionJobType;
 import com.kssasarma.confluencebot.repository.IngestionJobRepository;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
-import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -77,8 +78,8 @@ public class IngestionJobService {
     }
 
     @Transactional(readOnly = true)
-    public List<IngestionJobEntity> findAll() {
-        return jobRepo.findAllByOrderByCreatedAtDesc();
+    public Page<IngestionJobEntity> findAll(Pageable pageable) {
+        return jobRepo.findAllByOrderByCreatedAtDesc(pageable);
     }
 
     /**

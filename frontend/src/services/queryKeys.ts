@@ -12,6 +12,6 @@ export const queryKeys = {
   userPreferences: ['preferences', 'user'] as const,
   chatPreferences: (chatId: string) => ['preferences', 'chat', chatId] as const,
   adminUsers: ['admin', 'users'] as const,
-  ingestionJobs: ['admin', 'jobs'] as const,
+  ingestionJobs: (page: number) => ['admin', 'jobs', page] as const,
   spaces: ['spaces'] as const,
 } as const
