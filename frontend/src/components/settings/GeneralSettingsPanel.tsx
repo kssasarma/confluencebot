@@ -100,11 +100,9 @@ export default function GeneralSettingsPanel() {
         <h2 className="mb-3 text-2xs font-semibold uppercase tracking-wider text-muted-foreground">
           Appearance
         </h2>
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <p className="text-sm font-medium text-foreground">Theme</p>
-            <p className="text-2xs text-muted-foreground">Dark, light, or follow your system.</p>
-          </div>
+        <div className="flex flex-col items-start gap-1.5">
+          <p className="text-sm font-medium text-foreground">Theme</p>
+          <p className="text-2xs text-muted-foreground">Dark, light, or follow your system.</p>
           <ThemeSwitch value={theme} onChange={setTheme} />
         </div>
       </section>
