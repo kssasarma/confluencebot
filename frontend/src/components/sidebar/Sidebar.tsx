@@ -55,7 +55,7 @@ export default function Sidebar({ onNavigate }: SidebarProps) {
   }
 
   function handleNewChat() {
-    navigate(`/chat/${chat.startDraft()}`)
+    navigate('/chat')
     onNavigate?.()
   }
 
@@ -67,7 +67,7 @@ export default function Sidebar({ onNavigate }: SidebarProps) {
   return (
     <div className="flex h-full min-h-0 flex-col bg-surface">
       <div className="flex items-center gap-2 border-b border-border p-3">
-        <Link to="/" onClick={onNavigate} className="truncate rounded text-sm font-semibold text-foreground">
+        <Link to="/chat" onClick={onNavigate} className="truncate rounded text-sm font-semibold text-foreground">
           Confluence Bot
         </Link>
       </div>

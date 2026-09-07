@@ -10,6 +10,7 @@ import com.kssasarma.confluencebot.exception.GlobalExceptionHandler;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.core.task.SyncTaskExecutor;
@@ -26,6 +27,7 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -99,6 +101,33 @@ class ChatControllerTest {
         mockMvc.perform(post("/api/chat")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"question\": \"" + longQuery + "\"}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void chat_spaceKeyProvided_isPassedThroughToTheChatQuery() throws Exception {
+        when(chatService.chat(any(ChatQuery.class)))
+                .thenReturn(new ChatApiResponse("Configure X by...", List.of()));
+
+        mockMvc.perform(post("/api/chat")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"question": "How do I configure X?", "spaceKey": "ENG"}
+                                """))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<ChatQuery> query = ArgumentCaptor.forClass(ChatQuery.class);
+        verify(chatService).chat(query.capture());
+        assertThat(query.getValue().spaceKey()).isEqualTo("ENG");
+    }
+
+    @Test
+    void chat_spaceKeyOver50Chars_returns400() throws Exception {
+        String longSpaceKey = "A".repeat(51);
+
+        mockMvc.perform(post("/api/chat")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"question\": \"How do I configure X?\", \"spaceKey\": \"" + longSpaceKey + "\"}"))
                 .andExpect(status().isBadRequest());
     }
 

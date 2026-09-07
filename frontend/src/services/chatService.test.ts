@@ -218,4 +218,24 @@ describe('streamChatMessage', () => {
     await streamChatMessage(REQUEST, h)
     expect(h.tokens).toEqual(['Buffered by the proxy.'])
   })
+
+  it('includes spaceKey in the request body when the question is scoped to a space', async () => {
+    const fetchSpy = vi.mocked(fetch)
+    fetchSpy.mockResolvedValue(streamingResponse([sse(DONE_EVENT), 'data: [DONE]\n\n']))
+
+    await streamChatMessage({ ...REQUEST, spaceKey: 'ENG' }, handlers())
+
+    const body = JSON.parse(String(fetchSpy.mock.calls[0][1]?.body)) as Record<string, unknown>
+    expect(body.spaceKey).toBe('ENG')
+  })
+
+  it('omits spaceKey from the request body when the question is not scoped', async () => {
+    const fetchSpy = vi.mocked(fetch)
+    fetchSpy.mockResolvedValue(streamingResponse([sse(DONE_EVENT), 'data: [DONE]\n\n']))
+
+    await streamChatMessage(REQUEST, handlers())
+
+    const body = JSON.parse(String(fetchSpy.mock.calls[0][1]?.body)) as Record<string, unknown>
+    expect(body.spaceKey).toBeUndefined()
+  })
 })

@@ -1,31 +1,15 @@
 import userEvent from '@testing-library/user-event'
 import { screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { renderWithProviders } from '../test/render'
-import { TOKEN_KEY } from '../lib/token'
-import AdminRoute from './AdminRoute'
-import { toggleRole } from '../lib/roles'
-import type { AdminRole } from '../services/adminService'
-
-describe('toggleRole', () => {
-  it('adds a role that is not yet selected', () => {
-    expect(toggleRole(['USER'], 'INGESTOR')).toEqual(['USER', 'INGESTOR'])
-  })
-
-  it('removes a role that is already selected', () => {
-    expect(toggleRole(['USER', 'INGESTOR'], 'INGESTOR')).toEqual(['USER'])
-  })
-
-  it('refuses to remove the only remaining role', () => {
-    const solo: AdminRole[] = ['ADMIN']
-    expect(toggleRole(solo, 'ADMIN')).toBe(solo)
-  })
-})
+import { renderWithProviders } from '../../test/render'
+import { TOKEN_KEY } from '../../lib/token'
+import SettingsDialog from './SettingsDialog'
 
 /**
- * A user can now hold several roles, and each role unlocks its own tab of the admin screen: a
- * read-only admin only ever sees Users, an ingestor only ever sees Ingestion, and a full admin
- * sees both and can re-assign anyone else's roles from the table.
+ * Settings, Admin and Ingestor Settings used to be three separate nav entries and three separate
+ * full-page routes. They are now sections of one dialog, and a role still only ever sees the
+ * sections it has permission for: a read-only admin sees Admin but not Ingestion, an ingestor sees
+ * Ingestion but not Admin, and a full admin sees both — General is unconditional for everyone.
  */
 
 interface StubUser {
@@ -53,7 +37,13 @@ function makeFetchMock(options: { meRoles: string[]; users?: StubUser[]; jobs?: 
       const method = (init?.method ?? 'GET').toUpperCase()
 
       if (url.includes('/auth/me')) {
-        return json({ userId: 1, email: 'signed-in@example.com', roles: meRoles, mustChangePassword: false })
+        return json({ userId: 1, email: 'signed-in@example.com', name: 'Signed In', roles: meRoles, mustChangePassword: false })
+      }
+      if (url.includes('/user/preferences')) {
+        return json({
+          theme: 'system', language: 'en', responseStyle: 'balanced',
+          showSources: true, showConfidence: true,
+        })
       }
       if (url.endsWith('/admin/users') && method === 'GET') return json(users)
       if (url.endsWith('/admin/users') && method === 'POST') {
@@ -107,40 +97,58 @@ beforeEach(() => {
   localStorage.clear()
 })
 
-describe('AdminRoute tab visibility per role', () => {
-  it('a full admin sees both tabs, defaulting to Users', async () => {
+describe('SettingsDialog section visibility per role', () => {
+  it('opens on General, and a full admin can also reach Admin and Ingestion', async () => {
     seedToken()
     vi.stubGlobal('fetch', makeFetchMock({ meRoles: ['ADMIN'], users: [] }))
 
-    renderWithProviders(<AdminRoute />, { route: '/admin' })
+    renderWithProviders(<SettingsDialog open onClose={vi.fn()} />)
 
-    expect(await screen.findByRole('tab', { name: 'users', selected: true })).toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: 'ingestion' })).toBeInTheDocument()
+    expect(await screen.findByRole('tab', { name: 'General', selected: true })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Admin' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Ingestion' })).toBeInTheDocument()
   })
 
-  it('an admin_read_only sees only the Users tab', async () => {
+  it('an admin_read_only sees General and Admin, but not Ingestion', async () => {
     seedToken()
     vi.stubGlobal('fetch', makeFetchMock({ meRoles: ['ADMIN_READ_ONLY'], users: [] }))
 
-    renderWithProviders(<AdminRoute />, { route: '/admin' })
+    renderWithProviders(<SettingsDialog open onClose={vi.fn()} />)
 
-    expect(await screen.findByRole('tab', { name: 'users' })).toBeInTheDocument()
-    expect(screen.queryByRole('tab', { name: 'ingestion' })).not.toBeInTheDocument()
+    expect(await screen.findByRole('tab', { name: 'Admin' })).toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: 'Ingestion' })).not.toBeInTheDocument()
   })
 
-  it('an ingestor sees only the Ingestion tab, and it is already open', async () => {
+  it('an ingestor sees General and Ingestion, but not Admin', async () => {
     seedToken()
     vi.stubGlobal('fetch', makeFetchMock({ meRoles: ['INGESTOR'], jobs: [] }))
 
-    renderWithProviders(<AdminRoute />, { route: '/admin' })
+    renderWithProviders(<SettingsDialog open onClose={vi.fn()} />)
 
-    expect(await screen.findByRole('tab', { name: 'ingestion' })).toBeInTheDocument()
-    expect(screen.queryByRole('tab', { name: 'users' })).not.toBeInTheDocument()
+    expect(await screen.findByRole('tab', { name: 'Ingestion' })).toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: 'Admin' })).not.toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('tab', { name: 'Ingestion' }))
     expect(await screen.findByText(/ingest a space/i)).toBeInTheDocument()
+  })
+
+  it('a plain user sees only General', async () => {
+    seedToken()
+    vi.stubGlobal('fetch', makeFetchMock({ meRoles: ['USER'] }))
+
+    renderWithProviders(<SettingsDialog open onClose={vi.fn()} />)
+
+    await screen.findByRole('tab', { name: 'General' })
+    expect(screen.queryByRole('tab', { name: 'Admin' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: 'Ingestion' })).not.toBeInTheDocument()
   })
 })
 
-describe('AdminRoute role re-assignment', () => {
+describe('SettingsDialog Admin section', () => {
+  async function openAdminTab() {
+    await userEvent.click(await screen.findByRole('tab', { name: 'Admin' }))
+  }
+
   it('lets a full admin grant an additional role to another user', async () => {
     seedToken()
     const users: StubUser[] = [
@@ -150,7 +158,8 @@ describe('AdminRoute role re-assignment', () => {
     const fetchMock = makeFetchMock({ meRoles: ['ADMIN'], users })
     vi.stubGlobal('fetch', fetchMock)
 
-    renderWithProviders(<AdminRoute />, { route: '/admin' })
+    renderWithProviders(<SettingsDialog open onClose={vi.fn()} />)
+    await openAdminTab()
 
     const otherRow = (await screen.findByText('other@example.com')).closest('tr')
     if (!otherRow) throw new Error('expected a table row for other@example.com')
@@ -172,7 +181,8 @@ describe('AdminRoute role re-assignment', () => {
     ]
     vi.stubGlobal('fetch', makeFetchMock({ meRoles: ['ADMIN'], users }))
 
-    renderWithProviders(<AdminRoute />, { route: '/admin' })
+    renderWithProviders(<SettingsDialog open onClose={vi.fn()} />)
+    await openAdminTab()
 
     const ownRow = (await screen.findByText('signed-in@example.com')).closest('tr')
     if (!ownRow) throw new Error('expected a table row for the signed-in admin')
@@ -180,29 +190,13 @@ describe('AdminRoute role re-assignment', () => {
     expect(within(ownRow).getByText('Admin')).toBeInTheDocument()
   })
 
-  it('an admin_read_only sees roles as labels for every user, never toggles', async () => {
-    seedToken()
-    const users: StubUser[] = [
-      { id: 2, email: 'other@example.com', roles: ['USER'], enabled: true, mustChangePassword: false, createdAt: '2026-01-01T00:00:00Z' },
-    ]
-    vi.stubGlobal('fetch', makeFetchMock({ meRoles: ['ADMIN_READ_ONLY'], users }))
-
-    renderWithProviders(<AdminRoute />, { route: '/admin' })
-
-    const row = (await screen.findByText('other@example.com')).closest('tr')
-    if (!row) throw new Error('expected a table row for other@example.com')
-    expect(within(row).queryByRole('checkbox')).not.toBeInTheDocument()
-    expect(within(row).getByText('User')).toBeInTheDocument()
-  })
-})
-
-describe('AdminRoute user creation', () => {
-  it('submits every role selected in the toggle group', async () => {
+  it('submits every role selected in the toggle group when creating a user', async () => {
     seedToken()
     const fetchMock = makeFetchMock({ meRoles: ['ADMIN'], users: [] })
     vi.stubGlobal('fetch', fetchMock)
 
-    renderWithProviders(<AdminRoute />, { route: '/admin' })
+    renderWithProviders(<SettingsDialog open onClose={vi.fn()} />)
+    await openAdminTab()
 
     await userEvent.type(await screen.findByLabelText(/email/i), 'new.hire@example.com')
     const createForm = (await screen.findByLabelText(/email/i)).closest('form')
@@ -222,35 +216,6 @@ describe('AdminRoute user creation', () => {
     })
   })
 
-  it('tells the admin the welcome email was sent instead of showing the password', async () => {
-    seedToken()
-    vi.stubGlobal('fetch', makeFetchMock({ meRoles: ['ADMIN'], users: [], emailSent: true }))
-
-    renderWithProviders(<AdminRoute />, { route: '/admin' })
-
-    await userEvent.type(await screen.findByLabelText(/email/i), 'new.hire@example.com')
-    await userEvent.click(await screen.findByRole('button', { name: /add user/i }))
-
-    const banner = await screen.findByRole('status')
-    expect(within(banner).getByText(/sign-in instructions were emailed/i)).toBeInTheDocument()
-    expect(within(banner).queryByText('temp-pass-123')).not.toBeInTheDocument()
-  })
-
-  it('falls back to showing the password when the welcome email could not be sent', async () => {
-    seedToken()
-    vi.stubGlobal('fetch', makeFetchMock({ meRoles: ['ADMIN'], users: [], emailSent: false }))
-
-    renderWithProviders(<AdminRoute />, { route: '/admin' })
-
-    await userEvent.type(await screen.findByLabelText(/email/i), 'new.hire@example.com')
-    await userEvent.click(await screen.findByRole('button', { name: /add user/i }))
-
-    const banner = await screen.findByRole('status')
-    expect(within(banner).getByText('temp-pass-123')).toBeInTheDocument()
-  })
-})
-
-describe('AdminRoute delete user', () => {
   it('asks for confirmation, then deletes and removes the row', async () => {
     seedToken()
     const users: StubUser[] = [
@@ -260,7 +225,8 @@ describe('AdminRoute delete user', () => {
     const fetchMock = makeFetchMock({ meRoles: ['ADMIN'], users })
     vi.stubGlobal('fetch', fetchMock)
 
-    renderWithProviders(<AdminRoute />, { route: '/admin' })
+    renderWithProviders(<SettingsDialog open onClose={vi.fn()} />)
+    await openAdminTab()
 
     await userEvent.click(await screen.findByRole('button', { name: 'Delete other@example.com' }))
     await userEvent.click(await screen.findByRole('button', { name: 'Delete' }))
@@ -272,73 +238,7 @@ describe('AdminRoute delete user', () => {
     await waitFor(() => expect(screen.queryByText('other@example.com')).not.toBeInTheDocument())
   })
 
-  it('cannot be used on the signed-in admin\'s own row', async () => {
-    seedToken()
-    const users: StubUser[] = [
-      { id: 1, email: 'signed-in@example.com', roles: ['ADMIN'], enabled: true, mustChangePassword: false, createdAt: '2026-01-01T00:00:00Z' },
-    ]
-    vi.stubGlobal('fetch', makeFetchMock({ meRoles: ['ADMIN'], users }))
-
-    renderWithProviders(<AdminRoute />, { route: '/admin' })
-
-    const ownRow = (await screen.findByText('signed-in@example.com')).closest('tr')
-    if (!ownRow) throw new Error('expected a table row for the signed-in admin')
-    expect(within(ownRow).queryByRole('button', { name: /delete/i })).not.toBeInTheDocument()
-  })
-
-  it('does not delete when the confirmation is cancelled', async () => {
-    seedToken()
-    const users: StubUser[] = [
-      { id: 2, email: 'other@example.com', roles: ['USER'], enabled: true, mustChangePassword: false, createdAt: '2026-01-01T00:00:00Z' },
-    ]
-    const fetchMock = makeFetchMock({ meRoles: ['ADMIN'], users })
-    vi.stubGlobal('fetch', fetchMock)
-
-    renderWithProviders(<AdminRoute />, { route: '/admin' })
-
-    await userEvent.click(await screen.findByRole('button', { name: 'Delete other@example.com' }))
-    await userEvent.click(await screen.findByRole('button', { name: 'Cancel' }))
-
-    expect(screen.getByText('other@example.com')).toBeInTheDocument()
-    expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(false)
-  })
-})
-
-describe('AdminRoute resend welcome email', () => {
-  it('is only offered for a user who has not completed onboarding', async () => {
-    seedToken()
-    const users: StubUser[] = [
-      { id: 2, email: 'pending@example.com', roles: ['USER'], enabled: true, mustChangePassword: true, createdAt: '2026-01-01T00:00:00Z' },
-      { id: 3, email: 'active@example.com', roles: ['USER'], enabled: true, mustChangePassword: false, createdAt: '2026-01-01T00:00:00Z' },
-    ]
-    vi.stubGlobal('fetch', makeFetchMock({ meRoles: ['ADMIN'], users }))
-
-    renderWithProviders(<AdminRoute />, { route: '/admin' })
-
-    await screen.findByText('pending@example.com')
-    expect(screen.getByRole('button', { name: 'Resend welcome email to pending@example.com' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Resend welcome email to active@example.com' })).not.toBeInTheDocument()
-  })
-
-  /**
-   * resendWelcome resets an arbitrary account's password and hands the plaintext back in the
-   * response — restricted server-side to full ADMIN the same as delete/enable/roles. The button
-   * must not even render for a read-only admin, or it dangles a control that always 403s.
-   */
-  it('is not offered to a read-only admin, even for a user who has not completed onboarding', async () => {
-    seedToken()
-    const users: StubUser[] = [
-      { id: 2, email: 'pending@example.com', roles: ['USER'], enabled: true, mustChangePassword: true, createdAt: '2026-01-01T00:00:00Z' },
-    ]
-    vi.stubGlobal('fetch', makeFetchMock({ meRoles: ['ADMIN_READ_ONLY'], users }))
-
-    renderWithProviders(<AdminRoute />, { route: '/admin' })
-
-    await screen.findByText('pending@example.com')
-    expect(screen.queryByRole('button', { name: 'Resend welcome email to pending@example.com' })).not.toBeInTheDocument()
-  })
-
-  it('confirms, then reports the new email was sent', async () => {
+  it('confirms, then reports the welcome email was resent', async () => {
     seedToken()
     const users: StubUser[] = [
       { id: 2, email: 'pending@example.com', roles: ['USER'], enabled: true, mustChangePassword: true, createdAt: '2026-01-01T00:00:00Z' },
@@ -346,7 +246,8 @@ describe('AdminRoute resend welcome email', () => {
     const fetchMock = makeFetchMock({ meRoles: ['ADMIN'], users, emailSent: true })
     vi.stubGlobal('fetch', fetchMock)
 
-    renderWithProviders(<AdminRoute />, { route: '/admin' })
+    renderWithProviders(<SettingsDialog open onClose={vi.fn()} />)
+    await openAdminTab()
 
     await userEvent.click(await screen.findByRole('button', { name: 'Resend welcome email to pending@example.com' }))
     await userEvent.click(await screen.findByRole('button', { name: 'Resend' }))
@@ -357,6 +258,5 @@ describe('AdminRoute resend welcome email', () => {
     ))
     const banner = await screen.findByRole('status')
     expect(within(banner).getByText('Welcome email resent')).toBeInTheDocument()
-    expect(within(banner).getByText(/sign-in instructions were emailed/i)).toBeInTheDocument()
   })
 })

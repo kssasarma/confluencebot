@@ -1,28 +1,23 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, Ban, Check, Mail, Play, RefreshCw, RotateCcw, Trash2, UserPlus } from 'lucide-react'
+import { Ban, Check, Mail, Trash2, UserPlus } from 'lucide-react'
 import {
-  createUser, deleteUser, ingestPage, ingestSpace, listJobs, listUsers, resendWelcome,
-  retriggerJob, setUserEnabled, setUserRoles, type AdminRole, type AdminUser, type IngestionJob,
-} from '../services/adminService'
-import { useAuth } from '../context/AuthContext'
-import { queryKeys } from '../services/queryKeys'
-import { toMessage } from '../lib/errors'
-import { toggleRole } from '../lib/roles'
-import { useConfirm } from '../components/ui/ConfirmDialog'
-import { useToast } from '../components/ui/Toast'
-import { useDocumentTitle } from '../hooks/useDocumentTitle'
-import { absoluteTime } from '../lib/time'
-import { cn } from '../lib/cn'
-import Badge from '../components/ui/Badge'
-import Button from '../components/ui/Button'
-import EmptyState from '../components/ui/EmptyState'
-import IconButton from '../components/ui/IconButton'
-import Input from '../components/ui/Input'
-import { SkeletonText } from '../components/ui/Skeleton'
-
-type Tab = 'users' | 'ingestion'
+  createUser, deleteUser, listUsers, resendWelcome, setUserEnabled, setUserRoles,
+  type AdminRole, type AdminUser,
+} from '../../services/adminService'
+import { useAuth } from '../../context/AuthContext'
+import { queryKeys } from '../../services/queryKeys'
+import { toMessage } from '../../lib/errors'
+import { toggleRole } from '../../lib/roles'
+import { useConfirm } from '../ui/ConfirmDialog'
+import { useToast } from '../ui/Toast'
+import { cn } from '../../lib/cn'
+import Badge from '../ui/Badge'
+import Button from '../ui/Button'
+import EmptyState from '../ui/EmptyState'
+import IconButton from '../ui/IconButton'
+import Input from '../ui/Input'
+import { SkeletonText } from '../ui/Skeleton'
 
 const ROLE_LABELS: Record<AdminRole, string> = {
   ADMIN: 'Admin',
@@ -70,68 +65,6 @@ function RoleToggleGroup({
   )
 }
 
-/**
- * User management and ingestion control.
- *
- * A page, and lazily loaded: it is 400 lines that only administrators can act on, and shipping it
- * in the initial bundle taxes every other user for a screen they cannot open.
- */
-export default function AdminRoute() {
-  const { canManageUsers, canIngest } = useAuth()
-  useDocumentTitle('Admin')
-
-  // Each tab is its own power: a read-only admin manages users but not ingestion, an ingestor
-  // triggers ingestion but cannot see the users tab, and a full admin gets both.
-  const tabs: Tab[] = []
-  if (canManageUsers) tabs.push('users')
-  if (canIngest) tabs.push('ingestion')
-
-  const [tab, setTab] = useState<Tab>('users')
-  // `useAuth` resolves after this component's first render, so `tabs` is empty on mount and a
-  // `useState` initialiser computed from it would freeze on 'users' forever. Falling back here
-  // instead keeps the active tab correct once the session — and with it, `tabs` — settles.
-  const activeTab = tabs.includes(tab) ? tab : (tabs[0] ?? 'users')
-
-  return (
-    <div className="h-full overflow-y-auto">
-      <div className="mx-auto max-w-4xl px-4 py-8">
-        <Link
-          to="/"
-          className="mb-6 inline-flex items-center gap-1.5 rounded text-2xs text-muted-foreground hover:text-foreground"
-        >
-          <ArrowLeft size={13} aria-hidden="true" />
-          Back to chat
-        </Link>
-
-        <h1 className="mb-6 text-xl font-semibold text-foreground">Admin</h1>
-
-        <div role="tablist" aria-label="Admin sections" className="mb-6 flex gap-1">
-          {tabs.map(name => (
-            <button
-              key={name}
-              role="tab"
-              aria-selected={activeTab === name}
-              onClick={() => setTab(name)}
-              className={cn(
-                'rounded-lg px-4 py-2 text-sm font-medium capitalize transition-colors',
-                activeTab === name
-                  ? 'bg-primary text-primary-foreground'
-                  : 'text-muted-foreground hover:bg-surface-hover',
-              )}
-            >
-              {name}
-            </button>
-          ))}
-        </div>
-
-        <div role="tabpanel">
-          {activeTab === 'ingestion' ? <IngestionTab /> : <UsersTab />}
-        </div>
-      </div>
-    </div>
-  )
-}
-
 interface WelcomeEmailResult {
   action: 'created' | 'resent'
   email: string
@@ -139,7 +72,8 @@ interface WelcomeEmailResult {
   emailSent: boolean
 }
 
-function UsersTab() {
+/** User management: the "Admin" section of the unified Settings dialog. */
+export default function AdminUsersPanel() {
   const queryClient = useQueryClient()
   const toast = useToast()
   const confirm = useConfirm()
@@ -386,170 +320,6 @@ function UsersTab() {
                         </>
                       )}
                     </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  )
-}
-
-const JOB_TONE: Record<string, 'warning' | 'info' | 'success' | 'danger' | 'neutral'> = {
-  PENDING: 'warning',
-  RUNNING: 'info',
-  COMPLETED: 'success',
-  FAILED: 'danger',
-}
-
-function IngestionTab() {
-  const queryClient = useQueryClient()
-  const toast = useToast()
-
-  const [spaceKey, setSpaceKey] = useState('')
-  const [force, setForce] = useState(false)
-  const [pageId, setPageId] = useState('')
-
-  const jobs = useQuery({
-    queryKey: queryKeys.ingestionJobs,
-    queryFn: listJobs,
-    // Ingestion runs in the background, so the list is polled while anything is still in flight
-    // and left alone once everything has settled.
-    refetchInterval: query => {
-      const data = query.state.data as IngestionJob[] | undefined
-      const active = data?.some(job => job.status === 'PENDING' || job.status === 'RUNNING')
-      return active ? 4000 : false
-    },
-  })
-
-  const refresh = () => queryClient.invalidateQueries({ queryKey: queryKeys.ingestionJobs })
-
-  const startSpace = useMutation({
-    mutationFn: () => ingestSpace(spaceKey.trim(), force),
-    onSuccess: () => { setSpaceKey(''); setForce(false); void refresh() },
-    onError: error => toast.error('Could not start ingestion', toMessage(error, 'Please try again.')),
-  })
-
-  const startPage = useMutation({
-    mutationFn: () => ingestPage(pageId.trim()),
-    onSuccess: () => { setPageId(''); void refresh() },
-    onError: error => toast.error('Could not ingest the page', toMessage(error, 'Please try again.')),
-  })
-
-  const retrigger = useMutation({
-    mutationFn: (job: IngestionJob) => retriggerJob(job.jobId),
-    onSuccess: () => {
-      toast.success('Job resubmitted', 'The failed run stays in the history below.')
-      void refresh()
-    },
-    onError: error => toast.error('Could not retrigger the job', toMessage(error, 'Please try again.')),
-  })
-
-  return (
-    <div className="space-y-6">
-      <div className="grid gap-4 sm:grid-cols-2">
-        <form
-          onSubmit={event => { event.preventDefault(); startSpace.mutate() }}
-          className="space-y-3 rounded-lg border border-border p-4"
-        >
-          <h2 className="text-sm font-semibold text-foreground">Ingest a space</h2>
-          <Input
-            label="Space key"
-            value={spaceKey}
-            onChange={event => setSpaceKey(event.target.value)}
-            placeholder="ENG"
-            hint="Leave blank to use the configured default space."
-          />
-          <label className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
-            <input
-              type="checkbox"
-              checked={force}
-              onChange={event => setForce(event.target.checked)}
-              className="rounded accent-primary"
-            />
-            Re-ingest pages that have not changed
-          </label>
-          <Button type="submit" block loading={startSpace.isPending}>
-            <Play size={14} aria-hidden="true" />
-            Start ingestion
-          </Button>
-        </form>
-
-        <form
-          onSubmit={event => { event.preventDefault(); startPage.mutate() }}
-          className="space-y-3 rounded-lg border border-border p-4"
-        >
-          <h2 className="text-sm font-semibold text-foreground">Ingest a single page</h2>
-          <Input
-            label="Page ID"
-            required
-            value={pageId}
-            onChange={event => setPageId(event.target.value)}
-            placeholder="131073"
-            hint="The numeric id in the Confluence page URL."
-          />
-          <Button type="submit" block loading={startPage.isPending} disabled={!pageId.trim()}>
-            <Play size={14} aria-hidden="true" />
-            Ingest page
-          </Button>
-        </form>
-      </div>
-
-      <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-foreground">Job history</h2>
-        <Button size="sm" variant="ghost" onClick={refresh}>
-          <RefreshCw size={13} aria-hidden="true" />
-          Refresh
-        </Button>
-      </div>
-
-      {jobs.isLoading ? (
-        <SkeletonText lines={4} />
-      ) : jobs.data?.length === 0 ? (
-        <EmptyState title="No ingestion jobs yet" description="Start one above to index a space." />
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <caption className="sr-only">Recent ingestion jobs</caption>
-            <thead>
-              <tr className="border-b border-border text-left">
-                <th scope="col" className="pb-2 font-medium text-muted-foreground">Type</th>
-                <th scope="col" className="pb-2 font-medium text-muted-foreground">Target</th>
-                <th scope="col" className="pb-2 font-medium text-muted-foreground">Status</th>
-                <th scope="col" className="pb-2 font-medium text-muted-foreground">Pages</th>
-                <th scope="col" className="pb-2 font-medium text-muted-foreground">Chunks</th>
-                <th scope="col" className="pb-2 font-medium text-muted-foreground">Started</th>
-                <th scope="col" className="pb-2"><span className="sr-only">Actions</span></th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {jobs.data?.map(job => (
-                <tr key={job.jobId}>
-                  <td className="py-2 pr-3 text-2xs text-muted-foreground">{job.jobType}</td>
-                  <td className="py-2 pr-3 font-mono text-2xs">{job.spaceKey ?? job.pageId ?? '—'}</td>
-                  <td className="py-2 pr-3">
-                    <Badge tone={JOB_TONE[job.status] ?? 'neutral'}>{job.status}</Badge>
-                    {job.errorMessage && (
-                      <p className="mt-1 max-w-xs text-2xs text-danger-emphasis">{job.errorMessage}</p>
-                    )}
-                  </td>
-                  <td className="py-2 pr-3 text-2xs text-muted-foreground">{job.pagesProcessed ?? '—'}</td>
-                  <td className="py-2 pr-3 text-2xs text-muted-foreground">{job.chunksStored ?? '—'}</td>
-                  <td className="py-2 pr-3 text-2xs text-muted-foreground">
-                    {job.startedAt ? absoluteTime(job.startedAt) : '—'}
-                  </td>
-                  <td className="py-2 text-right">
-                    {job.status === 'FAILED' && (
-                      <IconButton
-                        size="sm"
-                        label={`Retrigger ${job.jobType.toLowerCase()} job for ${job.spaceKey ?? job.pageId ?? 'this target'}`}
-                        icon={<RotateCcw size={14} />}
-                        onClick={() => retrigger.mutate(job)}
-                        disabled={retrigger.isPending}
-                      />
-                    )}
                   </td>
                 </tr>
               ))}

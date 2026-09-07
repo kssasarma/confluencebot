@@ -6,8 +6,11 @@ import com.kssasarma.confluencebot.rag.model.RetrievedChunk;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Repository;
 
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -37,6 +40,17 @@ public class ChunkSearchRepository {
             LIMIT  ?
             """;
 
+    private static final String DENSE_QUERY_BY_SPACE = """
+            SELECT id::text            AS chunk_id,
+                   content,
+                   metadata::text      AS metadata_json,
+                   embedding::text     AS embedding_text
+            FROM   confluence_chunks
+            WHERE  metadata->>'space_key' = ?
+            ORDER  BY embedding <=> CAST(? AS vector)
+            LIMIT  ?
+            """;
+
     private static final String LEXICAL_QUERY = """
             SELECT id::text            AS chunk_id,
                    content,
@@ -44,6 +58,19 @@ public class ChunkSearchRepository {
                    embedding::text     AS embedding_text
             FROM   confluence_chunks
             WHERE  to_tsvector('english', content) @@ plainto_tsquery('english', ?)
+            ORDER  BY ts_rank(to_tsvector('english', content),
+                              plainto_tsquery('english', ?)) DESC
+            LIMIT  ?
+            """;
+
+    private static final String LEXICAL_QUERY_BY_SPACE = """
+            SELECT id::text            AS chunk_id,
+                   content,
+                   metadata::text      AS metadata_json,
+                   embedding::text     AS embedding_text
+            FROM   confluence_chunks
+            WHERE  to_tsvector('english', content) @@ plainto_tsquery('english', ?)
+            AND    metadata->>'space_key' = ?
             ORDER  BY ts_rank(to_tsvector('english', content),
                               plainto_tsquery('english', ?)) DESC
             LIMIT  ?
@@ -62,16 +89,14 @@ public class ChunkSearchRepository {
      *
      * @param embeddingStr vector string in pgvector format, e.g. {@code [0.1,0.2,...]}
      * @param limit        candidate pool size (typically larger than the final top-K)
+     * @param spaceKey     restricts the search to this Confluence space's chunks; {@code null} (or
+     *                     blank) searches every space, using the HNSW index unfiltered
      */
-    public List<RawCandidate> findTopNDense(String embeddingStr, int limit) {
+    public List<RawCandidate> findTopNDense(String embeddingStr, int limit, String spaceKey) {
         try {
-            return jdbc.query(DENSE_QUERY,
-                (rs, rowNum) -> new RawCandidate(
-                    rs.getString("chunk_id"),
-                    rs.getString("content"),
-                    rs.getString("metadata_json"),
-                    rs.getString("embedding_text")),
-                embeddingStr, limit);
+            return (spaceKey == null || spaceKey.isBlank())
+                    ? jdbc.query(DENSE_QUERY, RAW_CANDIDATE_MAPPER, embeddingStr, limit)
+                    : jdbc.query(DENSE_QUERY_BY_SPACE, RAW_CANDIDATE_MAPPER, spaceKey, embeddingStr, limit);
         } catch (Exception e) {
             log.error("Dense search failed: {}", e.getMessage(), e);
             return Collections.emptyList();
@@ -80,20 +105,29 @@ public class ChunkSearchRepository {
 
     /**
      * Lexical full-text search using the GIN tsvector index (added in V4 migration).
+     *
+     * @param spaceKey restricts the search to this Confluence space's chunks; {@code null} (or
+     *                 blank) searches every space.
      */
-    public List<RawCandidate> findTopNLexical(String query, int limit) {
+    public List<RawCandidate> findTopNLexical(String query, int limit, String spaceKey) {
         try {
-            return jdbc.query(LEXICAL_QUERY,
-                (rs, rowNum) -> new RawCandidate(
-                    rs.getString("chunk_id"),
-                    rs.getString("content"),
-                    rs.getString("metadata_json"),
-                    rs.getString("embedding_text")),
-                query, query, limit);
+            return (spaceKey == null || spaceKey.isBlank())
+                    ? jdbc.query(LEXICAL_QUERY, RAW_CANDIDATE_MAPPER, query, query, limit)
+                    : jdbc.query(LEXICAL_QUERY_BY_SPACE, RAW_CANDIDATE_MAPPER, query, spaceKey, query, limit);
         } catch (Exception e) {
             log.warn("Lexical search failed (index may not exist yet): {}", e.getMessage());
             return Collections.emptyList();
         }
+    }
+
+    private static final RowMapper<RawCandidate> RAW_CANDIDATE_MAPPER = ChunkSearchRepository::mapRawCandidate;
+
+    private static RawCandidate mapRawCandidate(ResultSet rs, int rowNum) throws SQLException {
+        return new RawCandidate(
+                rs.getString("chunk_id"),
+                rs.getString("content"),
+                rs.getString("metadata_json"),
+                rs.getString("embedding_text"));
     }
 
     /** Hydrates a {@link RawCandidate} into a {@link RetrievedChunk} by parsing its JSON metadata. */

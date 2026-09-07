@@ -1,11 +1,9 @@
 import { ChevronDown } from 'lucide-react'
-import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
-import { useTheme } from '../../context/ThemeContext'
 import { useConfirm } from '../ui/ConfirmDialog'
 import Badge from '../ui/Badge'
 import Menu from '../ui/Menu'
-import { THEME_ORDER, buildProfileActions } from './profileActions'
+import { buildProfileActions } from './profileActions'
 
 const ROLE_LABEL: Record<string, string> = {
   ADMIN: 'Admin',
@@ -21,14 +19,19 @@ const ROLE_LABEL: Record<string, string> = {
  * bottom of the sidebar and nothing at all elsewhere — so a reader on the admin screen or in
  * settings had no way to tell who they were signed in as, or to sign out, without navigating back
  * to the chat list first. One menu, one place, reachable from every screen this shell renders.
+ *
+ * The trigger shows the reader's name, not their email — the sign-in address is an identifier, not
+ * how anyone (including the reader themselves) thinks of themselves. The app forces a name to be
+ * set before this component can render at all (see `App.tsx`'s `CompleteProfilePage` gate), but
+ * the email fallback stays here in case that guarantee is ever relaxed.
  */
-export default function ProfileMenu() {
-  const { user, canAdminister, logout } = useAuth()
-  const { theme, setTheme } = useTheme()
+export default function ProfileMenu({ onOpenSettings }: { onOpenSettings: () => void }) {
+  const { user, logout } = useAuth()
   const confirm = useConfirm()
-  const navigate = useNavigate()
 
   if (!user) return null
+
+  const displayName = user.name ?? user.email
 
   async function signOut() {
     const confirmed = await confirm({
@@ -38,8 +41,6 @@ export default function ProfileMenu() {
     })
     if (confirmed) logout()
   }
-
-  const nextTheme = THEME_ORDER[(THEME_ORDER.indexOf(theme) + 1) % THEME_ORDER.length]
 
   return (
     <Menu
@@ -53,17 +54,20 @@ export default function ProfileMenu() {
             aria-hidden="true"
             className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary-soft text-2xs font-semibold uppercase text-primary-emphasis"
           >
-            {user.email.slice(0, 2)}
+            {displayName.slice(0, 2)}
           </span>
           <span className="hidden max-w-[12rem] truncate text-sm text-foreground sm:inline">
-            {user.email}
+            {displayName}
           </span>
           <ChevronDown size={14} aria-hidden="true" className="shrink-0 text-muted-foreground" />
         </button>
       }
       header={
         <div className="space-y-1.5">
-          <p className="truncate text-sm font-medium text-foreground">{user.email}</p>
+          {/* Name first, email second: the name is the identity, the email is only how they
+              signed in. */}
+          <p className="truncate text-sm font-medium text-foreground">{displayName}</p>
+          {user.name && <p className="truncate text-2xs text-muted-foreground">{user.email}</p>}
           <div className="flex flex-wrap gap-1">
             {user.roles.map(role => (
               <Badge key={role} tone={role === 'USER' ? 'info' : 'accent'}>
@@ -73,14 +77,7 @@ export default function ProfileMenu() {
           </div>
         </div>
       }
-      actions={buildProfileActions({
-        canAdminister,
-        nextTheme,
-        onThemeChange: () => setTheme(nextTheme),
-        onGoToAdmin: () => navigate('/admin'),
-        onGoToSettings: () => navigate('/settings'),
-        onSignOut: signOut,
-      })}
+      actions={buildProfileActions({ onOpenSettings, onSignOut: signOut })}
     />
   )
 }

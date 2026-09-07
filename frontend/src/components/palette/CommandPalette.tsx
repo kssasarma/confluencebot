@@ -2,8 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Dialog, DialogPanel, DialogTitle, Transition, TransitionChild } from '@headlessui/react'
 import { Command } from 'cmdk'
-import { MessageSquare, Moon, Plus, Settings, ShieldCheck, Sun } from 'lucide-react'
-import { useAuth } from '../../context/AuthContext'
+import { MessageSquare, Moon, Plus, Settings, Sun } from 'lucide-react'
 import { useChat } from '../../context/ChatContext'
 import { useTheme } from '../../context/ThemeContext'
 import { fetchSessions } from '../../services/chatService'
@@ -13,6 +12,7 @@ import type { ChatSession } from '../../types'
 interface CommandPaletteProps {
   open: boolean
   onClose: () => void
+  onOpenSettings: () => void
 }
 
 /**
@@ -26,11 +26,10 @@ interface CommandPaletteProps {
  * finds conversations by a phrase inside them. cmdk's client-side filter would then discard
  * exactly those results, because the phrase is not in the title.
  */
-export default function CommandPalette({ open, onClose }: CommandPaletteProps) {
+export default function CommandPalette({ open, onClose, onOpenSettings }: CommandPaletteProps) {
   const navigate = useNavigate()
   const chat = useChat()
   const { theme, setTheme } = useTheme()
-  const { canAdminister } = useAuth()
 
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<ChatSession[]>([])
@@ -104,17 +103,12 @@ export default function CommandPalette({ open, onClose }: CommandPaletteProps) {
                     heading="Actions"
                     className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:text-2xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider [&_[cmdk-group-heading]]:text-muted-foreground"
                   >
-                    <Item icon={<Plus size={15} />} onSelect={() => go(`/chat/${chat.startDraft()}`)}>
+                    <Item icon={<Plus size={15} />} onSelect={() => go('/chat')}>
                       New chat
                     </Item>
-                    <Item icon={<Settings size={15} />} onSelect={() => go('/settings')}>
+                    <Item icon={<Settings size={15} />} onSelect={() => { onClose(); onOpenSettings() }}>
                       Settings
                     </Item>
-                    {canAdminister && (
-                      <Item icon={<ShieldCheck size={15} />} onSelect={() => go('/admin')}>
-                        Admin
-                      </Item>
-                    )}
                     <Item
                       icon={theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
                       onSelect={() => { setTheme(theme === 'dark' ? 'light' : 'dark'); onClose() }}

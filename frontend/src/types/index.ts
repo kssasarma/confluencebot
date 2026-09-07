@@ -144,3 +144,9 @@ export interface Source {
   /** A short extract of the matching passage, so a citation can be judged without opening it. */
   excerpt?: string | null
 }
+
+/** A Confluence space with at least one ingested page, offered as a search scope. */
+export interface SpaceSummary {
+  key: string
+  name: string
+}

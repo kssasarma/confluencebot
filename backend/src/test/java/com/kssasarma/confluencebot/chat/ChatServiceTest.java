@@ -85,7 +85,7 @@ class ChatServiceTest {
 
     @Test
     void noRelevantDocs_returnsNoContextResponse() {
-        when(hybridSearchService.search(anyString())).thenReturn(List.of());
+        when(hybridSearchService.search(anyString(), any())).thenReturn(List.of());
 
         ChatApiResponse response = chatService.chat(ChatQuery.of("How do I configure X?"));
 
@@ -96,7 +96,7 @@ class ChatServiceTest {
 
     @Test
     void withRelevantDocs_callsLlmAndReturnsSources() {
-        when(hybridSearchService.search(anyString())).thenReturn(List.of(chunk()));
+        when(hybridSearchService.search(anyString(), any())).thenReturn(List.of(chunk()));
         when(llmGateway.complete(any())).thenReturn("Feature X is configured by...");
 
         ChatApiResponse response = chatService.chat(ChatQuery.of("How do I configure feature X?"));
@@ -113,7 +113,7 @@ class ChatServiceTest {
 
     @Test
     void withFollowUpQuestions_parsedAndReturnedSeparately() {
-        when(hybridSearchService.search(anyString())).thenReturn(List.of(chunk()));
+        when(hybridSearchService.search(anyString(), any())).thenReturn(List.of(chunk()));
         when(llmGateway.complete(any())).thenReturn(
                 "The answer is here.\n---FOLLOW-UP-QUESTIONS---\nHow do I do X?\nWhat about Y?\nCan I do Z?");
 
@@ -124,9 +124,38 @@ class ChatServiceTest {
                 .containsExactly("How do I do X?", "What about Y?", "Can I do Z?");
     }
 
+    // ── Per-space search ─────────────────────────────────────────────────────
+
+    @Test
+    void spaceKeyOnQuery_isPassedThroughToRetrieval() {
+        when(hybridSearchService.search(anyString(), any())).thenReturn(List.of(chunk()));
+        when(llmGateway.complete(any())).thenReturn("Feature X is configured by...");
+
+        chatService.chat(new ChatQuery("How do I configure feature X?", null, "ENG", null));
+
+        verify(hybridSearchService).search("How do I configure feature X?", "ENG");
+    }
+
+    @Test
+    void noSpaceKeyOnQuery_searchesEverySpace() {
+        when(hybridSearchService.search(anyString(), any())).thenReturn(List.of(chunk()));
+        when(llmGateway.complete(any())).thenReturn("An answer.");
+
+        chatService.chat(ChatQuery.of("Anything?"));
+
+        verify(hybridSearchService).search("Anything?", null);
+    }
+
+    @Test
+    void blankSpaceKey_isNormalisedToNull() {
+        ChatQuery query = new ChatQuery("Anything?", null, "   ", null);
+
+        assertThat(query.spaceKey()).isNull();
+    }
+
     @Test
     void anonymousQuery_isNotRecorded() {
-        when(hybridSearchService.search(anyString())).thenReturn(List.of(chunk()));
+        when(hybridSearchService.search(anyString(), any())).thenReturn(List.of(chunk()));
         when(llmGateway.complete(any())).thenReturn("An answer.");
 
         chatService.chat(ChatQuery.of("Anything?"));
@@ -136,7 +165,7 @@ class ChatServiceTest {
 
     @Test
     void queryWithConversation_recordsTheExchangeAndReturnsTheTitle() {
-        when(hybridSearchService.search(anyString())).thenReturn(List.of(chunk()));
+        when(hybridSearchService.search(anyString(), any())).thenReturn(List.of(chunk()));
         when(llmGateway.complete(any())).thenReturn("An answer.");
         when(chatSessionService.recordTurn(any(), any())).thenReturn(session("Where are the docs?"));
 
@@ -154,7 +183,7 @@ class ChatServiceTest {
 
     @Test
     void unavailableModel_failsLoudlyInsteadOfAnsweringWithAnApology() {
-        when(hybridSearchService.search(anyString())).thenReturn(List.of(chunk()));
+        when(hybridSearchService.search(anyString(), any())).thenReturn(List.of(chunk()));
         when(llmGateway.complete(any())).thenThrow(new LlmUnavailableException("circuit open"));
 
         assertThatThrownBy(() -> chatService.chat(ChatQuery.of("Anything?")))
@@ -164,7 +193,7 @@ class ChatServiceTest {
 
     @Test
     void streaming_pushesSourcesThenTokensThenTheRecordedAnswer() {
-        when(hybridSearchService.search(anyString())).thenReturn(List.of(chunk()));
+        when(hybridSearchService.search(anyString(), any())).thenReturn(List.of(chunk()));
         when(llmGateway.stream(any())).thenReturn(
                 Flux.just("Feature X ", "is configured.", "\n---FOLLOW-UP-QUESTIONS---\nMore?"));
         when(chatSessionService.recordTurn(any(), any())).thenReturn(session("How?"));
@@ -184,7 +213,7 @@ class ChatServiceTest {
 
     @Test
     void streaming_reportsAFailedModelToTheClient() {
-        when(hybridSearchService.search(anyString())).thenReturn(List.of(chunk()));
+        when(hybridSearchService.search(anyString(), any())).thenReturn(List.of(chunk()));
         when(llmGateway.stream(any())).thenReturn(Flux.error(new LlmUnavailableException("circuit open")));
 
         RecordingListener listener = new RecordingListener();
@@ -196,7 +225,7 @@ class ChatServiceTest {
 
     @Test
     void streaming_withNoRelevantDocs_stillDeliversAnAnswer() {
-        when(hybridSearchService.search(anyString())).thenReturn(List.of());
+        when(hybridSearchService.search(anyString(), any())).thenReturn(List.of());
 
         RecordingListener listener = new RecordingListener();
         chatService.stream(ChatQuery.of("How?"), listener);
@@ -217,14 +246,14 @@ class ChatServiceTest {
         when(historyService.recentContext(any())).thenReturn(context);
         when(queryRewriter.rewriteForRetrieval("And in staging?", context))
                 .thenReturn("How do I rotate the Kafka TLS certificates in staging?");
-        when(hybridSearchService.search(anyString())).thenReturn(List.of(chunk()));
+        when(hybridSearchService.search(anyString(), any())).thenReturn(List.of(chunk()));
         when(llmGateway.complete(any())).thenReturn("Same script, different inventory file.");
         when(chatSessionService.recordTurn(any(), any())).thenReturn(session("Certificate rotation"));
 
         chatService.chat(new ChatQuery("And in staging?", CHAT_ID, user));
 
         // Retrieval gets the resolved query — an index cannot follow "and in staging?" on its own.
-        verify(hybridSearchService).search("How do I rotate the Kafka TLS certificates in staging?");
+        verify(hybridSearchService).search("How do I rotate the Kafka TLS certificates in staging?", null);
 
         // The model is asked the question as the user wrote it, with the conversation behind it.
         ArgumentCaptor<LlmPrompt> prompt = ArgumentCaptor.forClass(LlmPrompt.class);
@@ -244,7 +273,7 @@ class ChatServiceTest {
                 new ConversationExchange("What is the deploy window?", "Tuesdays, 02:00-04:00 IST.")));
 
         when(historyService.recentContext(any())).thenReturn(context);
-        when(hybridSearchService.search(anyString())).thenReturn(List.of(chunk()));
+        when(hybridSearchService.search(anyString(), any())).thenReturn(List.of(chunk()));
         when(llmGateway.stream(any())).thenReturn(Flux.just("It is enforced by the pipeline."));
         when(chatSessionService.recordTurn(any(), any())).thenReturn(session("Deploy window"));
 
@@ -257,7 +286,7 @@ class ChatServiceTest {
 
     @Test
     void firstQuestionOfAConversation_carriesNoHistory() {
-        when(hybridSearchService.search(anyString())).thenReturn(List.of(chunk()));
+        when(hybridSearchService.search(anyString(), any())).thenReturn(List.of(chunk()));
         when(llmGateway.complete(any())).thenReturn("An answer.");
         when(chatSessionService.recordTurn(any(), any())).thenReturn(session("A title"));
 
@@ -286,14 +315,14 @@ class ChatServiceTest {
 
         when(historyService.recentContext(any())).thenReturn(context);
         // The rewriter declines: history exists, but the question reaches retrieval untouched.
-        when(hybridSearchService.search(anyString())).thenReturn(List.of(chunk()));
+        when(hybridSearchService.search(anyString(), any())).thenReturn(List.of(chunk()));
         when(llmGateway.complete(any())).thenReturn("An answer.");
         when(chatSessionService.recordTurn(any(), any())).thenReturn(session("Certificates"));
 
         chatService.chat(new ChatQuery("And in staging?", CHAT_ID, user));
 
         ArgumentCaptor<String> searched = ArgumentCaptor.forClass(String.class);
-        verify(hybridSearchService).search(searched.capture());
+        verify(hybridSearchService).search(searched.capture(), any());
 
         assertThat(searched.getValue()).isEqualTo("And in staging?");
         assertThat(searched.getValue()).doesNotContain("rotate script", "restart");
