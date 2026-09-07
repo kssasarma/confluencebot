@@ -14,6 +14,7 @@ import com.kssasarma.confluencebot.chat.source.SourceReferenceFactory;
 import com.kssasarma.confluencebot.chat.title.ChatTitleRefiner;
 import com.kssasarma.confluencebot.chat.title.TitleRefinementRequest;
 import com.kssasarma.confluencebot.exception.LlmUnavailableException;
+import com.kssasarma.confluencebot.exception.ResourceNotFoundException;
 import com.kssasarma.confluencebot.rag.model.RetrievedChunk;
 import com.kssasarma.confluencebot.rag.service.HybridSearchService;
 import com.kssasarma.confluencebot.user.ChatSessionService;
@@ -59,6 +60,15 @@ public class ChatServiceImpl implements ChatService {
 
     private static final String LLM_UNAVAILABLE =
             "The AI service is temporarily unavailable. Please try again in a moment.";
+
+    /**
+     * Shown when the chatId a turn was asked to record into no longer belongs to the caller —
+     * most often a browser tab or bookmark left open on a conversation from a different account.
+     * Retrying this exact conversation can never succeed, so the reader is told to start a new one
+     * instead of the answer silently vanishing.
+     */
+    private static final String CONVERSATION_UNAVAILABLE =
+            "This conversation is no longer available in your account. Please start a new chat.";
 
     /** A conversation's first turn writes exactly two rows: the question and the answer. */
     private static final long FIRST_TURN_MESSAGE_COUNT = 2L;
@@ -246,21 +256,32 @@ public class ChatServiceImpl implements ChatService {
 
     /**
      * Finishes a stream. The answer already reached the user, so a persistence failure is logged
-     * and reported as an un-saved conversation rather than thrown away as an error.
+     * and reported as an un-saved conversation rather than thrown away as an error — except when
+     * the chatId itself turns out to be unusable (see below), which no amount of retrying fixes.
      */
     private void completeQuietly(ChatStreamListener listener, ChatQuery query, String answer,
                                  RetrievalOutcome retrieval, Grounding grounding,
                                  List<String> followUps) {
-        RecordedTurn recorded = new RecordedTurn(
-                new ChatApiResponse(answer, retrieval.sources(), followUps)
-                        .withGrounding(grounding.citations(), grounding.confidence()),
-                false);
+        RecordedTurn recorded;
         try {
             recorded = record(query, answer, retrieval.sources(), followUps,
                     grounding.citations(), grounding.confidence());
+        } catch (ResourceNotFoundException e) {
+            // The chatId belongs to someone else's conversation, or to none at all — most likely a
+            // stale tab or bookmark left open across a login switch. Every future turn sent under
+            // this same id would fail identically, so swallowing this the way transient errors are
+            // swallowed below would silently discard the rest of the conversation forever, with
+            // nothing in the UI ever telling the reader their messages stopped being saved.
+            log.warn("Conversation {} could not be recorded into: {}", query.chatId(), e.getMessage());
+            listener.onFailed(CONVERSATION_UNAVAILABLE);
+            return;
         } catch (Exception e) {
             log.error("Could not record the exchange for conversation {}: {}",
                     query.chatId(), e.getMessage(), e);
+            recorded = new RecordedTurn(
+                    new ChatApiResponse(answer, retrieval.sources(), followUps)
+                            .withGrounding(grounding.citations(), grounding.confidence()),
+                    false);
         }
 
         // Announced before the answer is closed out, so the transport knows to hold the connection
