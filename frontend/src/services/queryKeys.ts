@@ -14,4 +14,5 @@ export const queryKeys = {
   adminUsers: ['admin', 'users'] as const,
   ingestionJobs: (page: number) => ['admin', 'jobs', page] as const,
   spaces: ['spaces'] as const,
+  suggestions: (spaceKey: string | null) => ['spaces', 'suggestions', spaceKey] as const,
 } as const

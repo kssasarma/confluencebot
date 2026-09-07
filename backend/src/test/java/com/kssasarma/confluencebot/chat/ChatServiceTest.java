@@ -89,7 +89,7 @@ class ChatServiceTest {
 
         ChatApiResponse response = chatService.chat(ChatQuery.of("How do I configure X?"));
 
-        assertThat(response.answer()).contains("could not find");
+        assertThat(response.answer()).contains("don't have enough information");
         assertThat(response.sources()).isEmpty();
         verifyNoInteractions(llmGateway);
     }
@@ -230,7 +230,7 @@ class ChatServiceTest {
         RecordingListener listener = new RecordingListener();
         chatService.stream(ChatQuery.of("How?"), listener);
 
-        assertThat(String.join("", listener.tokens)).contains("could not find");
+        assertThat(String.join("", listener.tokens)).contains("don't have enough information");
         assertThat(listener.completed).isNotNull();
         verifyNoInteractions(llmGateway);
     }

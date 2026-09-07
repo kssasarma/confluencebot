@@ -35,21 +35,10 @@ class SmtpEmailServiceTest {
     }
 
     @Test
-    void sendWelcomeEmail_ccsTheOnboardingAdmin() {
+    void sendWelcomeEmail_neverCcsTheOnboardingAdmin() {
         SmtpEmailService service = new SmtpEmailService(mailSender, "noreply@example.com", "");
 
         service.sendWelcomeEmail("new@example.com", "admin@example.com", "temp-pass-123");
-
-        ArgumentCaptor<SimpleMailMessage> captor = ArgumentCaptor.forClass(SimpleMailMessage.class);
-        verify(mailSender).send(captor.capture());
-        assertThat(captor.getValue().getCc()).containsExactly("admin@example.com");
-    }
-
-    @Test
-    void sendWelcomeEmail_adminIsTheNewUser_skipsDuplicateCc() {
-        SmtpEmailService service = new SmtpEmailService(mailSender, "noreply@example.com", "");
-
-        service.sendWelcomeEmail("new@example.com", "new@example.com", "temp-pass-123");
 
         ArgumentCaptor<SimpleMailMessage> captor = ArgumentCaptor.forClass(SimpleMailMessage.class);
         verify(mailSender).send(captor.capture());
@@ -57,13 +46,25 @@ class SmtpEmailServiceTest {
     }
 
     @Test
-    void sendWelcomeEmail_blankCc_omitsCcHeader() {
+    void sendWelcomeEmail_namesTheOnboardingAdminInTheBody() {
+        SmtpEmailService service = new SmtpEmailService(mailSender, "noreply@example.com", "");
+
+        service.sendWelcomeEmail("new@example.com", "Priya Sharma", "temp-pass-123");
+
+        ArgumentCaptor<SimpleMailMessage> captor = ArgumentCaptor.forClass(SimpleMailMessage.class);
+        verify(mailSender).send(captor.capture());
+        assertThat(captor.getValue().getText()).contains("You were onboarded by Priya Sharma");
+    }
+
+    @Test
+    void sendWelcomeEmail_blankOnboardedBy_omitsOnboardedByLine() {
         SmtpEmailService service = new SmtpEmailService(mailSender, "noreply@example.com", "");
 
         service.sendWelcomeEmail("new@example.com", "", "temp-pass-123");
 
         ArgumentCaptor<SimpleMailMessage> captor = ArgumentCaptor.forClass(SimpleMailMessage.class);
         verify(mailSender).send(captor.capture());
+        assertThat(captor.getValue().getText()).doesNotContain("onboarded by");
         assertThat(captor.getValue().getCc()).isNull();
     }
 

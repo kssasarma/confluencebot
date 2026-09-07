@@ -94,7 +94,7 @@ public class AdminController {
         user.setMustChangePassword(true);
 
         User saved = userRepository.save(user);
-        boolean emailSent = emailService.sendWelcomeEmail(request.email(), auth.getName(), tempPassword);
+        boolean emailSent = emailService.sendWelcomeEmail(request.email(), onboarderLabel(auth), tempPassword);
         eventRepository.save(AdminUserEvent.of(AdminUserEvent.EventType.CREATED, auth.getName(), saved, emailSent));
         logger.info("Admin {} created new user {} with roles {} (welcome email {})",
                 auth.getName(), request.email(), roles, emailSent ? "sent" : "not sent");
@@ -118,7 +118,7 @@ public class AdminController {
                     // enforces for a user changing their own password.
                     refreshTokenRepository.revokeAllByUserId(saved.getId());
 
-                    boolean emailSent = emailService.sendWelcomeEmail(saved.getEmail(), auth.getName(), tempPassword);
+                    boolean emailSent = emailService.sendWelcomeEmail(saved.getEmail(), onboarderLabel(auth), tempPassword);
                     eventRepository.save(AdminUserEvent.of(AdminUserEvent.EventType.RESENT, auth.getName(), saved, emailSent));
                     logger.info("Admin {} resent welcome email to user {} (id={}, email {})",
                             auth.getName(), saved.getEmail(), id, emailSent ? "sent" : "not sent");
@@ -224,6 +224,13 @@ public class AdminController {
             parsed.add(UserRole.valueOf(value.toUpperCase()));
         }
         return parsed;
+    }
+
+    /** The onboarding admin's name where they have set one, falling back to their email. */
+    private String onboarderLabel(Authentication auth) {
+        return userRepository.findByEmail(auth.getName())
+                .map(admin -> admin.getName() != null && !admin.getName().isBlank() ? admin.getName() : admin.getEmail())
+                .orElse(auth.getName());
     }
 
     private String generateTempPassword() {

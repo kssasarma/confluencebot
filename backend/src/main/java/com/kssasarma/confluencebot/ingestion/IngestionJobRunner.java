@@ -25,10 +25,13 @@ public class IngestionJobRunner {
 
     private final IngestionJobRepository jobRepo;
     private final IngestionService ingestionService;
+    private final SuggestionGenerationService suggestionGenerationService;
 
-    public IngestionJobRunner(IngestionJobRepository jobRepo, IngestionService ingestionService) {
+    public IngestionJobRunner(IngestionJobRepository jobRepo, IngestionService ingestionService,
+                              SuggestionGenerationService suggestionGenerationService) {
         this.jobRepo = jobRepo;
         this.ingestionService = ingestionService;
+        this.suggestionGenerationService = suggestionGenerationService;
     }
 
     @Async("ingestionTaskExecutor")
@@ -44,10 +47,23 @@ public class IngestionJobRunner {
             jobRepo.save(job);
             log.info("Background ingestion completed — jobId={}, pages={}, chunks={}, skipped={}, {}ms",
                     jobId, result.pagesProcessed(), result.chunksStored(), result.pagesSkipped(), result.durationMs());
+
+            // Runs after the ingestion job is already marked complete, and swallows its own
+            // failures: the welcome-screen suggestions are a nice-to-have, never a reason to fail
+            // or delay reporting that ingestion itself succeeded.
+            regenerateSuggestions(spaceKey);
         } catch (Exception ex) {
             job.markFailed(ex.getMessage());
             jobRepo.save(job);
             log.error("Background ingestion failed — jobId={}, space={}: {}", jobId, spaceKey, ex.getMessage(), ex);
+        }
+    }
+
+    private void regenerateSuggestions(String spaceKey) {
+        try {
+            suggestionGenerationService.regenerate(spaceKey);
+        } catch (Exception ex) {
+            log.warn("Could not regenerate suggestions for space {}: {}", spaceKey, ex.getMessage());
         }
     }
 

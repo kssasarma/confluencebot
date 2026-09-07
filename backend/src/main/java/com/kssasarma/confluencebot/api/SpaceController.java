@@ -1,8 +1,11 @@
 package com.kssasarma.confluencebot.api;
 
 import com.kssasarma.confluencebot.api.dto.SpaceSummaryResponse;
+import com.kssasarma.confluencebot.domain.SpaceSuggestion;
 import com.kssasarma.confluencebot.repository.ConfluencePageRepository;
+import com.kssasarma.confluencebot.repository.SpaceSuggestionRepository;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.ArraySchema;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.ExampleObject;
@@ -13,6 +16,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Comparator;
@@ -31,10 +35,16 @@ import java.util.List;
 @RequestMapping("/api/spaces")
 public class SpaceController {
 
-    private final ConfluencePageRepository pageRepository;
+    /** Suggestions capped here, not just at generation time: a space ingested before this cap
+     * existed, or one whose rows were hand-edited, should not flood the welcome screen either. */
+    private static final int MAX_SUGGESTIONS = 4;
 
-    public SpaceController(ConfluencePageRepository pageRepository) {
+    private final ConfluencePageRepository pageRepository;
+    private final SpaceSuggestionRepository suggestionRepository;
+
+    public SpaceController(ConfluencePageRepository pageRepository, SpaceSuggestionRepository suggestionRepository) {
         this.pageRepository = pageRepository;
+        this.suggestionRepository = suggestionRepository;
     }
 
     @Operation(
@@ -61,5 +71,36 @@ public class SpaceController {
                 .toList();
 
         return ResponseEntity.ok(spaces);
+    }
+
+    @Operation(
+            summary = "Suggested questions for the welcome screen",
+            description = """
+                    Returns up to four example questions generated from what was actually ingested \
+                    — see SuggestionGenerationService, which (re)writes them every time a space \
+                    finishes ingesting. Pass `spaceKey` to scope to one space; omit it (or when the \
+                    space has none yet) for a random sample drawn across every space that has any.
+                    """)
+    @ApiResponse(responseCode = "200", description = "Suggestions returned",
+            content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                    array = @ArraySchema(schema = @Schema(implementation = String.class)),
+                    examples = @ExampleObject(value = """
+                            ["How do I request VPN access?", "Where is the on-call rotation documented?"]
+                            """)))
+    @GetMapping("/suggestions")
+    public ResponseEntity<List<String>> suggestions(
+            @Parameter(description = "Confluence space key to scope suggestions to. Omit for a "
+                    + "cross-space sample.", example = "IT")
+            @RequestParam(required = false) String spaceKey) {
+
+        List<SpaceSuggestion> rows = (spaceKey != null && !spaceKey.isBlank())
+                ? suggestionRepository.findBySpaceKeyOrderByIdAsc(spaceKey)
+                : suggestionRepository.findRandomSample(MAX_SUGGESTIONS);
+
+        List<String> questions = rows.stream().map(SpaceSuggestion::getQuestion)
+                .limit(MAX_SUGGESTIONS)
+                .toList();
+
+        return ResponseEntity.ok(questions);
     }
 }

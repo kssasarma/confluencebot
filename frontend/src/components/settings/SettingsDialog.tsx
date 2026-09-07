@@ -10,7 +10,7 @@ type Section = 'general' | 'admin' | 'ingestion'
 
 const SECTION_LABEL: Record<Section, string> = {
   general: 'General',
-  admin: 'Admin',
+  admin: 'User Management',
   ingestion: 'Ingestion',
 }
 

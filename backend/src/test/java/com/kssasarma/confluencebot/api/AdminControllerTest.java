@@ -130,14 +130,30 @@ class AdminControllerTest {
     }
 
     @Test
-    void createUser_ccsTheOnboardingAdminOnTheWelcomeEmail() {
+    void createUser_namesTheOnboardingAdminOnTheWelcomeEmail() {
         when(userRepository.existsByEmail("new@example.com")).thenReturn(false);
         when(passwordEncoder.encode(any())).thenReturn("hashed");
         when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         controller.createUser(new AdminUserRequest("new@example.com", null, null), asAdmin("admin@example.com"));
 
+        // The onboarding admin has no name on their own account, so their email is what identifies
+        // them in the welcome email body — and it is passed there rather than set as a CC header.
         verify(emailService).sendWelcomeEmail(eq("new@example.com"), eq("admin@example.com"), any());
+    }
+
+    @Test
+    void createUser_onboardingAdminHasAName_usesItInsteadOfTheirEmail() {
+        when(userRepository.existsByEmail("new@example.com")).thenReturn(false);
+        when(passwordEncoder.encode(any())).thenReturn("hashed");
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        User admin = userWithRoles(1L, "admin@example.com", Set.of(UserRole.ADMIN));
+        admin.setName("Priya Sharma");
+        when(userRepository.findByEmail("admin@example.com")).thenReturn(Optional.of(admin));
+
+        controller.createUser(new AdminUserRequest("new@example.com", null, null), asAdmin("admin@example.com"));
+
+        verify(emailService).sendWelcomeEmail(eq("new@example.com"), eq("Priya Sharma"), any());
     }
 
     @Test
@@ -363,6 +379,24 @@ class AdminControllerTest {
         // The old password must stop working the moment a new one is generated — any session
         // still alive under it should not survive a resend, same as changePassword enforces.
         verify(refreshTokenRepository).revokeAllByUserId(2L);
+    }
+
+    @Test
+    void resendWelcome_userAlreadyHasAName_leavesItUntouched() {
+        // A re-shared temporary password only resets the password: the user's name (and, by the
+        // same reasoning, their chats — this endpoint never touches ChatSession/ChatMessage rows
+        // at all) survive, so a returning user is not sent through the "set your name" gate again.
+        User existing = userWithRoles(2L, "other@example.com", Set.of(UserRole.USER));
+        existing.setName("Returning User");
+        when(userRepository.findById(2L)).thenReturn(Optional.of(existing));
+        when(passwordEncoder.encode(any())).thenReturn("hashed-new");
+        when(userRepository.save(existing)).thenReturn(existing);
+
+        ResponseEntity<?> response = controller.resendWelcome(2L, asAdmin("admin@example.com"));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(existing.getName()).isEqualTo("Returning User");
+        assertThat(existing.isMustChangePassword()).isTrue();
     }
 
     @Test
