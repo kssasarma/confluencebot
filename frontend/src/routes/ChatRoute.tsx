@@ -78,7 +78,9 @@ export default function ChatRoute() {
   const chatPreferences = useChatPreferences(hasPendingToFlush ? chatId : null)
   const flushPendingPreferences = useEventCallback(chatPreferences.save)
 
-  useDocumentTitle(session?.title ?? (messages.length > 0 ? 'Conversation' : 'New chat'))
+  // The bare welcome screen (`/chat`, nothing started yet) shows just the app name; once a
+  // conversation exists it takes over the tab, first with a placeholder and then its own title.
+  useDocumentTitle(isWelcome ? null : (session?.title ?? (messages.length > 0 ? 'Conversation' : 'New chat')))
 
   // Depends on the conversation, not on the whole context: the context value changes on every
   // streamed token, and taking it as a dependency re-runs this on each one.
