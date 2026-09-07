@@ -115,7 +115,7 @@ describe('the chat surface', () => {
     expect(onSelect).toHaveBeenCalledWith('What are the steps to deploy to production?')
   })
 
-  it('renders nothing when there are no suggestions yet', () => {
+  it('renders no visible list when there are no suggestions yet', () => {
     renderWithProviders(<WelcomeSuggestions suggestions={[]} onSelect={() => {}} />)
     expect(screen.queryByRole('list')).not.toBeInTheDocument()
   })
