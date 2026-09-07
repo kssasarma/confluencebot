@@ -208,7 +208,7 @@ public class IngestionServiceImpl implements IngestionService {
         if (sections.isEmpty()) {
             log.warn("Page {} ({}) produced no parseable content — recorded with 0 chunks",
                     page.title(), page.id());
-            upsertPageTracking(page, spaceKey, pageUrl, 0);
+            upsertPageTracking(page, spaceKey, spaceName, pageUrl, 0);
             return 0;
         }
 
@@ -218,12 +218,12 @@ public class IngestionServiceImpl implements IngestionService {
         if (documents.isEmpty()) {
             log.warn("Page {} ({}) produced no chunks — recorded with 0 chunks",
                     page.title(), page.id());
-            upsertPageTracking(page, spaceKey, pageUrl, 0);
+            upsertPageTracking(page, spaceKey, spaceName, pageUrl, 0);
             return 0;
         }
 
         vectorStore.add(documents);
-        upsertPageTracking(page, spaceKey, pageUrl, documents.size());
+        upsertPageTracking(page, spaceKey, spaceName, pageUrl, documents.size());
 
         log.info("Ingested: {} [{}] → {} chunks ({} sections)",
                 page.title(), page.id(), documents.size(), sections.size());
@@ -274,11 +274,14 @@ public class IngestionServiceImpl implements IngestionService {
         return docs;
     }
 
-    private void upsertPageTracking(ConfluencePageDetail page, String spaceKey,
+    private void upsertPageTracking(ConfluencePageDetail page, String spaceKey, String spaceName,
                                      String pageUrl, int chunkCount) {
         ConfluencePageEntity entity = pageRepository.findById(page.id())
                 .orElseGet(() -> ConfluencePageEntity.newPage(
-                        page.id(), spaceKey, page.title(), pageUrl));
+                        page.id(), spaceKey, spaceName, page.title(), pageUrl));
+        // Keeps the name current on re-ingestion (e.g. after a rename in Confluence), whether the
+        // entity is the freshly-built one above or one already tracked from an earlier run.
+        entity.setSpaceName(spaceName);
         entity.setVersion(page.version().number());
         entity.setChunkCount(chunkCount);
         entity.setIngestedAt(OffsetDateTime.now());

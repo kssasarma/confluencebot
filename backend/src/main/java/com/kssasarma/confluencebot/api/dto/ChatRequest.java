@@ -20,5 +20,10 @@ public record ChatRequest(
                 example = "0f2a5f1e-9c1c-4f1f-9a2b-6f0d5f4a1b2c")
         @Pattern(regexp = "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
                 message = "chatId must be a UUID")
-        String chatId
+        String chatId,
+
+        @Schema(description = "Confluence space key to scope retrieval to. Omit (or pass null) to "
+                + "search across every ingested space.", example = "IT", maxLength = 50)
+        @Size(max = 50, message = "spaceKey must be at most 50 characters")
+        String spaceKey
 ) {}

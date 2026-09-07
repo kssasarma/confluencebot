@@ -53,15 +53,19 @@ public class HybridSearchService {
 
     /**
      * Runs hybrid retrieval for the given query and returns the final re-ranked result set.
+     *
+     * @param spaceKey restricts both the dense and lexical candidate pools to chunks from this
+     *                 Confluence space. {@code null} (or blank) searches every ingested space.
      */
-    public List<RetrievedChunk> search(String query) {
-        log.info("Hybrid search: {}", query);
+    public List<RetrievedChunk> search(String query, String spaceKey) {
+        log.info("Hybrid search: {}{}", query,
+                (spaceKey == null || spaceKey.isBlank()) ? "" : " (space=" + spaceKey + ")");
 
         float[] queryEmbedding = embed(query);
         String embeddingStr = toVectorString(queryEmbedding);
 
-        List<RawCandidate> denseResults   = searchRepo.findTopNDense(embeddingStr, candidatePoolSize);
-        List<RawCandidate> lexicalResults = searchRepo.findTopNLexical(query, candidatePoolSize);
+        List<RawCandidate> denseResults   = searchRepo.findTopNDense(embeddingStr, candidatePoolSize, spaceKey);
+        List<RawCandidate> lexicalResults = searchRepo.findTopNLexical(query, candidatePoolSize, spaceKey);
 
         if (denseResults.isEmpty() && lexicalResults.isEmpty()) {
             log.info("No candidates from either dense or lexical retrieval");

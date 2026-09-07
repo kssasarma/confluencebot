@@ -6,6 +6,7 @@ import { useChat } from '../context/ChatContext'
 import { useEffectiveDisplayPreferences } from '../hooks/usePreferences'
 import { useDocumentTitle } from '../hooks/useDocumentTitle'
 import { useEventCallback } from '../hooks/useEventCallback'
+import { readSpaceFilter, writeSpaceFilter } from '../hooks/usePersistentState'
 import { displayNameFromEmail } from '../lib/displayName'
 import Button from '../components/ui/Button'
 import EmptyState from '../components/ui/EmptyState'
@@ -16,6 +17,7 @@ import MessageList from '../components/chat/MessageList'
 import { prefetchMarkdown } from '../components/chat/LazyMarkdown'
 import Composer from '../components/chat/Composer'
 import ChatHeader from '../components/chat/ChatHeader'
+import SpaceSelector from '../components/chat/SpaceSelector'
 import { WelcomeGreeting, WelcomeSuggestions } from '../components/chat/WelcomePanel'
 import ChatPreferencesDialog from '../components/settings/ChatPreferencesDialog'
 
@@ -32,6 +34,7 @@ export default function ChatRoute() {
   const chat = useChat()
   const { user } = useAuth()
   const [showPreferences, setShowPreferences] = useState(false)
+  const [spaceKey, setSpaceKey] = useState<string | null>(() => readSpaceFilter(chatId))
 
   const messages = chat.messagesFor(chatId)
   const session = chat.sessionFor(chatId)
@@ -62,10 +65,18 @@ export default function ChatRoute() {
   // Warm the renderer while the reader is still typing, so the first answer never waits on it.
   useEffect(prefetchMarkdown, [])
 
+  // Each conversation keeps its own space filter, the same way the composer keeps its own draft.
+  useEffect(() => setSpaceKey(readSpaceFilter(chatId)), [chatId])
+
+  const changeSpace = (next: string | null) => {
+    setSpaceKey(next)
+    writeSpaceFilter(chatId, next)
+  }
+
   const lastQuestion = messages.findLast(message => message.role === 'user')?.content
 
-  const ask = useEventCallback((question: string) => chat.send(chatId, question))
-  const retry = useEventCallback(() => chat.retry(chatId))
+  const ask = useEventCallback((question: string) => chat.send(chatId, question, spaceKey))
+  const retry = useEventCallback(() => chat.retry(chatId, spaceKey))
 
   /**
    * Nothing said here yet, and nothing preventing it being said.
@@ -95,13 +106,16 @@ export default function ChatRoute() {
         titleGenerated={session?.titleGenerated ?? false}
         onRename={title => chat.rename(chatId, title)}
         actions={
-          isSaved && (
-            <IconButton
-              label="Chat settings"
-              icon={<SlidersHorizontal size={16} />}
-              onClick={() => setShowPreferences(true)}
-            />
-          )
+          <>
+            <SpaceSelector value={spaceKey} onChange={changeSpace} />
+            {isSaved && (
+              <IconButton
+                label="Chat settings"
+                icon={<SlidersHorizontal size={16} />}
+                onClick={() => setShowPreferences(true)}
+              />
+            )}
+          </>
         }
       />
 

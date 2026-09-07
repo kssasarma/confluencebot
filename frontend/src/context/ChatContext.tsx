@@ -26,8 +26,9 @@ export interface ChatContextValue extends SessionsApi {
 
   streamingChatId: string | null
   isStreaming: (chatId: string | null) => boolean
-  send: (chatId: string, question: string) => void
-  retry: (chatId: string) => void
+  /** `spaceKey` restricts retrieval to one Confluence space; omit (or null) to search every space. */
+  send: (chatId: string, question: string, spaceKey?: string | null) => void
+  retry: (chatId: string, spaceKey?: string | null) => void
   stop: () => void
 
   /** True while a conversation exists only in this browser tab. */
@@ -171,8 +172,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
     streamingChatId,
     isStreaming: chatId => chatId !== null && streamingChatId === chatId,
-    send: (chatId, question) => { void sendMessage(chatId, question) },
-    retry: chatId => { void retry(chatId) },
+    send: (chatId, question, spaceKey) => { void sendMessage(chatId, question, spaceKey) },
+    retry: (chatId, spaceKey) => { void retry(chatId, spaceKey) },
     stop: stopStreaming,
 
     isDraft,

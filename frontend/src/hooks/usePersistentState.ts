@@ -60,3 +60,25 @@ export function writeDraft(chatId: string, text: string): void {
     /* An unsaved draft is a smaller loss than a thrown render. */
   }
 }
+
+/**
+ * The Confluence space a conversation's questions are scoped to, kept per conversation and per
+ * tab like the draft above: reopening the same chat in a different window starts unscoped rather
+ * than silently inheriting a filter chosen somewhere else.
+ */
+export function readSpaceFilter(chatId: string): string | null {
+  try {
+    return sessionStorage.getItem(`cb_space_${chatId}`)
+  } catch {
+    return null
+  }
+}
+
+export function writeSpaceFilter(chatId: string, spaceKey: string | null): void {
+  try {
+    if (spaceKey) sessionStorage.setItem(`cb_space_${chatId}`, spaceKey)
+    else sessionStorage.removeItem(`cb_space_${chatId}`)
+  } catch {
+    /* A filter that resets on reload is a smaller loss than a thrown render. */
+  }
+}
