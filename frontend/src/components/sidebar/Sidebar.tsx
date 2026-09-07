@@ -1,5 +1,5 @@
 import { useDeferredValue, useEffect, useRef, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { Loader2, MessageSquare, Plus, Search, X } from 'lucide-react'
 import { cn } from '../../lib/cn'
 import { groupByRecency } from '../../lib/time'
@@ -25,6 +25,7 @@ interface SidebarProps {
  */
 export default function Sidebar({ onNavigate }: SidebarProps) {
   const navigate = useNavigate()
+  const location = useLocation()
   const confirm = useConfirm()
   const chat = useChat()
 
@@ -51,7 +52,15 @@ export default function Sidebar({ onNavigate }: SidebarProps) {
       confirmLabel: 'Delete',
       tone: 'danger',
     })
-    if (confirmed) chat.deleteConversation(chatId)
+    if (!confirmed) return
+
+    // Deleting the conversation currently open leaves its route pointing at a chat that no
+    // longer exists, which otherwise gets stuck showing the loading skeleton forever — nothing
+    // else tells that route its id just vanished. Sending it back to the welcome screen is what
+    // an already-open, now-gone conversation should look like.
+    const isOpen = location.pathname === `/chat/${chatId}`
+    chat.deleteConversation(chatId)
+    if (isOpen) navigate('/chat')
   }
 
   function handleNewChat() {
