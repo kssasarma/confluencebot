@@ -12,7 +12,6 @@ import { toggleRole } from '../../lib/roles'
 import { useConfirm } from '../ui/ConfirmDialog'
 import { useToast } from '../ui/Toast'
 import { cn } from '../../lib/cn'
-import AdminAnalyticsPanel from './AdminAnalyticsPanel'
 import Badge from '../ui/Badge'
 import Button from '../ui/Button'
 import EmptyState from '../ui/EmptyState'
@@ -182,10 +181,6 @@ export default function AdminUsersPanel() {
 
   return (
     <div className="space-y-6">
-      {/* Onboarding/usage analytics are a full-admin thing — a read-only admin can see and manage
-          users here, but not how much the deployment is being used or by whom. */}
-      {isAdmin && <AdminAnalyticsPanel />}
-
       {welcomeResult && (
         <div role="status" className="rounded-lg border border-success/40 bg-success-soft p-4 text-sm">
           <p className="mb-1 font-medium text-success-emphasis">

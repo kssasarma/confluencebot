@@ -5,12 +5,14 @@ import Modal from '../ui/Modal'
 import GeneralSettingsPanel from './GeneralSettingsPanel'
 import AdminUsersPanel from './AdminUsersPanel'
 import AdminIngestionPanel from './AdminIngestionPanel'
+import AdminAnalyticsPanel from './AdminAnalyticsPanel'
 
-type Section = 'general' | 'admin' | 'ingestion'
+type Section = 'general' | 'admin' | 'analytics' | 'ingestion'
 
 const SECTION_LABEL: Record<Section, string> = {
   general: 'General',
   admin: 'User Management',
+  analytics: 'Analytics',
   ingestion: 'Ingestion',
 }
 
@@ -29,11 +31,14 @@ const SECTION_LABEL: Record<Section, string> = {
  * that reaches them is organised.
  */
 export default function SettingsDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { canManageUsers, canIngest } = useAuth()
+  const { canManageUsers, canIngest, isAdmin } = useAuth()
 
   const sections: Section[] = [
     'general',
     ...(canManageUsers ? (['admin'] as const) : []),
+    // Onboarding/usage analytics are a full-admin thing — a read-only admin can manage users but
+    // not see how much the deployment is being used or by whom.
+    ...(isAdmin ? (['analytics'] as const) : []),
     ...(canIngest ? (['ingestion'] as const) : []),
   ]
 
@@ -80,6 +85,8 @@ export default function SettingsDialog({ open, onClose }: { open: boolean; onClo
         >
           {activeSection === 'admin' ? (
             <AdminUsersPanel />
+          ) : activeSection === 'analytics' ? (
+            <AdminAnalyticsPanel />
           ) : activeSection === 'ingestion' ? (
             <AdminIngestionPanel />
           ) : (
