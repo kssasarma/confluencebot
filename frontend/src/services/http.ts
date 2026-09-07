@@ -26,6 +26,13 @@ let refreshInFlight: Promise<boolean> | null = null
  * An access token lives for minutes, so any request can outlive it — a laptop waking from sleep
  * hits this constantly. On a 401 the refresh token is redeemed once (single-flight across all
  * concurrent callers) and the request is replayed, which is invisible to the caller.
+ *
+ * The JWT is checked first on every call this wraps — every session and chat request alike — so a
+ * request never runs against a token the server has already rejected. If the replay is *still*
+ * unauthorized (a revoked or otherwise invalid session that a fresh access token cannot fix), the
+ * session is cleared right here rather than left for the caller to notice: `clearSession` is what
+ * signs the reader out in the UI, and it takes the chat state with it, since `ChatProvider` only
+ * exists inside the authenticated route tree that a cleared session unmounts.
  */
 export async function apiFetch(path: string, options: RequestOptions = {}): Promise<Response> {
   const { skipAuthRetry, ...init } = options
@@ -34,7 +41,9 @@ export async function apiFetch(path: string, options: RequestOptions = {}): Prom
   if (response.status !== 401 || skipAuthRetry) return response
   if (!(await refreshAccessToken())) return response
 
-  return fetch(`${API_BASE}${path}`, withAuth(init))
+  const retried = await fetch(`${API_BASE}${path}`, withAuth(init))
+  if (retried.status === 401) clearSession()
+  return retried
 }
 
 export async function apiJson<T>(path: string, options: RequestOptions = {}): Promise<T> {
