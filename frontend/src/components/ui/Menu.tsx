@@ -1,7 +1,10 @@
-import { Fragment, type ReactNode } from 'react'
+import {
+  cloneElement, Fragment, isValidElement, useState, type FocusEvent, type ReactNode,
+} from 'react'
 import {
   Menu as HeadlessMenu, MenuButton, MenuItem, MenuItems,
 } from '@headlessui/react'
+import { getInteractionModality } from '@react-aria/interactions'
 import { cn } from '../../lib/cn'
 
 /**
@@ -19,6 +22,14 @@ import { cn } from '../../lib/cn'
  * unpositioned default (near the viewport's top-left) before floating-ui snaps it to the trigger,
  * which reads as the menu flying in from the far left. Keeping `MenuItems` mounted and toggling
  * visibility via data attributes lets the anchor settle first.
+ *
+ * Clicking outside the menu to dismiss it (without picking an item) makes Headless UI call
+ * `buttonElement.focus()` so keyboard focus isn't dropped into the void — but that's a script-
+ * driven focus the mouse user never asked for, and the app's global `:focus-visible` rule (see
+ * `index.css`) can't tell it apart from a real Tab landing on the button, so the ring flashes on
+ * for no reason a mouse user can see. `getInteractionModality` is the same signal Headless UI's
+ * own internals use to tell keyboard from pointer input; reading it in the trigger's `onFocus`
+ * lets the ring be suppressed for that one case while staying intact for actual keyboard use.
  */
 
 export interface MenuAction {
@@ -43,9 +54,25 @@ interface MenuProps {
 export default function Menu({
   trigger, actions, placement = 'bottom end', className, header,
 }: MenuProps) {
+  const [suppressTriggerRing, setSuppressTriggerRing] = useState(false)
+
+  function handleTriggerFocus(event: FocusEvent) {
+    setSuppressTriggerRing(getInteractionModality() !== 'keyboard')
+    if (isValidElement(trigger)) {
+      (trigger.props as { onFocus?: (event: FocusEvent) => void }).onFocus?.(event)
+    }
+  }
+
+  const decoratedTrigger = isValidElement(trigger)
+    ? cloneElement(trigger, {
+      onFocus: handleTriggerFocus,
+      'data-focus-ring': suppressTriggerRing ? 'none' : undefined,
+    } as Record<string, unknown>)
+    : trigger
+
   return (
     <HeadlessMenu as="div" className={cn('relative inline-block', className)}>
-      <MenuButton as={Fragment}>{trigger}</MenuButton>
+      <MenuButton as={Fragment}>{decoratedTrigger}</MenuButton>
 
       <MenuItems
         transition
