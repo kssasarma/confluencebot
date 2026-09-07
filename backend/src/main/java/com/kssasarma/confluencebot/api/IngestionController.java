@@ -215,8 +215,8 @@ public class IngestionController {
     public ResponseEntity<IngestionJobPageResponse> listJobs(
             @Parameter(description = "Zero-based page number", example = "0")
             @RequestParam(defaultValue = "0") int page,
-            @Parameter(description = "Jobs per page, capped at 100", example = "10")
-            @RequestParam(defaultValue = "10") int size) {
+            @Parameter(description = "Jobs per page, capped at 100", example = "5")
+            @RequestParam(defaultValue = "5") int size) {
 
         Pageable pageable = PageRequest.of(page, Math.min(Math.max(size, 1), 100));
         Page<IngestionJobResponse> jobs = jobService.findAll(pageable).map(IngestionJobResponse::from);
