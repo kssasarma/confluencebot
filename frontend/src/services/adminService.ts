@@ -130,7 +130,7 @@ export const ingestSpace = (spaceKey: string, force = false): Promise<IngestionJ
 export const ingestPage = (pageId: string): Promise<IngestionJob> =>
   apiJson<IngestionJob>(`/ingest/page/${pageId}`, { method: 'POST' })
 
-export const JOB_HISTORY_PAGE_SIZE = 10
+export const JOB_HISTORY_PAGE_SIZE = 5
 
 export const listJobs = (page = 0, size = JOB_HISTORY_PAGE_SIZE): Promise<IngestionJobPage> =>
   apiJson<IngestionJobPage>(`/ingest/jobs?page=${page}&size=${size}`)

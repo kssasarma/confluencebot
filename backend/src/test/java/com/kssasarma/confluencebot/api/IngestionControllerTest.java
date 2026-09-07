@@ -107,15 +107,15 @@ class IngestionControllerTest {
     }
 
     @Test
-    void listJobs_defaultPaging_returnsFirstPageOfTenAsJobsArray() throws Exception {
-        Page<IngestionJobEntity> emptyPage = new PageImpl<>(List.of(), PageRequest.of(0, 10), 0);
+    void listJobs_defaultPaging_returnsFirstPageOfFiveAsJobsArray() throws Exception {
+        Page<IngestionJobEntity> emptyPage = new PageImpl<>(List.of(), PageRequest.of(0, 5), 0);
         when(jobService.findAll(any(Pageable.class))).thenReturn(emptyPage);
 
         mockMvc.perform(get("/api/ingest/jobs"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.jobs").isArray())
                 .andExpect(jsonPath("$.page").value(0))
-                .andExpect(jsonPath("$.size").value(10))
+                .andExpect(jsonPath("$.size").value(5))
                 .andExpect(jsonPath("$.totalElements").value(0))
                 .andExpect(jsonPath("$.hasNext").value(false));
     }
