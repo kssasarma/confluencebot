@@ -27,17 +27,14 @@ public class SmtpEmailService implements EmailService {
     }
 
     @Override
-    public boolean sendWelcomeEmail(String toEmail, String ccEmail, String tempPassword) {
+    public boolean sendWelcomeEmail(String toEmail, String onboardedBy, String tempPassword) {
         SimpleMailMessage message = new SimpleMailMessage();
         if (fromAddress != null && !fromAddress.isBlank()) {
             message.setFrom(fromAddress);
         }
         message.setTo(toEmail);
-        if (ccEmail != null && !ccEmail.isBlank() && !ccEmail.equalsIgnoreCase(toEmail)) {
-            message.setCc(ccEmail);
-        }
         message.setSubject("Your Confluence Bot account is ready");
-        message.setText(body(toEmail, tempPassword));
+        message.setText(body(toEmail, onboardedBy, tempPassword));
         try {
             mailSender.send(message);
             return true;
@@ -47,18 +44,44 @@ public class SmtpEmailService implements EmailService {
         }
     }
 
-    private String body(String email, String tempPassword) {
+    @Override
+    public boolean sendPasswordResetOtp(String toEmail, String otp, int validMinutes) {
+        SimpleMailMessage message = new SimpleMailMessage();
+        if (fromAddress != null && !fromAddress.isBlank()) {
+            message.setFrom(fromAddress);
+        }
+        message.setTo(toEmail);
+        message.setSubject("Your Confluence Bot password reset code");
+        message.setText("""
+                Your password reset code is: %s
+
+                This code expires in %d minutes. If you didn't request a password reset, you can \
+                safely ignore this email — your password has not been changed.
+                """.formatted(otp, validMinutes));
+        try {
+            mailSender.send(message);
+            return true;
+        } catch (MailException e) {
+            logger.warn("Could not send password reset code to {}: {}", toEmail, e.getMessage());
+            return false;
+        }
+    }
+
+    private String body(String email, String onboardedBy, String tempPassword) {
         String signInLine = (appBaseUrl == null || appBaseUrl.isBlank())
                 ? ""
                 : "Sign in here: " + appBaseUrl + "\n\n";
+        String onboardedByLine = (onboardedBy == null || onboardedBy.isBlank())
+                ? ""
+                : "You were onboarded by " + onboardedBy + ".\n\n";
         return """
                 An account has been created for you on Confluence Bot.
 
                 Email: %s
                 Temporary password: %s
 
-                %sYou'll be asked to choose your own password the first time you sign in. Keep this \
+                %s%sYou'll be asked to choose your own password the first time you sign in. Keep this \
                 temporary password safe until then — it will not be shown to you again.
-                """.formatted(email, tempPassword, signInLine);
+                """.formatted(email, tempPassword, onboardedByLine, signInLine);
     }
 }

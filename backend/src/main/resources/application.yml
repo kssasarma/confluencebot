@@ -4,6 +4,9 @@ app:
     expiration-ms: ${JWT_EXPIRATION_MS:900000}
     # How long a refresh token stays valid (ISO-8601 duration)
     refresh-token-ttl: ${JWT_REFRESH_TOKEN_TTL:P30D}
+  otp:
+    # How long a "forgot password" one-time code stays valid (ISO-8601 duration)
+    ttl: ${OTP_TTL:PT10M}
   cors:
     # Browser origins allowed to call the API. The bundled nginx proxies /api on the same origin,
     # so this only matters when the UI is served from somewhere else.

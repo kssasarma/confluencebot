@@ -28,6 +28,10 @@ public class User implements UserDetails {
     @Column
     private String name;
 
+    /** Set by an admin, typically at onboarding. Reporting only — never used for access control. */
+    @Column(name = "business_unit")
+    private String businessUnit;
+
     /**
      * A user's roles, not a role: {@link #setRoles} is the only mutator, and it always replaces
      * the whole set. Eagerly fetched because {@link #getAuthorities()} is read by the security
@@ -67,6 +71,7 @@ public class User implements UserDetails {
     public Long getId() { return id; }
     public String getEmail() { return email; }
     public String getName() { return name; }
+    public String getBusinessUnit() { return businessUnit; }
 
     /** Read-only view; go through {@link #setRoles} to change membership. */
     public Set<UserRole> getRoles() { return Collections.unmodifiableSet(roles); }
@@ -79,6 +84,7 @@ public class User implements UserDetails {
     public void setEmail(String email) { this.email = email; }
     public void setPassword(String password) { this.password = password; }
     public void setName(String name) { this.name = name; }
+    public void setBusinessUnit(String businessUnit) { this.businessUnit = businessUnit; }
 
     /**
      * Replaces the full set of roles. A user with no roles could authenticate but do nothing —

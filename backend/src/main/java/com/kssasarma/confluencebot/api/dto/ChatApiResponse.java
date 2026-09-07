@@ -67,5 +67,6 @@ public record ChatApiResponse(
     }
 
     public static final String NO_CONTEXT_ANSWER =
-            "I could not find relevant information in the Confluence documentation for your question.";
+            "We don't have enough information. Please refer to confluence directly or reach out to "
+            + "Admin for a reingestion, if the question is from a new recent change from the space.";
 }

@@ -8,6 +8,8 @@ import MessageList from './MessageList'
 import Composer from './Composer'
 import { WelcomeGreeting, WelcomeSuggestions } from './WelcomePanel'
 
+const SAMPLE_SUGGESTIONS = ['What are the steps to deploy to production?', 'Where are the runbooks?']
+
 /**
  * The delivery plan's Phase 6 acceptance criterion: zero axe violations on the chat route.
  *
@@ -87,7 +89,7 @@ describe('the chat surface', () => {
       <div>
         <WelcomeGreeting name="Priya Sharma" />
         <Composer chatId="c-welcome" onSend={() => {}} onStop={() => {}} isStreaming={false} />
-        <WelcomeSuggestions onSelect={() => {}} />
+        <WelcomeSuggestions suggestions={SAMPLE_SUGGESTIONS} onSelect={() => {}} />
       </div>,
     )
     await expectNoAxeViolations(container)
@@ -107,10 +109,15 @@ describe('the chat surface', () => {
   it('sends a suggestion rather than dropping it into the composer', async () => {
     const onSelect = vi.fn()
     const user = userEvent.setup()
-    renderWithProviders(<WelcomeSuggestions onSelect={onSelect} />)
+    renderWithProviders(<WelcomeSuggestions suggestions={SAMPLE_SUGGESTIONS} onSelect={onSelect} />)
 
     await user.click(screen.getByRole('button', { name: /steps to deploy to production/i }))
     expect(onSelect).toHaveBeenCalledWith('What are the steps to deploy to production?')
+  })
+
+  it('renders nothing when there are no suggestions yet', () => {
+    renderWithProviders(<WelcomeSuggestions suggestions={[]} onSelect={() => {}} />)
+    expect(screen.queryByRole('list')).not.toBeInTheDocument()
   })
 
   it('mirrors a streaming answer into a live region for screen readers', () => {

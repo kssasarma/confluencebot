@@ -127,7 +127,7 @@ describe('SettingsDialog section visibility per role', () => {
     renderWithProviders(<SettingsDialog open onClose={vi.fn()} />)
 
     expect(await screen.findByRole('tab', { name: 'General', selected: true })).toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: 'Admin' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'User Management' })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: 'Ingestion' })).toBeInTheDocument()
   })
 
@@ -137,7 +137,7 @@ describe('SettingsDialog section visibility per role', () => {
 
     renderWithProviders(<SettingsDialog open onClose={vi.fn()} />)
 
-    expect(await screen.findByRole('tab', { name: 'Admin' })).toBeInTheDocument()
+    expect(await screen.findByRole('tab', { name: 'User Management' })).toBeInTheDocument()
     expect(screen.queryByRole('tab', { name: 'Ingestion' })).not.toBeInTheDocument()
   })
 
@@ -148,7 +148,7 @@ describe('SettingsDialog section visibility per role', () => {
     renderWithProviders(<SettingsDialog open onClose={vi.fn()} />)
 
     expect(await screen.findByRole('tab', { name: 'Ingestion' })).toBeInTheDocument()
-    expect(screen.queryByRole('tab', { name: 'Admin' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: 'User Management' })).not.toBeInTheDocument()
 
     await userEvent.click(screen.getByRole('tab', { name: 'Ingestion' }))
     expect(await screen.findByText(/ingest a space/i)).toBeInTheDocument()
@@ -161,14 +161,14 @@ describe('SettingsDialog section visibility per role', () => {
     renderWithProviders(<SettingsDialog open onClose={vi.fn()} />)
 
     await screen.findByRole('tab', { name: 'General' })
-    expect(screen.queryByRole('tab', { name: 'Admin' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: 'User Management' })).not.toBeInTheDocument()
     expect(screen.queryByRole('tab', { name: 'Ingestion' })).not.toBeInTheDocument()
   })
 })
 
 describe('SettingsDialog Admin section', () => {
   async function openAdminTab() {
-    await userEvent.click(await screen.findByRole('tab', { name: 'Admin' }))
+    await userEvent.click(await screen.findByRole('tab', { name: 'User Management' }))
   }
 
   it('lets a full admin grant an additional role to another user', async () => {

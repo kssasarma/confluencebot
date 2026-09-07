@@ -4,7 +4,7 @@ import AuthLayout from './AuthLayout'
 import Input from '../ui/Input'
 import Button from '../ui/Button'
 
-export default function LoginPage() {
+export default function LoginPage({ onForgotPassword }: { onForgotPassword: () => void }) {
   const { login } = useAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -47,6 +47,13 @@ export default function LoginPage() {
         <Button type="submit" loading={loading} block className="mt-1">
           Sign in
         </Button>
+        <button
+          type="button"
+          onClick={onForgotPassword}
+          className="text-center text-sm text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+        >
+          Forgot password?
+        </button>
       </form>
     </AuthLayout>
   )

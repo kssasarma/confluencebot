@@ -20,6 +20,28 @@ export interface AdminUser {
   enabled: boolean
   mustChangePassword: boolean
   createdAt: string
+  /** Set by an admin, typically at onboarding. Reporting only. */
+  businessUnit: string | null
+}
+
+export interface OnboardingStats {
+  totalUsers: number
+  usersByRole: Array<{ role: string; count: number }>
+  createdLast30Days: number
+  resentLast30Days: number
+  deletedLast30Days: number
+  emailDeliveryFailuresLast30Days: number
+}
+
+export interface UsageStats {
+  totalQuestions: number
+  topUsers: Array<{ email: string; name: string | null; questionCount: number }>
+  byBusinessUnit: Array<{ businessUnit: string; questionCount: number }>
+}
+
+export interface AdminAnalytics {
+  onboarding: OnboardingStats
+  usage: UsageStats
 }
 
 export interface CreateUserResult {
@@ -72,10 +94,11 @@ export const createUser = (
   email: string,
   roles: AdminRole[],
   tempPassword?: string,
+  businessUnit?: string,
 ): Promise<CreateUserResult> =>
   apiJson<CreateUserResult>('/admin/users', {
     method: 'POST',
-    ...jsonBody({ email, roles, tempPassword }),
+    ...jsonBody({ email, roles, tempPassword, businessUnit }),
   })
 
 export const setUserEnabled = (id: number, enabled: boolean): Promise<AdminUser> =>
@@ -83,6 +106,10 @@ export const setUserEnabled = (id: number, enabled: boolean): Promise<AdminUser>
 
 export const setUserRoles = (id: number, roles: AdminRole[]): Promise<AdminUser> =>
   apiJson<AdminUser>(`/admin/users/${id}/roles`, { method: 'PATCH', ...jsonBody({ roles }) })
+
+/** Reporting only. An empty string clears it. */
+export const setUserBusinessUnit = (id: number, businessUnit: string): Promise<AdminUser> =>
+  apiJson<AdminUser>(`/admin/users/${id}/business-unit`, { method: 'PATCH', ...jsonBody({ businessUnit }) })
 
 /** Cascades: every chat, session and preference scoped to this user goes with it. */
 export const deleteUser = (id: number): Promise<void> =>
@@ -93,6 +120,9 @@ export const resendWelcome = (id: number): Promise<CreateUserResult> =>
   apiJson<CreateUserResult>(`/admin/users/${id}/resend-welcome`, { method: 'POST' })
 
 export const listAuditEvents = (): Promise<AdminUserEvent[]> => apiJson<AdminUserEvent[]>('/admin/audit')
+
+/** Onboarding and usage analytics. Admin-only — the endpoint 403s for anyone else. */
+export const getAnalytics = (): Promise<AdminAnalytics> => apiJson<AdminAnalytics>('/admin/analytics')
 
 export const ingestSpace = (spaceKey: string, force = false): Promise<IngestionJob> =>
   apiJson<IngestionJob>('/ingest/space', { method: 'POST', ...jsonBody({ spaceKey, force }) })

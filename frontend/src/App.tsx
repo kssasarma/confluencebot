@@ -1,8 +1,10 @@
+import { useState } from 'react'
 import { RouterProvider } from 'react-router-dom'
 import Providers from './app/providers'
 import { router } from './app/router'
 import { useAuth } from './context/AuthContext'
 import LoginPage from './components/auth/LoginPage'
+import ForgotPasswordPage from './components/auth/ForgotPasswordPage'
 import ChangePasswordPage from './components/auth/ChangePasswordPage'
 import CompleteProfilePage from './components/auth/CompleteProfilePage'
 import ErrorBoundary from './components/ui/ErrorBoundary'
@@ -27,6 +29,7 @@ export default function App() {
 
 function AuthenticatedApp() {
   const { user, isLoading } = useAuth()
+  const [showForgotPassword, setShowForgotPassword] = useState(false)
 
   if (isLoading) {
     return (
@@ -36,7 +39,11 @@ function AuthenticatedApp() {
     )
   }
 
-  if (!user) return <LoginPage />
+  if (!user) {
+    return showForgotPassword
+      ? <ForgotPasswordPage onBack={() => setShowForgotPassword(false)} />
+      : <LoginPage onForgotPassword={() => setShowForgotPassword(true)} />
+  }
   if (user.mustChangePassword) return <ChangePasswordPage />
   if (!user.name) return <CompleteProfilePage />
 

@@ -1,7 +1,10 @@
 package com.kssasarma.confluencebot.auth;
 
+import com.kssasarma.confluencebot.email.EmailService;
 import com.kssasarma.confluencebot.exception.InvalidRefreshTokenException;
 import com.kssasarma.confluencebot.security.JwtService;
+import com.kssasarma.confluencebot.user.PasswordResetOtp;
+import com.kssasarma.confluencebot.user.PasswordResetOtpRepository;
 import com.kssasarma.confluencebot.user.RefreshToken;
 import com.kssasarma.confluencebot.user.RefreshTokenRepository;
 import com.kssasarma.confluencebot.user.User;
@@ -26,7 +29,10 @@ import java.util.Set;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -43,6 +49,8 @@ class AuthServiceImplTest {
     @Mock private JwtService jwtService;
     @Mock private UserRepository userRepository;
     @Mock private RefreshTokenRepository refreshTokenRepository;
+    @Mock private PasswordResetOtpRepository otpRepository;
+    @Mock private EmailService emailService;
     @Mock private PasswordEncoder passwordEncoder;
 
     private AuthServiceImpl service;
@@ -50,7 +58,8 @@ class AuthServiceImplTest {
     @BeforeEach
     void setUp() {
         service = new AuthServiceImpl(authenticationManager, jwtService, userRepository,
-                refreshTokenRepository, passwordEncoder, Duration.ofDays(30));
+                refreshTokenRepository, otpRepository, emailService, passwordEncoder,
+                Duration.ofDays(30), Duration.ofMinutes(10));
     }
 
     private static User userWithRoles(Long id, String email, Set<UserRole> roles) {
@@ -222,5 +231,142 @@ class AuthServiceImplTest {
         service.updateName(managed, new UpdateNameRequest("New Name"));
 
         assertThat(managed.getName()).isEqualTo("New Name");
+    }
+
+    // ── requestPasswordReset ─────────────────────────────────────────────────
+
+    @Test
+    void requestPasswordReset_knownEmail_emailsACodeAndInvalidatesEarlierOnes() {
+        User user = userWithRoles(9L, "user@example.com", Set.of(UserRole.USER));
+        when(userRepository.findByEmail("user@example.com")).thenReturn(Optional.of(user));
+        when(passwordEncoder.encode(anyString())).thenReturn("hashed-otp");
+        when(emailService.sendPasswordResetOtp(eq("user@example.com"), anyString(), eq(10))).thenReturn(true);
+
+        boolean result = service.requestPasswordReset(new ForgotPasswordRequest("user@example.com"));
+
+        assertThat(result).isTrue();
+        verify(otpRepository).consumeAllByUserId(9L);
+        ArgumentCaptor<PasswordResetOtp> saved = ArgumentCaptor.forClass(PasswordResetOtp.class);
+        verify(otpRepository).save(saved.capture());
+        assertThat(saved.getValue().getOtpHash()).isEqualTo("hashed-otp");
+        assertThat(saved.getValue().getUser()).isEqualTo(user);
+    }
+
+    @Test
+    void requestPasswordReset_unknownEmail_reportsSuccessWithoutEmailingAnything() {
+        when(userRepository.findByEmail("ghost@example.com")).thenReturn(Optional.empty());
+
+        boolean result = service.requestPasswordReset(new ForgotPasswordRequest("ghost@example.com"));
+
+        assertThat(result).isTrue();
+        verify(emailService, never()).sendPasswordResetOtp(any(), any(), anyInt());
+        verify(otpRepository, never()).save(any());
+    }
+
+    @Test
+    void requestPasswordReset_mailFails_reportsFalse() {
+        User user = userWithRoles(9L, "user@example.com", Set.of(UserRole.USER));
+        when(userRepository.findByEmail("user@example.com")).thenReturn(Optional.of(user));
+        when(passwordEncoder.encode(anyString())).thenReturn("hashed-otp");
+        when(emailService.sendPasswordResetOtp(any(), any(), anyInt())).thenReturn(false);
+
+        boolean result = service.requestPasswordReset(new ForgotPasswordRequest("user@example.com"));
+
+        assertThat(result).isFalse();
+    }
+
+    // ── resetPassword ────────────────────────────────────────────────────────
+
+    private static PasswordResetOtp usableOtp(User user, String hash) {
+        PasswordResetOtp otp = new PasswordResetOtp();
+        otp.setUser(user);
+        otp.setOtpHash(hash);
+        otp.setExpiresAt(Instant.now().plusSeconds(300));
+        return otp;
+    }
+
+    @Test
+    void resetPassword_correctCode_updatesPasswordAndSignsIn() {
+        User user = userWithRoles(10L, "user@example.com", Set.of(UserRole.USER));
+        user.setMustChangePassword(true);
+        PasswordResetOtp otp = usableOtp(user, "hashed-otp");
+        when(userRepository.findByEmail("user@example.com")).thenReturn(Optional.of(user));
+        when(otpRepository.findTopByUserIdAndConsumedFalseOrderByCreatedAtDesc(10L)).thenReturn(Optional.of(otp));
+        when(passwordEncoder.matches("123456", "hashed-otp")).thenReturn(true);
+        when(passwordEncoder.encode("newPassword1")).thenReturn("hashed-new");
+        when(jwtService.generateToken(user)).thenReturn("post-reset-token");
+
+        AuthResponse response = service.resetPassword(
+                new ResetPasswordRequest("user@example.com", "123456", "newPassword1"));
+
+        assertThat(otp.isConsumed()).isTrue();
+        assertThat(user.getPassword()).isEqualTo("hashed-new");
+        assertThat(user.isMustChangePassword()).isFalse();
+        assertThat(response.token()).isEqualTo("post-reset-token");
+        verify(refreshTokenRepository).revokeAllByUserId(10L);
+    }
+
+    @Test
+    void resetPassword_wrongCode_throwsAndRecordsTheAttempt() {
+        User user = userWithRoles(11L, "user@example.com", Set.of(UserRole.USER));
+        PasswordResetOtp otp = usableOtp(user, "hashed-otp");
+        when(userRepository.findByEmail("user@example.com")).thenReturn(Optional.of(user));
+        when(otpRepository.findTopByUserIdAndConsumedFalseOrderByCreatedAtDesc(11L)).thenReturn(Optional.of(otp));
+        when(passwordEncoder.matches("000000", "hashed-otp")).thenReturn(false);
+
+        assertThatThrownBy(() -> service.resetPassword(
+                new ResetPasswordRequest("user@example.com", "000000", "newPassword1")))
+                .isInstanceOf(BadCredentialsException.class);
+
+        assertThat(otp.getAttempts()).isEqualTo(1);
+        assertThat(otp.isConsumed()).isFalse();
+        verify(refreshTokenRepository, never()).revokeAllByUserId(anyLong());
+    }
+
+    @Test
+    void resetPassword_expiredCode_throwsBadCredentials() {
+        User user = userWithRoles(12L, "user@example.com", Set.of(UserRole.USER));
+        PasswordResetOtp otp = usableOtp(user, "hashed-otp");
+        ReflectionTestUtils.setField(otp, "expiresAt", Instant.now().minusSeconds(1));
+        when(userRepository.findByEmail("user@example.com")).thenReturn(Optional.of(user));
+        when(otpRepository.findTopByUserIdAndConsumedFalseOrderByCreatedAtDesc(12L)).thenReturn(Optional.of(otp));
+
+        assertThatThrownBy(() -> service.resetPassword(
+                new ResetPasswordRequest("user@example.com", "123456", "newPassword1")))
+                .isInstanceOf(BadCredentialsException.class);
+        verify(passwordEncoder, never()).matches(any(), any());
+    }
+
+    @Test
+    void resetPassword_tooManyAttempts_throwsBadCredentialsEvenWithTheRightCode() {
+        User user = userWithRoles(13L, "user@example.com", Set.of(UserRole.USER));
+        PasswordResetOtp otp = usableOtp(user, "hashed-otp");
+        for (int i = 0; i < PasswordResetOtp.MAX_ATTEMPTS; i++) otp.recordFailedAttempt();
+        when(userRepository.findByEmail("user@example.com")).thenReturn(Optional.of(user));
+        when(otpRepository.findTopByUserIdAndConsumedFalseOrderByCreatedAtDesc(13L)).thenReturn(Optional.of(otp));
+
+        assertThatThrownBy(() -> service.resetPassword(
+                new ResetPasswordRequest("user@example.com", "123456", "newPassword1")))
+                .isInstanceOf(BadCredentialsException.class);
+    }
+
+    @Test
+    void resetPassword_noCodeEverRequested_throwsBadCredentials() {
+        User user = userWithRoles(14L, "user@example.com", Set.of(UserRole.USER));
+        when(userRepository.findByEmail("user@example.com")).thenReturn(Optional.of(user));
+        when(otpRepository.findTopByUserIdAndConsumedFalseOrderByCreatedAtDesc(14L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.resetPassword(
+                new ResetPasswordRequest("user@example.com", "123456", "newPassword1")))
+                .isInstanceOf(BadCredentialsException.class);
+    }
+
+    @Test
+    void resetPassword_unknownEmail_throwsBadCredentials() {
+        when(userRepository.findByEmail("ghost@example.com")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.resetPassword(
+                new ResetPasswordRequest("ghost@example.com", "123456", "newPassword1")))
+                .isInstanceOf(BadCredentialsException.class);
     }
 }

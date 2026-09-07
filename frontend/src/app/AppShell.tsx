@@ -7,10 +7,12 @@ import { useIsDesktop } from '../hooks/useMediaQuery'
 import { useOnlineStatus } from '../hooks/useOnlineStatus'
 import { useResizable } from '../hooks/useResizable'
 import { useHotkeys } from '../hooks/useHotkeys'
+import { useTheme } from '../context/ThemeContext'
 import Sidebar from '../components/sidebar/Sidebar'
 const CommandPalette = lazy(() => import('../components/palette/CommandPalette'))
 const SettingsDialog = lazy(() => import('../components/settings/SettingsDialog'))
 import ProfileMenu from '../components/layout/ProfileMenu'
+import ThemeSwitch from '../components/settings/ThemeSwitch'
 import Footer from '../components/layout/Footer'
 import ErrorBoundary from '../components/ui/ErrorBoundary'
 import IconButton from '../components/ui/IconButton'
@@ -34,6 +36,7 @@ export default function AppShell() {
   const isDesktop = useIsDesktop()
   const online = useOnlineStatus()
   const location = useLocation()
+  const { theme, setTheme } = useTheme()
 
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
@@ -112,7 +115,8 @@ export default function AppShell() {
               <span className="text-sm font-semibold text-foreground">Confluence Bot</span>
             </>
           )}
-          <div className="ml-auto">
+          <div className="ml-auto flex items-center gap-2">
+            <ThemeSwitch value={theme} onChange={setTheme} />
             <ProfileMenu onOpenSettings={() => setSettingsOpen(true)} />
           </div>
         </div>

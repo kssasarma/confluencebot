@@ -1,11 +1,13 @@
 package com.kssasarma.confluencebot.api;
 
+import com.kssasarma.confluencebot.api.dto.AdminAnalyticsResponse;
 import com.kssasarma.confluencebot.api.dto.AdminUserEventResponse;
 import com.kssasarma.confluencebot.api.dto.AdminUserRequest;
 import com.kssasarma.confluencebot.api.dto.AdminUserResponse;
 import com.kssasarma.confluencebot.email.EmailService;
 import com.kssasarma.confluencebot.user.AdminUserEvent;
 import com.kssasarma.confluencebot.user.AdminUserEventRepository;
+import com.kssasarma.confluencebot.user.ChatMessageRepository;
 import com.kssasarma.confluencebot.user.RefreshTokenRepository;
 import com.kssasarma.confluencebot.user.User;
 import com.kssasarma.confluencebot.user.UserRepository;
@@ -50,12 +52,14 @@ class AdminControllerTest {
     @Mock private EmailService emailService;
     @Mock private AdminUserEventRepository eventRepository;
     @Mock private RefreshTokenRepository refreshTokenRepository;
+    @Mock private ChatMessageRepository chatMessageRepository;
 
     private AdminController controller;
 
     @BeforeEach
     void setUp() {
-        controller = new AdminController(userRepository, passwordEncoder, emailService, eventRepository, refreshTokenRepository);
+        controller = new AdminController(userRepository, passwordEncoder, emailService, eventRepository,
+                refreshTokenRepository, chatMessageRepository);
     }
 
     private static Authentication asAdmin(String email) {
@@ -130,14 +134,30 @@ class AdminControllerTest {
     }
 
     @Test
-    void createUser_ccsTheOnboardingAdminOnTheWelcomeEmail() {
+    void createUser_namesTheOnboardingAdminOnTheWelcomeEmail() {
         when(userRepository.existsByEmail("new@example.com")).thenReturn(false);
         when(passwordEncoder.encode(any())).thenReturn("hashed");
         when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         controller.createUser(new AdminUserRequest("new@example.com", null, null), asAdmin("admin@example.com"));
 
+        // The onboarding admin has no name on their own account, so their email is what identifies
+        // them in the welcome email body — and it is passed there rather than set as a CC header.
         verify(emailService).sendWelcomeEmail(eq("new@example.com"), eq("admin@example.com"), any());
+    }
+
+    @Test
+    void createUser_onboardingAdminHasAName_usesItInsteadOfTheirEmail() {
+        when(userRepository.existsByEmail("new@example.com")).thenReturn(false);
+        when(passwordEncoder.encode(any())).thenReturn("hashed");
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        User admin = userWithRoles(1L, "admin@example.com", Set.of(UserRole.ADMIN));
+        admin.setName("Priya Sharma");
+        when(userRepository.findByEmail("admin@example.com")).thenReturn(Optional.of(admin));
+
+        controller.createUser(new AdminUserRequest("new@example.com", null, null), asAdmin("admin@example.com"));
+
+        verify(emailService).sendWelcomeEmail(eq("new@example.com"), eq("Priya Sharma"), any());
     }
 
     @Test
@@ -366,6 +386,24 @@ class AdminControllerTest {
     }
 
     @Test
+    void resendWelcome_userAlreadyHasAName_leavesItUntouched() {
+        // A re-shared temporary password only resets the password: the user's name (and, by the
+        // same reasoning, their chats — this endpoint never touches ChatSession/ChatMessage rows
+        // at all) survive, so a returning user is not sent through the "set your name" gate again.
+        User existing = userWithRoles(2L, "other@example.com", Set.of(UserRole.USER));
+        existing.setName("Returning User");
+        when(userRepository.findById(2L)).thenReturn(Optional.of(existing));
+        when(passwordEncoder.encode(any())).thenReturn("hashed-new");
+        when(userRepository.save(existing)).thenReturn(existing);
+
+        ResponseEntity<?> response = controller.resendWelcome(2L, asAdmin("admin@example.com"));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(existing.getName()).isEqualTo("Returning User");
+        assertThat(existing.isMustChangePassword()).isTrue();
+    }
+
+    @Test
     void resendWelcome_unknownUser_returnsNotFound() {
         when(userRepository.findById(99L)).thenReturn(Optional.empty());
 
@@ -427,5 +465,101 @@ class AdminControllerTest {
 
         assertThat(response.getBody()).hasSize(1);
         assertThat(response.getBody().get(0).targetEmail()).isEqualTo("other@example.com");
+    }
+
+    // ── setBusinessUnit ──────────────────────────────────────────────────────
+
+    @Test
+    void setBusinessUnit_setsTrimmedValue() {
+        User other = userWithRoles(2L, "other@example.com", Set.of(UserRole.USER));
+        when(userRepository.findById(2L)).thenReturn(Optional.of(other));
+        when(userRepository.save(other)).thenReturn(other);
+
+        ResponseEntity<?> response = controller.setBusinessUnit(2L, Map.of("businessUnit", "  Engineering  "),
+                asAdmin("admin@example.com"));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(other.getBusinessUnit()).isEqualTo("Engineering");
+    }
+
+    @Test
+    void setBusinessUnit_blankValue_clearsIt() {
+        User other = userWithRoles(2L, "other@example.com", Set.of(UserRole.USER));
+        other.setBusinessUnit("Sales");
+        when(userRepository.findById(2L)).thenReturn(Optional.of(other));
+        when(userRepository.save(other)).thenReturn(other);
+
+        ResponseEntity<?> response = controller.setBusinessUnit(2L, Map.of("businessUnit", ""),
+                asAdmin("admin@example.com"));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(other.getBusinessUnit()).isNull();
+    }
+
+    @Test
+    void setBusinessUnit_unknownUser_returnsNotFound() {
+        when(userRepository.findById(99L)).thenReturn(Optional.empty());
+
+        ResponseEntity<?> response = controller.setBusinessUnit(99L, Map.of("businessUnit", "Engineering"),
+                asAdmin("admin@example.com"));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
+    // ── analytics ────────────────────────────────────────────────────────────
+
+    @Test
+    void analytics_aggregatesOnboardingAndUsageStats() {
+        when(userRepository.findAll()).thenReturn(List.of(
+                userWithRoles(1L, "admin@example.com", Set.of(UserRole.ADMIN)),
+                userWithRoles(2L, "other@example.com", Set.of(UserRole.USER)),
+                userWithRoles(3L, "ingestor@example.com", Set.of(UserRole.INGESTOR, UserRole.USER))));
+        when(eventRepository.countByEventTypeAndCreatedAtAfter(eq(AdminUserEvent.EventType.CREATED), any()))
+                .thenReturn(3L);
+        when(eventRepository.countByEventTypeAndCreatedAtAfter(eq(AdminUserEvent.EventType.RESENT), any()))
+                .thenReturn(1L);
+        when(eventRepository.countByEventTypeAndCreatedAtAfter(eq(AdminUserEvent.EventType.DELETED), any()))
+                .thenReturn(0L);
+        when(eventRepository.countByEmailSentFalseAndCreatedAtAfter(any())).thenReturn(2L);
+        when(chatMessageRepository.countByRole(any())).thenReturn(42L);
+        when(chatMessageRepository.topUsersByQuestionCount(any())).thenReturn(List.of(
+                questionCountRow("other@example.com", "Other Person", 30L)));
+        when(chatMessageRepository.questionCountsByBusinessUnit()).thenReturn(List.of(
+                businessUnitRow("Engineering", 25L)));
+
+        ResponseEntity<AdminAnalyticsResponse> response = controller.analytics();
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        AdminAnalyticsResponse body = response.getBody();
+        assertThat(body.onboarding().totalUsers()).isEqualTo(3);
+        assertThat(body.onboarding().usersByRole()).extracting("role", "count")
+                .containsExactlyInAnyOrder(
+                        org.assertj.core.groups.Tuple.tuple("ADMIN", 1L),
+                        org.assertj.core.groups.Tuple.tuple("USER", 2L),
+                        org.assertj.core.groups.Tuple.tuple("INGESTOR", 1L));
+        assertThat(body.onboarding().createdLast30Days()).isEqualTo(3);
+        assertThat(body.onboarding().resentLast30Days()).isEqualTo(1);
+        assertThat(body.onboarding().deletedLast30Days()).isEqualTo(0);
+        assertThat(body.onboarding().emailDeliveryFailuresLast30Days()).isEqualTo(2);
+        assertThat(body.usage().totalQuestions()).isEqualTo(42);
+        assertThat(body.usage().topUsers()).hasSize(1);
+        assertThat(body.usage().topUsers().get(0).email()).isEqualTo("other@example.com");
+        assertThat(body.usage().byBusinessUnit()).hasSize(1);
+        assertThat(body.usage().byBusinessUnit().get(0).businessUnit()).isEqualTo("Engineering");
+    }
+
+    private static ChatMessageRepository.UserQuestionCount questionCountRow(String email, String name, long count) {
+        return new ChatMessageRepository.UserQuestionCount() {
+            @Override public String getEmail() { return email; }
+            @Override public String getName() { return name; }
+            @Override public long getQuestionCount() { return count; }
+        };
+    }
+
+    private static ChatMessageRepository.BusinessUnitQuestionCount businessUnitRow(String bu, long count) {
+        return new ChatMessageRepository.BusinessUnitQuestionCount() {
+            @Override public String getBusinessUnit() { return bu; }
+            @Override public long getQuestionCount() { return count; }
+        };
     }
 }
