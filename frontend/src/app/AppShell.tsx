@@ -10,6 +10,7 @@ import { useHotkeys } from '../hooks/useHotkeys'
 import Sidebar from '../components/sidebar/Sidebar'
 const CommandPalette = lazy(() => import('../components/palette/CommandPalette'))
 import ProfileMenu from '../components/layout/ProfileMenu'
+import Footer from '../components/layout/Footer'
 import ErrorBoundary from '../components/ui/ErrorBoundary'
 import IconButton from '../components/ui/IconButton'
 import Spinner from '../components/ui/Spinner'
@@ -127,6 +128,8 @@ export default function AppShell() {
             </Suspense>
           </ErrorBoundary>
         </main>
+
+        <Footer />
       </div>
 
       {/* Rendered only once opened, so the chunk is fetched on first use rather than on load. */}
