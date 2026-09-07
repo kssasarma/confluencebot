@@ -44,6 +44,29 @@ public class SmtpEmailService implements EmailService {
         }
     }
 
+    @Override
+    public boolean sendPasswordResetOtp(String toEmail, String otp, int validMinutes) {
+        SimpleMailMessage message = new SimpleMailMessage();
+        if (fromAddress != null && !fromAddress.isBlank()) {
+            message.setFrom(fromAddress);
+        }
+        message.setTo(toEmail);
+        message.setSubject("Your Confluence Bot password reset code");
+        message.setText("""
+                Your password reset code is: %s
+
+                This code expires in %d minutes. If you didn't request a password reset, you can \
+                safely ignore this email — your password has not been changed.
+                """.formatted(otp, validMinutes));
+        try {
+            mailSender.send(message);
+            return true;
+        } catch (MailException e) {
+            logger.warn("Could not send password reset code to {}: {}", toEmail, e.getMessage());
+            return false;
+        }
+    }
+
     private String body(String email, String onboardedBy, String tempPassword) {
         String signInLine = (appBaseUrl == null || appBaseUrl.isBlank())
                 ? ""

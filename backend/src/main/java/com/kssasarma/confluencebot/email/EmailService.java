@@ -14,4 +14,11 @@ public interface EmailService {
      *                    blank
      */
     boolean sendWelcomeEmail(String toEmail, String onboardedBy, String tempPassword);
+
+    /**
+     * Sends a one-time password-reset code, valid for {@code validMinutes}. Best-effort like
+     * {@link #sendWelcomeEmail} — a misconfigured or unreachable relay returns {@code false}
+     * rather than throwing.
+     */
+    boolean sendPasswordResetOtp(String toEmail, String otp, int validMinutes);
 }
