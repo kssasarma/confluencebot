@@ -13,6 +13,7 @@ import com.kssasarma.confluencebot.chat.source.SourceReferenceFactory;
 import com.kssasarma.confluencebot.chat.title.ChatTitleRefiner;
 import com.kssasarma.confluencebot.config.ChatConfidenceProperties;
 import com.kssasarma.confluencebot.exception.LlmUnavailableException;
+import com.kssasarma.confluencebot.exception.ResourceNotFoundException;
 import com.kssasarma.confluencebot.rag.model.RetrievedChunk;
 import com.kssasarma.confluencebot.rag.service.HybridSearchService;
 import com.kssasarma.confluencebot.user.ChatSessionService;
@@ -209,6 +210,30 @@ class ChatServiceTest {
         assertThat(listener.completed.followUpQuestions()).containsExactly("More?");
         assertThat(listener.completed.chatId()).isEqualTo(CHAT_ID);
         assertThat(listener.failure).isNull();
+    }
+
+    /**
+     * A chatId that no longer belongs to the caller (a stale tab or bookmark left open across a
+     * login switch, most often) must not be treated like a transient persistence hiccup: retrying
+     * the same id can never succeed, so swallowing the failure would silently drop every future
+     * turn in the conversation while the UI kept reporting success.
+     */
+    @Test
+    void streaming_reportsAnUnrecordableConversationInsteadOfSilentlyDroppingIt() {
+        when(hybridSearchService.search(anyString(), any())).thenReturn(List.of(chunk()));
+        when(llmGateway.stream(any())).thenReturn(Flux.just("Feature X is configured."));
+        when(chatSessionService.recordTurn(any(), any()))
+                .thenThrow(new ResourceNotFoundException("Conversation not found: " + CHAT_ID));
+
+        RecordingListener listener = new RecordingListener();
+        chatService.stream(new ChatQuery("How?", CHAT_ID, user), listener);
+
+        // The answer was already generated and shown; only the recording outcome is reported as a
+        // failure, not the answer itself.
+        assertThat(String.join("", listener.tokens)).isEqualTo("Feature X is configured.");
+        assertThat(listener.failure).contains("start a new chat");
+        assertThat(listener.completed).isNull();
+        verifyNoInteractions(titleRefiner);
     }
 
     @Test
