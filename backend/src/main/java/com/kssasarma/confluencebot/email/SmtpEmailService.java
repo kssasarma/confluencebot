@@ -132,7 +132,7 @@ public class SmtpEmailService implements EmailService {
                 : """
                 <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:28px auto 4px;">
                   <tr>
-                    <td align="center" style="border-radius:8px;background:#4f46e5;">
+                    <td align="center" class="cta-cell" style="border-radius:8px;background:#4f46e5;">
                       <a href="%s" class="cta" style="display:inline-block;padding:12px 28px;font-size:15px;\
 font-weight:600;color:#ffffff;text-decoration:none;border-radius:8px;">Sign in to Confluence Bot</a>
                     </td>
@@ -146,6 +146,8 @@ font-weight:600;color:#ffffff;text-decoration:none;border-radius:8px;">Sign in t
                 <head>
                 <meta charset="UTF-8">
                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <meta name="color-scheme" content="light dark">
+                <meta name="supported-color-scheme" content="light dark">
                 <title>Your Confluence Bot account is ready</title>
                 <style>
                   @keyframes pop-in {
@@ -165,6 +167,7 @@ font-weight:600;color:#ffffff;text-decoration:none;border-radius:8px;">Sign in t
                     animation: pop-in 0.6s ease-out;
                   }
                   .card { animation: fade-up 0.5s ease-out; }
+                  .cta, .cta:hover { color: #ffffff !important; }
                   .cta:hover { background: #4338ca !important; }
                   .muted { color: #6b7280; }
                   @media (prefers-color-scheme: dark) {
@@ -172,7 +175,14 @@ font-weight:600;color:#ffffff;text-decoration:none;border-radius:8px;">Sign in t
                     .card { background-color: #1f2937 !important; }
                     .heading { color: #f9fafb !important; }
                     .body-text { color: #d1d5db !important; }
+                    .muted { color: #9ca3af !important; }
                     .creds { background-color: #111827 !important; border-color: #374151 !important; }
+                    .cred-label { color: #d1d5db !important; }
+                    .cred-value { color: #f9fafb !important; }
+                    .cred-value-strong { color: #a5b4fc !important; }
+                    .cred-border { border-top-color: #374151 !important; }
+                    .cta-cell { background: #4f46e5 !important; }
+                    .cta { background: #4f46e5 !important; }
                   }
                 </style>
                 </head>
@@ -195,12 +205,12 @@ font-weight:600;color:#ffffff;text-decoration:none;border-radius:8px;">Sign in t
                             </p>
                             <table role="presentation" width="100%%" cellpadding="0" cellspacing="0" border="0" class="creds" style="background-color:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;">
                               <tr>
-                                <td style="padding:14px 18px;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:14px;color:#4b5563;">Email</td>
-                                <td align="right" style="padding:14px 18px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:14px;color:#111827;">%s</td>
+                                <td class="cred-label" style="padding:14px 18px;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:14px;color:#4b5563;">Email</td>
+                                <td align="right" class="cred-value" style="padding:14px 18px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:14px;color:#111827;">%s</td>
                               </tr>
                               <tr>
-                                <td style="padding:0 18px 14px;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:14px;color:#4b5563;border-top:1px solid #e5e7eb;">Temporary password</td>
-                                <td align="right" style="padding:14px 18px 14px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:14px;font-weight:600;color:#4f46e5;border-top:1px solid #e5e7eb;">%s</td>
+                                <td class="cred-label cred-border" style="padding:0 18px 14px;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:14px;color:#4b5563;border-top:1px solid #e5e7eb;">Temporary password</td>
+                                <td align="right" class="cred-value-strong cred-border" style="padding:14px 18px 14px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:14px;font-weight:600;color:#4f46e5;border-top:1px solid #e5e7eb;">%s</td>
                               </tr>
                             </table>
                             %s
