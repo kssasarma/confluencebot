@@ -267,6 +267,8 @@ spring.mail:
   # From address on outgoing mail. Falls back to the SMTP username, which most relays require
   # to match the From header anyway.
   from: ${MAIL_FROM:${MAIL_USERNAME:}}
+  # Display name shown alongside the from address, e.g. "Confluence Bot <noreply@example.com>".
+  from-name: ${MAIL_FROM_NAME:Confluence Bot}
   properties.mail.smtp:
     auth: ${MAIL_SMTP_AUTH:true}
     starttls.enable: ${MAIL_STARTTLS_ENABLE:true}
