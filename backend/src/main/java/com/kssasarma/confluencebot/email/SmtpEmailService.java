@@ -24,16 +24,19 @@ public class SmtpEmailService implements EmailService {
     private final String fromAddress;
     private final String fromName;
     private final String appBaseUrl;
+    private final String appName;
 
     public SmtpEmailService(
             JavaMailSender mailSender,
             @Value("${spring.mail.from:}") String fromAddress,
             @Value("${spring.mail.from-name:}") String fromName,
-            @Value("${app.base-url:}") String appBaseUrl) {
+            @Value("${app.base-url:}") String appBaseUrl,
+            @Value("${app.name:Satya's Confluence Agent}") String appName) {
         this.mailSender = mailSender;
         this.fromAddress = fromAddress;
         this.fromName = fromName;
         this.appBaseUrl = appBaseUrl;
+        this.appName = appName;
     }
 
     @Override
@@ -43,7 +46,7 @@ public class SmtpEmailService implements EmailService {
             MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
             setFrom(helper);
             helper.setTo(toEmail);
-            helper.setSubject("Your Confluence Bot account is ready");
+            helper.setSubject("Your " + appName + " account is ready");
             helper.setText(welcomeText(toEmail, onboardedBy, tempPassword), welcomeHtml(toEmail, onboardedBy, tempPassword));
             mailSender.send(message);
             return true;
@@ -113,14 +116,14 @@ public class SmtpEmailService implements EmailService {
                 ? ""
                 : "You were onboarded by " + onboardedBy + ".\n\n";
         return """
-                An account has been created for you on Confluence Bot.
+                An account has been created for you on %s.
 
                 Email: %s
                 Temporary password: %s
 
                 %s%sYou'll be asked to choose your own password the first time you sign in. Keep this \
                 temporary password safe until then — it will not be shown to you again.
-                """.formatted(email, tempPassword, onboardedByLine, signInLine);
+                """.formatted(appName, email, tempPassword, onboardedByLine, signInLine);
     }
 
     private String welcomeHtml(String email, String onboardedBy, String tempPassword) {
@@ -134,11 +137,11 @@ public class SmtpEmailService implements EmailService {
                   <tr>
                     <td align="center" class="cta-cell" style="border-radius:8px;background:#4f46e5;">
                       <a href="%s" class="cta" style="display:inline-block;padding:12px 28px;font-size:15px;\
-font-weight:600;color:#ffffff;text-decoration:none;border-radius:8px;">Sign in to Confluence Bot</a>
+font-weight:600;color:#ffffff;text-decoration:none;border-radius:8px;">Sign in to %s</a>
                     </td>
                   </tr>
                 </table>
-                """.formatted(escapeHtml(appBaseUrl));
+                """.formatted(escapeHtml(appBaseUrl), escapeHtml(appName));
 
         return """
                 <!doctype html>
@@ -148,7 +151,7 @@ font-weight:600;color:#ffffff;text-decoration:none;border-radius:8px;">Sign in t
                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
                 <meta name="color-scheme" content="light dark">
                 <meta name="supported-color-scheme" content="light dark">
-                <title>Your Confluence Bot account is ready</title>
+                <title>Your %s account is ready</title>
                 <style>
                   @keyframes pop-in {
                     0%% { opacity: 0; transform: scale(0.6); }
@@ -193,7 +196,7 @@ font-weight:600;color:#ffffff;text-decoration:none;border-radius:8px;">Sign in t
                       <table role="presentation" width="100%%" cellpadding="0" cellspacing="0" border="0" style="max-width:480px;">
                         <tr>
                           <td align="center" style="padding-bottom:16px;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">
-                            <span style="font-size:14px;letter-spacing:0.08em;color:#6366f1;font-weight:700;text-transform:uppercase;">Confluence Bot</span>
+                            <span style="font-size:14px;letter-spacing:0.08em;color:#6366f1;font-weight:700;text-transform:uppercase;">%s</span>
                           </td>
                         </tr>
                         <tr>
@@ -201,7 +204,7 @@ font-weight:600;color:#ffffff;text-decoration:none;border-radius:8px;">Sign in t
                             <div class="badge">%s</div>
                             <h1 class="heading" style="margin:0 0 8px;font-size:22px;text-align:center;color:#111827;">Your account is ready</h1>
                             <p class="body-text" style="margin:0 0 24px;text-align:center;color:#4b5563;font-size:15px;line-height:1.5;">
-                              An account has been created for you on Confluence Bot.
+                              An account has been created for you on %s.
                             </p>
                             <table role="presentation" width="100%%" cellpadding="0" cellspacing="0" border="0" class="creds" style="background-color:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;">
                               <tr>
@@ -223,7 +226,7 @@ font-weight:600;color:#ffffff;text-decoration:none;border-radius:8px;">Sign in t
                         </tr>
                         <tr>
                           <td align="center" style="padding-top:20px;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:12px;color:#9ca3af;">
-                            You're receiving this because an admin created a Confluence Bot account for you.
+                            You're receiving this because an admin created a %s account for you.
                           </td>
                         </tr>
                       </table>
@@ -233,11 +236,15 @@ font-weight:600;color:#ffffff;text-decoration:none;border-radius:8px;">Sign in t
                 </body>
                 </html>
                 """.formatted(
+                        escapeHtml(appName),
+                        escapeHtml(appName),
                         "👋",
+                        escapeHtml(appName),
                         escapeHtml(email),
                         escapeHtml(tempPassword),
                         signInButton,
-                        onboardedByParagraph);
+                        onboardedByParagraph,
+                        escapeHtml(appName));
     }
 
     private static String escapeHtml(String value) {

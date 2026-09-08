@@ -14,6 +14,10 @@ app:
   # Where the frontend is served from. Included as a sign-in link in onboarding emails; left
   # blank, the email just omits that line.
   base-url: ${APP_BASE_URL:}
+  # Product name shown in onboarding emails. Defaults to VITE_APP_TITLE so it matches the name
+  # shown in the UI without extra config; override with APP_NAME if the backend runs somewhere
+  # that doesn't share the frontend's env file.
+  name: ${APP_NAME:${VITE_APP_TITLE:Satya's Confluence Agent}}
 
 spring:
   application:
