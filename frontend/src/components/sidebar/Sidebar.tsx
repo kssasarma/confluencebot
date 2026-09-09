@@ -1,7 +1,8 @@
 import { useDeferredValue, useEffect, useRef, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
-import { Loader2, MessageSquare, Plus, Search, X } from 'lucide-react'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { Loader2, MessageSquare, PanelLeftClose, Plus, Search, X } from 'lucide-react'
 import { cn } from '../../lib/cn'
+import { APP_TITLE } from '../../config/env'
 import { groupByRecency } from '../../lib/time'
 import { useChat } from '../../context/ChatContext'
 import { useConfirm } from '../ui/ConfirmDialog'
@@ -14,6 +15,8 @@ import SessionItem from './SessionItem'
 interface SidebarProps {
   /** Closes the drawer after navigating. Only supplied on small screens. */
   onNavigate?: () => void
+  /** Shrinks the sidebar to a slim rail. Only supplied on desktop, where it can be collapsed. */
+  onCollapse?: () => void
 }
 
 /**
@@ -23,8 +26,9 @@ interface SidebarProps {
  * a conversation three months ago is findable — the previous list had no search at all, and
  * fetched every conversation in one unpaginated call.
  */
-export default function Sidebar({ onNavigate }: SidebarProps) {
+export default function Sidebar({ onNavigate, onCollapse }: SidebarProps) {
   const navigate = useNavigate()
+  const location = useLocation()
   const confirm = useConfirm()
   const chat = useChat()
 
@@ -51,7 +55,15 @@ export default function Sidebar({ onNavigate }: SidebarProps) {
       confirmLabel: 'Delete',
       tone: 'danger',
     })
-    if (confirmed) chat.deleteConversation(chatId)
+    if (!confirmed) return
+
+    // Deleting the conversation currently open leaves its route pointing at a chat that no
+    // longer exists, which otherwise gets stuck showing the loading skeleton forever — nothing
+    // else tells that route its id just vanished. Sending it back to the welcome screen is what
+    // an already-open, now-gone conversation should look like.
+    const isOpen = location.pathname === `/chat/${chatId}`
+    chat.deleteConversation(chatId)
+    if (isOpen) navigate('/chat')
   }
 
   function handleNewChat() {
@@ -68,8 +80,16 @@ export default function Sidebar({ onNavigate }: SidebarProps) {
     <div className="flex h-full min-h-0 flex-col bg-surface">
       <div className="flex items-center gap-2 border-b border-border p-3">
         <Link to="/chat" onClick={onNavigate} className="truncate rounded text-sm font-semibold text-foreground">
-          Confluence Bot
+          {APP_TITLE}
         </Link>
+        {onCollapse && (
+          <IconButton
+            label="Collapse sidebar"
+            icon={<PanelLeftClose size={16} />}
+            onClick={onCollapse}
+            className="ml-auto"
+          />
+        )}
       </div>
 
       <div className="space-y-2 p-2">

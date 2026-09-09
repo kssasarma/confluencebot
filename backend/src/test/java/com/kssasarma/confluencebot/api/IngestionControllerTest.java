@@ -10,6 +10,10 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -18,6 +22,8 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -101,12 +107,28 @@ class IngestionControllerTest {
     }
 
     @Test
-    void listJobs_returnsAllJobsAsArray() throws Exception {
-        when(jobService.findAll()).thenReturn(List.of());
+    void listJobs_defaultPaging_returnsFirstPageOfFiveAsJobsArray() throws Exception {
+        Page<IngestionJobEntity> emptyPage = new PageImpl<>(List.of(), PageRequest.of(0, 5), 0);
+        when(jobService.findAll(any(Pageable.class))).thenReturn(emptyPage);
 
         mockMvc.perform(get("/api/ingest/jobs"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$").isArray());
+                .andExpect(jsonPath("$.jobs").isArray())
+                .andExpect(jsonPath("$.page").value(0))
+                .andExpect(jsonPath("$.size").value(5))
+                .andExpect(jsonPath("$.totalElements").value(0))
+                .andExpect(jsonPath("$.hasNext").value(false));
+    }
+
+    @Test
+    void listJobs_pageAndSizeParams_passedThroughAndCappedAt100() throws Exception {
+        Page<IngestionJobEntity> emptyPage = new PageImpl<>(List.of(), PageRequest.of(2, 100), 0);
+        when(jobService.findAll(any(Pageable.class))).thenReturn(emptyPage);
+
+        mockMvc.perform(get("/api/ingest/jobs").param("page", "2").param("size", "500"))
+                .andExpect(status().isOk());
+
+        verify(jobService).findAll(PageRequest.of(2, 100));
     }
 
     @Test

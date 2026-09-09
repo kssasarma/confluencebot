@@ -3,7 +3,6 @@ import { Check } from 'lucide-react'
 import type { ResponseStyle, UserPreferences } from '../../types'
 import { useUserPreferences } from '../../hooks/usePreferences'
 import { useAuth } from '../../context/AuthContext'
-import { useTheme } from '../../context/ThemeContext'
 import { useTimedFlag } from '../../hooks/useTimedFlag'
 import Button from '../ui/Button'
 import EmptyState from '../ui/EmptyState'
@@ -11,7 +10,6 @@ import Input from '../ui/Input'
 import Switch from '../ui/Switch'
 import { SkeletonText } from '../ui/Skeleton'
 import { cn } from '../../lib/cn'
-import ThemeSwitch from './ThemeSwitch'
 
 /** The user's own name — editable; email is the sign-in identity and never is. */
 function ProfileSection() {
@@ -73,9 +71,8 @@ const STYLES: Array<{ value: ResponseStyle; label: string; description: string }
   { value: 'detailed', label: 'Detailed', description: 'In-depth explanations' },
 ]
 
-/** Account-wide preferences: profile, appearance, and the defaults every new conversation starts from. */
+/** Account-wide preferences: profile and the defaults every new conversation starts from. */
 export default function GeneralSettingsPanel() {
-  const { theme, setTheme } = useTheme()
   const { preferences, isLoading, error, save, isSaving } = useUserPreferences()
   const [draft, setDraft] = useState<UserPreferences | null>(null)
   const [justSaved, triggerJustSaved] = useTimedFlag()
@@ -95,19 +92,6 @@ export default function GeneralSettingsPanel() {
   return (
     <div>
       <ProfileSection />
-
-      <section className="mb-8">
-        <h2 className="mb-3 text-2xs font-semibold uppercase tracking-wider text-muted-foreground">
-          Appearance
-        </h2>
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <p className="text-sm font-medium text-foreground">Theme</p>
-            <p className="text-2xs text-muted-foreground">Dark, light, or follow your system.</p>
-          </div>
-          <ThemeSwitch value={theme} onChange={setTheme} />
-        </div>
-      </section>
 
       {isLoading ? (
         <SkeletonText lines={8} />

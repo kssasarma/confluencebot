@@ -5,12 +5,14 @@ import Modal from '../ui/Modal'
 import GeneralSettingsPanel from './GeneralSettingsPanel'
 import AdminUsersPanel from './AdminUsersPanel'
 import AdminIngestionPanel from './AdminIngestionPanel'
+import AdminAnalyticsPanel from './AdminAnalyticsPanel'
 
-type Section = 'general' | 'admin' | 'ingestion'
+type Section = 'general' | 'admin' | 'analytics' | 'ingestion'
 
 const SECTION_LABEL: Record<Section, string> = {
   general: 'General',
-  admin: 'Admin',
+  admin: 'User Management',
+  analytics: 'Analytics',
   ingestion: 'Ingestion',
 }
 
@@ -29,11 +31,14 @@ const SECTION_LABEL: Record<Section, string> = {
  * that reaches them is organised.
  */
 export default function SettingsDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { canManageUsers, canIngest } = useAuth()
+  const { canManageUsers, canIngest, isAdmin } = useAuth()
 
   const sections: Section[] = [
     'general',
     ...(canManageUsers ? (['admin'] as const) : []),
+    // Onboarding/usage analytics are a full-admin thing — a read-only admin can manage users but
+    // not see how much the deployment is being used or by whom.
+    ...(isAdmin ? (['analytics'] as const) : []),
     ...(canIngest ? (['ingestion'] as const) : []),
   ]
 
@@ -41,7 +46,7 @@ export default function SettingsDialog({ open, onClose }: { open: boolean; onClo
   const activeSection = sections.includes(section) ? section : sections[0]
 
   return (
-    <Modal open={open} onClose={onClose} title="Settings" size="lg">
+    <Modal open={open} onClose={onClose} title="Settings" size="xl" fixedHeight>
       <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
         <nav
           aria-label="Settings sections"
@@ -67,9 +72,21 @@ export default function SettingsDialog({ open, onClose }: { open: boolean; onClo
           ))}
         </nav>
 
-        <div role="tabpanel" className="min-h-0 flex-1 overflow-y-auto p-5">
+        {/*
+          `scrollbar-gutter: stable` reserves the scrollbar's track up front instead of only
+          when content overflows. Without it, a panel that starts short (a loading skeleton,
+          say) and then grows past the fold — General does this the moment preferences finish
+          fetching — pops a scrollbar into existence and the content it sits beside visibly
+          shifts left by its width. Reserving the gutter always keeps that width constant.
+        */}
+        <div
+          role="tabpanel"
+          className="min-h-0 flex-1 overflow-y-auto p-5 [scrollbar-gutter:stable]"
+        >
           {activeSection === 'admin' ? (
             <AdminUsersPanel />
+          ) : activeSection === 'analytics' ? (
+            <AdminAnalyticsPanel />
           ) : activeSection === 'ingestion' ? (
             <AdminIngestionPanel />
           ) : (

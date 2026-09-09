@@ -41,7 +41,7 @@ describe('LoginPage', () => {
   it('offers the provider by name once the deployment says it has one', async () => {
     mockGetSsoConfig.mockResolvedValue(ssoConfig())
 
-    renderWithProviders(<LoginPage />)
+    renderWithProviders(<LoginPage onForgotPassword={() => {}} />)
 
     expect(await screen.findByRole('button', { name: /continue with opentext/i })).toBeInTheDocument()
   })
@@ -55,7 +55,7 @@ describe('LoginPage', () => {
       authorizationUrl: '/api/oauth2/authorization/entra',
     }))
 
-    renderWithProviders(<LoginPage />)
+    renderWithProviders(<LoginPage onForgotPassword={() => {}} />)
 
     expect(await screen.findByRole('button', { name: /continue with microsoft entra id/i }))
       .toBeInTheDocument()
@@ -66,7 +66,7 @@ describe('LoginPage', () => {
     mockGetSsoConfig.mockResolvedValue(
       ssoConfig({ enabled: false, providerId: null, providerName: null, authorizationUrl: null }))
 
-    renderWithProviders(<LoginPage />)
+    renderWithProviders(<LoginPage onForgotPassword={() => {}} />)
 
     await waitFor(() => expect(mockGetSsoConfig).toHaveBeenCalled())
     expect(screen.queryByRole('button', { name: /continue with/i })).not.toBeInTheDocument()
@@ -77,7 +77,7 @@ describe('LoginPage', () => {
     // The endpoint being unreachable must not take the password form down with it.
     mockGetSsoConfig.mockRejectedValue(new Error('network'))
 
-    renderWithProviders(<LoginPage />)
+    renderWithProviders(<LoginPage onForgotPassword={() => {}} />)
 
     await waitFor(() => expect(mockGetSsoConfig).toHaveBeenCalled())
     expect(screen.getByRole('button', { name: /^sign in$/i })).toBeInTheDocument()
@@ -87,7 +87,7 @@ describe('LoginPage', () => {
   it('keeps the password form even when the directory is offered', async () => {
     mockGetSsoConfig.mockResolvedValue(ssoConfig())
 
-    renderWithProviders(<LoginPage />)
+    renderWithProviders(<LoginPage onForgotPassword={() => {}} />)
 
     await screen.findByRole('button', { name: /continue with opentext/i })
     expect(screen.getByLabelText(/email/i)).toBeInTheDocument()
@@ -101,7 +101,7 @@ describe('LoginPage', () => {
     vi.spyOn(window, 'location', 'get').mockReturnValue({ ...window.location, assign } as Location)
     mockGetSsoConfig.mockResolvedValue(ssoConfig())
 
-    renderWithProviders(<LoginPage />)
+    renderWithProviders(<LoginPage onForgotPassword={() => {}} />)
     await userEvent.click(await screen.findByRole('button', { name: /continue with opentext/i }))
 
     expect(assign).toHaveBeenCalledWith('/api/oauth2/authorization/otds')
@@ -111,7 +111,7 @@ describe('LoginPage', () => {
   it('falls back to a neutral label when the provider has no name', async () => {
     mockGetSsoConfig.mockResolvedValue(ssoConfig({ providerName: null }))
 
-    renderWithProviders(<LoginPage />)
+    renderWithProviders(<LoginPage onForgotPassword={() => {}} />)
 
     expect(await screen.findByRole('button', { name: /continue with single sign-on/i })).toBeInTheDocument()
   })

@@ -48,6 +48,9 @@ function stubBackground(url: string): Response | null {
       showSources: true, showConfidence: true,
     })
   }
+  if (url.includes('/spaces/suggestions')) {
+    return json(['What are the steps to deploy to production?'])
+  }
   return null
 }
 
@@ -194,7 +197,7 @@ describe('opening a new chat', () => {
 
     const heading = await screen.findByRole('heading', { name: /how may i help you/i })
     const box = screen.getByRole('textbox', { name: /ask a question/i })
-    const suggestion = screen.getByRole('button', { name: /steps to deploy to production/i })
+    const suggestion = await screen.findByRole('button', { name: /steps to deploy to production/i })
 
     const follows = (first: Element, second: Element) =>
       Boolean(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING)

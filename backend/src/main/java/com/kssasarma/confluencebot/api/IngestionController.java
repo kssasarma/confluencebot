@@ -1,6 +1,7 @@
 package com.kssasarma.confluencebot.api;
 
 import com.kssasarma.confluencebot.api.dto.IngestRequest;
+import com.kssasarma.confluencebot.api.dto.IngestionJobPageResponse;
 import com.kssasarma.confluencebot.api.dto.IngestionJobResponse;
 import com.kssasarma.confluencebot.api.dto.PageSummaryResponse;
 import com.kssasarma.confluencebot.config.ConfluenceProperties;
@@ -16,6 +17,9 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ProblemDetail;
@@ -199,17 +203,24 @@ public class IngestionController {
     }
 
     @Operation(
-            summary = "List all ingestion jobs",
-            description = "Returns all ingestion jobs, newest first. Use this to monitor running jobs or review history.")
-    @ApiResponse(responseCode = "200", description = "Job list returned",
+            summary = "List ingestion jobs, paginated",
+            description = """
+                    Returns one page of ingestion jobs, newest first. Use this to monitor running \
+                    jobs or review history. `size` is capped at 100 regardless of what is requested.
+                    """)
+    @ApiResponse(responseCode = "200", description = "Job page returned",
             content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
-                    array = @ArraySchema(schema = @Schema(implementation = IngestionJobResponse.class))))
+                    schema = @Schema(implementation = IngestionJobPageResponse.class)))
     @GetMapping("/jobs")
-    public ResponseEntity<List<IngestionJobResponse>> listJobs() {
-        List<IngestionJobResponse> jobs = jobService.findAll().stream()
-                .map(IngestionJobResponse::from)
-                .toList();
-        return ResponseEntity.ok(jobs);
+    public ResponseEntity<IngestionJobPageResponse> listJobs(
+            @Parameter(description = "Zero-based page number", example = "0")
+            @RequestParam(defaultValue = "0") int page,
+            @Parameter(description = "Jobs per page, capped at 100", example = "5")
+            @RequestParam(defaultValue = "5") int size) {
+
+        Pageable pageable = PageRequest.of(page, Math.min(Math.max(size, 1), 100));
+        Page<IngestionJobResponse> jobs = jobService.findAll(pageable).map(IngestionJobResponse::from);
+        return ResponseEntity.ok(IngestionJobPageResponse.from(jobs));
     }
 
     @Operation(

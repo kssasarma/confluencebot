@@ -10,12 +10,8 @@
 
 import { BookOpen, MessageSquare, Search, Zap } from 'lucide-react'
 
-const SUGGESTIONS = [
-  { icon: Search, text: 'What is our onboarding process for new engineers?' },
-  { icon: BookOpen, text: 'Summarise the architecture decision records for the payment service.' },
-  { icon: Zap, text: 'What are the steps to deploy to production?' },
-  { icon: MessageSquare, text: 'Find all pages related to incident response procedures.' },
-]
+/** Cycled across whatever suggestions the backend returns — purely decorative, not tied to content. */
+const ICONS = [Search, BookOpen, Zap, MessageSquare]
 
 /** Above the composer: who is here, and what this box answers from. */
 export function WelcomeGreeting({ name }: { name: string }) {
@@ -46,46 +42,67 @@ export function WelcomeGreeting({ name }: { name: string }) {
 }
 
 /**
- * Below the composer: four questions that are one click from being asked.
+ * Below the composer: a handful of questions that are one click from being asked.
  *
  * The suggestions send immediately rather than filling the composer. Previously the home
  * suggestions filled the box while the follow-up chips sent straight away — two affordances that
  * looked identical and behaved differently, which is a coin flip the reader has to lose once to
  * learn.
+ *
+ * The questions themselves are not hard-coded: they come from whatever the currently selected
+ * space (or, with none selected, a sample across every space) was last ingested with — see
+ * `useSuggestions`.
+ *
+ * This always renders its flex-1 wrapper, even with nothing to show yet (before anything has been
+ * ingested, or while a space's suggestions are still loading) — it is `WelcomeGreeting`'s mirror
+ * image, and the two are what keep the composer vertically centred between them. Rendering nothing
+ * at all in that case, as this used to, left the greeting as the only flex-1 element in the
+ * column; with nothing below to balance it, it claimed the entire height and its `justify-end`
+ * shoved the greeting and composer down to the bottom of the screen instead of the middle.
  */
-export function WelcomeSuggestions({ onSelect }: { onSelect: (prompt: string) => void }) {
+export function WelcomeSuggestions({
+  suggestions, onSelect,
+}: {
+  suggestions: string[]
+  onSelect: (prompt: string) => void
+}) {
   return (
-    <div className="min-h-0 flex-1 animate-fade-in-up overflow-y-auto px-4 pb-6 pt-3">
-      <div className="mx-auto w-full max-w-3xl">
-        <p
-          id="welcome-suggestions-label"
-          className="mb-2 text-2xs font-medium uppercase tracking-wider text-muted-foreground"
-        >
-          Or start with one of these
-        </p>
+    <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-6 pt-3">
+      {suggestions.length > 0 && (
+        <div className="mx-auto w-full max-w-3xl animate-fade-in-up">
+          <p
+            id="welcome-suggestions-label"
+            className="mb-2 text-2xs font-medium uppercase tracking-wider text-muted-foreground"
+          >
+            Or start with one of these
+          </p>
 
-        <ul
-          aria-labelledby="welcome-suggestions-label"
-          className="grid grid-cols-1 gap-2 sm:grid-cols-2"
-        >
-          {SUGGESTIONS.map(({ icon: Icon, text }) => (
-            <li key={text}>
-              <button
-                onClick={() => onSelect(text)}
-                className="group flex h-full w-full items-start gap-3 rounded-xl border border-border bg-surface p-3 text-left transition-colors hover:bg-surface-hover"
-              >
-                <span
-                  aria-hidden="true"
-                  className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-muted"
-                >
-                  <Icon size={14} className="text-muted-foreground transition-colors group-hover:text-primary-emphasis" />
-                </span>
-                <span className="text-sm leading-snug text-foreground">{text}</span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      </div>
+          <ul
+            aria-labelledby="welcome-suggestions-label"
+            className="grid grid-cols-1 gap-2 sm:grid-cols-2"
+          >
+            {suggestions.map((text, index) => {
+              const Icon = ICONS[index % ICONS.length]
+              return (
+                <li key={text}>
+                  <button
+                    onClick={() => onSelect(text)}
+                    className="group flex h-full w-full items-start gap-3 rounded-xl border border-border bg-surface p-3 text-left transition-colors hover:bg-surface-hover"
+                  >
+                    <span
+                      aria-hidden="true"
+                      className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-muted"
+                    >
+                      <Icon size={14} className="text-muted-foreground transition-colors group-hover:text-primary-emphasis" />
+                    </span>
+                    <span className="text-sm leading-snug text-foreground">{text}</span>
+                  </button>
+                </li>
+              )
+            })}
+          </ul>
+        </div>
+      )}
     </div>
   )
 }

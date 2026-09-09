@@ -4,6 +4,9 @@ app:
     expiration-ms: ${JWT_EXPIRATION_MS:900000}
     # How long a refresh token stays valid (ISO-8601 duration)
     refresh-token-ttl: ${JWT_REFRESH_TOKEN_TTL:P30D}
+  otp:
+    # How long a "forgot password" one-time code stays valid (ISO-8601 duration)
+    ttl: ${OTP_TTL:PT10M}
   cors:
     # Browser origins allowed to call the API. The bundled nginx proxies /api on the same origin,
     # so this only matters when the UI is served from somewhere else.
@@ -11,6 +14,10 @@ app:
   # Where the frontend is served from. Included as a sign-in link in onboarding emails; left
   # blank, the email just omits that line.
   base-url: ${APP_BASE_URL:}
+  # Product name shown in onboarding emails. Defaults to VITE_APP_TITLE so it matches the name
+  # shown in the UI without extra config; override with APP_NAME if the backend runs somewhere
+  # that doesn't share the frontend's env file.
+  name: ${APP_NAME:${VITE_APP_TITLE:Satya's Confluence Agent}}
 
   # ── Single sign-on: any OAuth 2.0 / OpenID Connect provider ───────────────
   #
@@ -347,6 +354,8 @@ spring.mail:
   # From address on outgoing mail. Falls back to the SMTP username, which most relays require
   # to match the From header anyway.
   from: ${MAIL_FROM:${MAIL_USERNAME:}}
+  # Display name shown alongside the from address, e.g. "Confluence Bot <noreply@example.com>".
+  from-name: ${MAIL_FROM_NAME:Confluence Bot}
   properties.mail.smtp:
     auth: ${MAIL_SMTP_AUTH:true}
     starttls.enable: ${MAIL_STARTTLS_ENABLE:true}

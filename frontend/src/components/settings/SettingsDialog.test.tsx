@@ -22,6 +22,19 @@ interface StubUser {
   createdAt: string
 }
 
+interface StubJob {
+  jobId: string
+  jobType: string
+  spaceKey?: string | null
+  pageId?: string | null
+  status: string
+  createdAt: string
+}
+
+function stubJob(jobId: string, spaceKey: string): StubJob {
+  return { jobId, jobType: 'SPACE', spaceKey, status: 'COMPLETED', createdAt: '2026-09-04T00:00:00Z' }
+}
+
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -29,7 +42,7 @@ function json(body: unknown, status = 200): Response {
   })
 }
 
-function makeFetchMock(options: { meRoles: string[]; users?: StubUser[]; jobs?: unknown[]; emailSent?: boolean }) {
+function makeFetchMock(options: { meRoles: string[]; users?: StubUser[]; jobs?: StubJob[]; emailSent?: boolean }) {
   const { meRoles, users = [], jobs = [], emailSent = true } = options
   return vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(
     async (input, init) => {
@@ -78,7 +91,20 @@ function makeFetchMock(options: { meRoles: string[]; users?: StubUser[]; jobs?: 
       if (deleteMatch && method === 'DELETE') {
         return new Response(null, { status: 204 })
       }
-      if (url.includes('/ingest/jobs')) return json(jobs)
+      if (url.includes('/ingest/jobs')) {
+        const parsed = new URL(url, 'http://localhost')
+        const page = Number(parsed.searchParams.get('page') ?? '0')
+        const size = Number(parsed.searchParams.get('size') ?? '10')
+        const start = page * size
+        return json({
+          jobs: jobs.slice(start, start + size),
+          page,
+          size,
+          totalElements: jobs.length,
+          totalPages: Math.max(Math.ceil(jobs.length / size), 1),
+          hasNext: start + size < jobs.length,
+        })
+      }
       // Asked once on mount by the auth provider; this deployment has no directory configured.
       if (url.includes('/auth/sso')) {
         return json({ enabled: false, providerId: null, providerName: null, authorizationUrl: null, logoutUrl: null })
@@ -105,7 +131,7 @@ describe('SettingsDialog section visibility per role', () => {
     renderWithProviders(<SettingsDialog open onClose={vi.fn()} />)
 
     expect(await screen.findByRole('tab', { name: 'General', selected: true })).toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: 'Admin' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'User Management' })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: 'Ingestion' })).toBeInTheDocument()
   })
 
@@ -115,7 +141,7 @@ describe('SettingsDialog section visibility per role', () => {
 
     renderWithProviders(<SettingsDialog open onClose={vi.fn()} />)
 
-    expect(await screen.findByRole('tab', { name: 'Admin' })).toBeInTheDocument()
+    expect(await screen.findByRole('tab', { name: 'User Management' })).toBeInTheDocument()
     expect(screen.queryByRole('tab', { name: 'Ingestion' })).not.toBeInTheDocument()
   })
 
@@ -126,7 +152,7 @@ describe('SettingsDialog section visibility per role', () => {
     renderWithProviders(<SettingsDialog open onClose={vi.fn()} />)
 
     expect(await screen.findByRole('tab', { name: 'Ingestion' })).toBeInTheDocument()
-    expect(screen.queryByRole('tab', { name: 'Admin' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: 'User Management' })).not.toBeInTheDocument()
 
     await userEvent.click(screen.getByRole('tab', { name: 'Ingestion' }))
     expect(await screen.findByText(/ingest a space/i)).toBeInTheDocument()
@@ -139,14 +165,14 @@ describe('SettingsDialog section visibility per role', () => {
     renderWithProviders(<SettingsDialog open onClose={vi.fn()} />)
 
     await screen.findByRole('tab', { name: 'General' })
-    expect(screen.queryByRole('tab', { name: 'Admin' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: 'User Management' })).not.toBeInTheDocument()
     expect(screen.queryByRole('tab', { name: 'Ingestion' })).not.toBeInTheDocument()
   })
 })
 
 describe('SettingsDialog Admin section', () => {
   async function openAdminTab() {
-    await userEvent.click(await screen.findByRole('tab', { name: 'Admin' }))
+    await userEvent.click(await screen.findByRole('tab', { name: 'User Management' }))
   }
 
   it('lets a full admin grant an additional role to another user', async () => {
@@ -163,6 +189,7 @@ describe('SettingsDialog Admin section', () => {
 
     const otherRow = (await screen.findByText('other@example.com')).closest('tr')
     if (!otherRow) throw new Error('expected a table row for other@example.com')
+    await userEvent.click(within(otherRow).getByRole('button', { name: 'Edit roles for other@example.com' }))
     await userEvent.click(within(otherRow).getByRole('checkbox', { name: 'Ingestor' }))
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
@@ -258,5 +285,58 @@ describe('SettingsDialog Admin section', () => {
     ))
     const banner = await screen.findByRole('status')
     expect(within(banner).getByText('Welcome email resent')).toBeInTheDocument()
+  })
+})
+
+describe('SettingsDialog Ingestion section job history', () => {
+  async function openIngestionTab() {
+    await userEvent.click(await screen.findByRole('tab', { name: 'Ingestion' }))
+    await screen.findByText(/ingest a space/i)
+  }
+
+  it('stays collapsed on load and does not fetch job history until opened', async () => {
+    seedToken()
+    const jobs = [stubJob('job-1', 'ENG')]
+    const fetchMock = makeFetchMock({ meRoles: ['INGESTOR'], jobs })
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderWithProviders(<SettingsDialog open onClose={vi.fn()} />)
+    await openIngestionTab()
+
+    expect(screen.queryByText('ENG')).not.toBeInTheDocument()
+    expect(fetchMock.mock.calls.some(([reqUrl]) => String(reqUrl).includes('/ingest/jobs'))).toBe(false)
+
+    await userEvent.click(screen.getByRole('button', { name: /job history/i }))
+
+    await waitFor(() => expect(
+      fetchMock.mock.calls.some(([reqUrl]) => String(reqUrl).includes('/ingest/jobs')),
+    ).toBe(true))
+    expect(await screen.findByText('ENG')).toBeInTheDocument()
+  })
+
+  it('paginates through job history using Next and Previous', async () => {
+    seedToken()
+    const jobs = Array.from({ length: 8 }, (_, i) => stubJob(`job-${i}`, `SPACE${i}`))
+    const fetchMock = makeFetchMock({ meRoles: ['INGESTOR'], jobs })
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderWithProviders(<SettingsDialog open onClose={vi.fn()} />)
+    await openIngestionTab()
+    await userEvent.click(screen.getByRole('button', { name: /job history/i }))
+
+    expect(await screen.findByText('SPACE0')).toBeInTheDocument()
+    expect(screen.queryByText('SPACE5')).not.toBeInTheDocument()
+    expect(screen.getByText(/page 1 of 2/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Previous' })).toBeDisabled()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Next' }))
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('page=1'),
+      expect.anything(),
+    ))
+    expect(await screen.findByText('SPACE5')).toBeInTheDocument()
+    expect(screen.queryByText('SPACE0')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled()
   })
 })

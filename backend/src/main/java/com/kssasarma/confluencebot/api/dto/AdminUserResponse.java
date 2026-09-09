@@ -14,6 +14,7 @@ public record AdminUserResponse(
         boolean enabled,
         boolean mustChangePassword,
         Instant createdAt,
+        String businessUnit,
         /** Where the account came from: {@code LOCAL} or {@code SSO}. */
         String authProvider,
         /** Which identity provider it is linked to, or null if none. */
@@ -24,7 +25,7 @@ public record AdminUserResponse(
     public static AdminUserResponse from(User u) {
         return new AdminUserResponse(
                 u.getId(), u.getEmail(), u.getName(), UserRole.namesOf(u.getRoles()),
-                u.isEnabled(), u.isMustChangePassword(), u.getCreatedAt(),
+                u.isEnabled(), u.isMustChangePassword(), u.getCreatedAt(), u.getBusinessUnit(),
                 u.getAuthProvider().name(), u.getSsoProviderId(), u.isSsoLinked());
     }
 }

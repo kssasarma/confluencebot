@@ -17,6 +17,7 @@
   "dependencies": {
     "@fontsource-variable/inter": "^5.2.8",
     "@headlessui/react": "^2.2.0",
+    "@react-aria/interactions": "^3.25.0",
     "@tanstack/react-query": "^5.64.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

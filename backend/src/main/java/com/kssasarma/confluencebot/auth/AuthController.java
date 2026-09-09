@@ -79,4 +79,25 @@ public class AuthController {
                                        @Valid @RequestBody UpdateNameRequest request) {
         return authService.updateName(user, request);
     }
+
+    @Operation(summary = "Request a one-time password-reset code by email",
+            description = """
+                    Always responds the same way whether or not the address is registered, to \
+                    avoid confirming which emails have accounts. `emailSent: false` means mail is \
+                    down or misconfigured, not that the address is unknown — the reader's recourse \
+                    then is asking an admin to re-share a temporary password from Settings, which \
+                    works independently of the mail relay.
+                    """)
+    @PostMapping("/forgot-password/request")
+    public ForgotPasswordResponse requestPasswordReset(@Valid @RequestBody ForgotPasswordRequest request) {
+        return new ForgotPasswordResponse(authService.requestPasswordReset(request));
+    }
+
+    @Operation(summary = "Redeem a one-time code for a new password",
+            description = "Signs the user in with the new password, the same as changing it "
+                    + "while already signed in.")
+    @PostMapping("/forgot-password/reset")
+    public AuthResponse resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
+        return authService.resetPassword(request);
+    }
 }

@@ -27,8 +27,15 @@ export interface ModalProps {
   /** Optional line under the title. Announced as the dialog's description. */
   description?: string
 
-  /** `md` for a form, `sm` for a confirmation, `lg` for something with a table in it. */
-  size?: 'sm' | 'md' | 'lg'
+  /** `md` for a form, `sm` for a confirmation, `lg`/`xl` for something with a table in it. */
+  size?: 'sm' | 'md' | 'lg' | 'xl'
+
+  /**
+   * Pins the panel to one fixed height instead of sizing to its content. Use this for a dialog
+   * whose body swaps between differently-sized views (tabs, in particular) so switching between
+   * them doesn't resize or reflow the panel itself — the body scrolls internally instead.
+   */
+  fixedHeight?: boolean
 
   /**
    * Set false for a dialog the user must answer — a destructive confirmation, say. Escape and the
@@ -45,10 +52,11 @@ const SIZES = {
   sm: 'max-w-sm',
   md: 'max-w-lg',
   lg: 'max-w-3xl',
+  xl: 'max-w-5xl',
 } as const
 
 export default function Modal({
-  open, onClose, title, description, size = 'md', dismissable = true, children, footer,
+  open, onClose, title, description, size = 'md', fixedHeight = false, dismissable = true, children, footer,
 }: ModalProps) {
   return (
     <Transition show={open} as={Fragment}>
@@ -75,7 +83,8 @@ export default function Modal({
               <DialogPanel
                 className={cn(
                   'w-full rounded-2xl border border-border bg-surface shadow-overlay',
-                  'flex max-h-[85vh] flex-col overflow-hidden',
+                  'flex flex-col overflow-hidden',
+                  fixedHeight ? 'h-[min(640px,85vh)]' : 'max-h-[85vh]',
                   SIZES[size],
                 )}
               >

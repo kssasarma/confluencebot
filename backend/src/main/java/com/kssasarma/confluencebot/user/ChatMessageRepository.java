@@ -11,6 +11,43 @@ import java.util.Map;
 
 public interface ChatMessageRepository extends JpaRepository<ChatMessage, Long> {
 
+    long countByRole(ChatMessageRole role);
+
+    /**
+     * Who is asking the most questions, most first. Capped by the {@link Pageable} the caller
+     * passes — this backs an admin-only "top users" report, not a full ranking of every user.
+     */
+    @Query("""
+            SELECT u.email AS email, u.name AS name, COUNT(m) AS questionCount
+              FROM ChatMessage m JOIN m.session s JOIN s.user u
+             WHERE m.role = com.kssasarma.confluencebot.user.ChatMessageRole.USER
+             GROUP BY u.id, u.email, u.name
+             ORDER BY COUNT(m) DESC
+            """)
+    List<UserQuestionCount> topUsersByQuestionCount(Pageable pageable);
+
+    /** Question volume per business unit, for whichever users have one set. */
+    @Query("""
+            SELECT u.businessUnit AS businessUnit, COUNT(m) AS questionCount
+              FROM ChatMessage m JOIN m.session s JOIN s.user u
+             WHERE m.role = com.kssasarma.confluencebot.user.ChatMessageRole.USER
+               AND u.businessUnit IS NOT NULL
+             GROUP BY u.businessUnit
+             ORDER BY COUNT(m) DESC
+            """)
+    List<BusinessUnitQuestionCount> questionCountsByBusinessUnit();
+
+    interface UserQuestionCount {
+        String getEmail();
+        String getName();
+        long getQuestionCount();
+    }
+
+    interface BusinessUnitQuestionCount {
+        String getBusinessUnit();
+        long getQuestionCount();
+    }
+
     List<ChatMessage> findBySessionIdOrderBySequenceNoAsc(Long sessionId);
 
     @Query("SELECT COALESCE(MAX(m.sequenceNo), -1) FROM ChatMessage m WHERE m.session.id = :sessionId")

@@ -13,6 +13,7 @@ import com.kssasarma.confluencebot.chat.source.SourceReferenceFactory;
 import com.kssasarma.confluencebot.chat.title.ChatTitleRefiner;
 import com.kssasarma.confluencebot.config.ChatConfidenceProperties;
 import com.kssasarma.confluencebot.exception.LlmUnavailableException;
+import com.kssasarma.confluencebot.exception.ResourceNotFoundException;
 import com.kssasarma.confluencebot.rag.model.RetrievedChunk;
 import com.kssasarma.confluencebot.rag.service.HybridSearchService;
 import com.kssasarma.confluencebot.user.ChatSessionService;
@@ -89,7 +90,7 @@ class ChatServiceTest {
 
         ChatApiResponse response = chatService.chat(ChatQuery.of("How do I configure X?"));
 
-        assertThat(response.answer()).contains("could not find");
+        assertThat(response.answer()).contains("don't have enough information");
         assertThat(response.sources()).isEmpty();
         verifyNoInteractions(llmGateway);
     }
@@ -211,6 +212,30 @@ class ChatServiceTest {
         assertThat(listener.failure).isNull();
     }
 
+    /**
+     * A chatId that no longer belongs to the caller (a stale tab or bookmark left open across a
+     * login switch, most often) must not be treated like a transient persistence hiccup: retrying
+     * the same id can never succeed, so swallowing the failure would silently drop every future
+     * turn in the conversation while the UI kept reporting success.
+     */
+    @Test
+    void streaming_reportsAnUnrecordableConversationInsteadOfSilentlyDroppingIt() {
+        when(hybridSearchService.search(anyString(), any())).thenReturn(List.of(chunk()));
+        when(llmGateway.stream(any())).thenReturn(Flux.just("Feature X is configured."));
+        when(chatSessionService.recordTurn(any(), any()))
+                .thenThrow(new ResourceNotFoundException("Conversation not found: " + CHAT_ID));
+
+        RecordingListener listener = new RecordingListener();
+        chatService.stream(new ChatQuery("How?", CHAT_ID, user), listener);
+
+        // The answer was already generated and shown; only the recording outcome is reported as a
+        // failure, not the answer itself.
+        assertThat(String.join("", listener.tokens)).isEqualTo("Feature X is configured.");
+        assertThat(listener.failure).contains("start a new chat");
+        assertThat(listener.completed).isNull();
+        verifyNoInteractions(titleRefiner);
+    }
+
     @Test
     void streaming_reportsAFailedModelToTheClient() {
         when(hybridSearchService.search(anyString(), any())).thenReturn(List.of(chunk()));
@@ -230,7 +255,7 @@ class ChatServiceTest {
         RecordingListener listener = new RecordingListener();
         chatService.stream(ChatQuery.of("How?"), listener);
 
-        assertThat(String.join("", listener.tokens)).contains("could not find");
+        assertThat(String.join("", listener.tokens)).contains("don't have enough information");
         assertThat(listener.completed).isNotNull();
         verifyNoInteractions(llmGateway);
     }

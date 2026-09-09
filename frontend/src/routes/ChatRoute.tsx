@@ -6,11 +6,11 @@ import { useChat } from '../context/ChatContext'
 import { useChatPreferences, useEffectiveDisplayPreferences } from '../hooks/usePreferences'
 import { useDocumentTitle } from '../hooks/useDocumentTitle'
 import { useEventCallback } from '../hooks/useEventCallback'
+import { useSuggestions } from '../hooks/useSuggestions'
 import {
   clearPendingChatPreferences, readPendingChatPreferences, readSpaceFilter, writePendingChatPreferences,
   writeSpaceFilter,
 } from '../hooks/usePersistentState'
-import { displayNameFromEmail } from '../lib/displayName'
 import type { ChatPreferences } from '../types'
 import Button from '../components/ui/Button'
 import EmptyState from '../components/ui/EmptyState'
@@ -50,6 +50,8 @@ export default function ChatRoute() {
     () => (chatId ? readPendingChatPreferences<ChatPreferences>(chatId) ?? {} : {}),
   )
 
+  const { suggestions } = useSuggestions(spaceKey)
+
   const messages = chat.messagesFor(chatId)
   const session = chat.sessionFor(chatId)
   const isDraft = chat.isDraft(chatId)
@@ -76,7 +78,9 @@ export default function ChatRoute() {
   const chatPreferences = useChatPreferences(hasPendingToFlush ? chatId : null)
   const flushPendingPreferences = useEventCallback(chatPreferences.save)
 
-  useDocumentTitle(session?.title ?? (messages.length > 0 ? 'Conversation' : 'New chat'))
+  // The bare welcome screen (`/chat`, nothing started yet) shows just the app name; once a
+  // conversation exists it takes over the tab, first with a placeholder and then its own title.
+  useDocumentTitle(isWelcome ? null : (session?.title ?? (messages.length > 0 ? 'Conversation' : 'New chat')))
 
   // Depends on the conversation, not on the whole context: the context value changes on every
   // streamed token, and taking it as a dependency re-runs this on each one.
@@ -226,7 +230,7 @@ export default function ChatRoute() {
             />
           </div>
         ) : (
-          <WelcomeGreeting name={displayNameFromEmail(user?.email)} />
+          <WelcomeGreeting name={user?.name ?? ''} />
         )}
       </ErrorBoundary>
 
@@ -257,7 +261,9 @@ export default function ChatRoute() {
         reader had switched away and back: React mismatched which committed DOM node belonged to
         which of the two identically-keyed elements, so removing the greeting outlived its own key.
       */}
-      {showWelcome && <WelcomeSuggestions key={`welcome-${chatId}`} onSelect={ask} />}
+      {showWelcome && (
+        <WelcomeSuggestions key={`welcome-${chatId}`} suggestions={suggestions} onSelect={ask} />
+      )}
 
       {showPreferences && (
         isSaved ? (

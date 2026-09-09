@@ -1,6 +1,8 @@
 package com.kssasarma.confluencebot.auth;
 
+import com.kssasarma.confluencebot.email.EmailService;
 import com.kssasarma.confluencebot.user.AuthProvider;
+import com.kssasarma.confluencebot.user.PasswordResetOtpRepository;
 import com.kssasarma.confluencebot.user.RefreshTokenRepository;
 import com.kssasarma.confluencebot.user.User;
 import com.kssasarma.confluencebot.user.UserRepository;
@@ -16,6 +18,7 @@ import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
+import java.time.Duration;
 import java.util.Optional;
 import java.util.Set;
 
@@ -42,6 +45,8 @@ class AuthServiceImplPasswordlessTest {
     @Mock private AuthenticationManager authenticationManager;
     @Mock private UserRepository userRepository;
     @Mock private RefreshTokenRepository refreshTokenRepository;
+    @Mock private PasswordResetOtpRepository otpRepository;
+    @Mock private EmailService emailService;
     @Mock private TokenIssuer tokenIssuer;
 
     private final PasswordEncoder passwordEncoder = new BCryptPasswordEncoder(4);
@@ -50,7 +55,7 @@ class AuthServiceImplPasswordlessTest {
     @BeforeEach
     void setUp() {
         service = new AuthServiceImpl(authenticationManager, userRepository, refreshTokenRepository,
-                passwordEncoder, tokenIssuer);
+                otpRepository, emailService, passwordEncoder, tokenIssuer, Duration.ofMinutes(10));
     }
 
     @Test

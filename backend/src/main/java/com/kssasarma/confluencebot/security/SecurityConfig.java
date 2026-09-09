@@ -1,9 +1,13 @@
 package com.kssasarma.confluencebot.security;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ProblemDetail;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.AuthenticationProvider;
 import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
@@ -23,6 +27,7 @@ import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
+import java.net.URI;
 import java.util.List;
 
 @Configuration
@@ -33,12 +38,14 @@ public class SecurityConfig {
     private final JwtAuthenticationFilter jwtFilter;
     private final UserDetailsService userDetailsService;
     private final WebConfig corsProperties;
+    private final ObjectMapper objectMapper;
 
     public SecurityConfig(JwtAuthenticationFilter jwtFilter, UserDetailsService userDetailsService,
-                          WebConfig corsProperties) {
+                          WebConfig corsProperties, ObjectMapper objectMapper) {
         this.jwtFilter = jwtFilter;
         this.userDetailsService = userDetailsService;
         this.corsProperties = corsProperties;
+        this.objectMapper = objectMapper;
     }
 
     /**
@@ -57,11 +64,22 @@ public class SecurityConfig {
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
+                        // Only the flows a signed-out visitor can actually reach: signing in,
+                        // rotating a refresh token, revoking one on the way out, and resetting a
+                        // forgotten password by OTP. Everything else under /api/auth/** — /me,
+                        // /change-password, /name — needs a signed-in principal, and used to be
+                        // swept into this same permitAll: a missing or expired bearer token still
+                        // reached those controller methods with a null @AuthenticationPrincipal
+                        // instead of being stopped here with a clean 401.
                         .requestMatchers(
-                                // Includes /api/auth/sso, which a signed-out visitor asks whether
-                                // there is a directory to sign in through, and /api/auth/sso/
-                                // exchange, which redeems the code the directory sent them back with.
-                                "/api/auth/**",
+                                "/api/auth/login",
+                                "/api/auth/refresh",
+                                "/api/auth/logout",
+                                "/api/auth/forgot-password/**",
+                                // A signed-out visitor asks whether there is a directory to sign in
+                                // through, and redeems the code the directory sent them back with.
+                                "/api/auth/sso",
+                                "/api/auth/sso/exchange",
                                 "/actuator/health",
                                 "/v3/api-docs/**",
                                 "/swagger-ui/**",
@@ -73,6 +91,18 @@ public class SecurityConfig {
                         .requestMatchers("/api/admin/**").hasAnyRole("ADMIN", "ADMIN_READ_ONLY")
                         .anyRequest().authenticated()
                 )
+                // Without this, a request with no (or an expired) bearer token that reaches an
+                // authenticated endpoint gets the servlet container's default error page instead
+                // of the same ProblemDetail JSON every other error on this API returns.
+                .exceptionHandling(ex -> ex.authenticationEntryPoint((request, response, authException) -> {
+                    response.setStatus(HttpStatus.UNAUTHORIZED.value());
+                    response.setContentType(MediaType.APPLICATION_PROBLEM_JSON_VALUE);
+                    ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.UNAUTHORIZED);
+                    problem.setTitle("Authentication Failed");
+                    problem.setType(URI.create("urn:confluencebot:error:authentication"));
+                    problem.setDetail("A valid access token is required to access this resource.");
+                    objectMapper.writeValue(response.getWriter(), problem);
+                }))
                 .authenticationProvider(authenticationProvider())
                 .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)
                 .build();

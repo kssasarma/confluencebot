@@ -1,14 +1,15 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Ban, Check, Mail, Trash2, UserPlus } from 'lucide-react'
+import { Ban, Check, Mail, Pencil, Trash2, UserPlus } from 'lucide-react'
 import {
-  createUser, deleteUser, listUsers, resendWelcome, setUserEnabled, setUserRoles,
+  createUser, deleteUser, listUsers, resendWelcome, setUserBusinessUnit, setUserEnabled, setUserRoles,
   type AdminRole, type AdminUser,
 } from '../../services/adminService'
 import { useAuth } from '../../context/AuthContext'
 import { queryKeys } from '../../services/queryKeys'
 import { toMessage } from '../../lib/errors'
 import { toggleRole } from '../../lib/roles'
+import { useDismiss } from '../../hooks/useDismiss'
 import { useConfirm } from '../ui/ConfirmDialog'
 import { useToast } from '../ui/Toast'
 import { cn } from '../../lib/cn'
@@ -17,6 +18,7 @@ import Button from '../ui/Button'
 import EmptyState from '../ui/EmptyState'
 import IconButton from '../ui/IconButton'
 import Input from '../ui/Input'
+import Tooltip from '../ui/Tooltip'
 import { SkeletonText } from '../ui/Skeleton'
 
 const ROLE_LABELS: Record<AdminRole, string> = {
@@ -27,6 +29,9 @@ const ROLE_LABELS: Record<AdminRole, string> = {
 }
 
 const ROLES = Object.keys(ROLE_LABELS) as AdminRole[]
+
+/** An icon button that stays hidden until its row (or the button itself) is hovered or focused. */
+const REVEAL_ON_HOVER = 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'
 
 /** A row of pills toggling membership in `selected`. Used for both creating and re-assigning. */
 function RoleToggleGroup({
@@ -65,6 +70,17 @@ function RoleToggleGroup({
   )
 }
 
+/** Compact role display: one badge, with the full list on hover/focus once there's more than one. */
+function RoleSummary({ roles }: { roles: AdminRole[] }) {
+  const labels = roles.map(role => ROLE_LABELS[role] ?? role)
+  const badge = (
+    <Badge tone={roles[0] === 'USER' ? 'info' : 'accent'}>
+      {labels[0]}{labels.length > 1 && ` +${labels.length - 1}`}
+    </Badge>
+  )
+  return labels.length > 1 ? <Tooltip content={labels.join(', ')}>{badge}</Tooltip> : badge
+}
+
 interface WelcomeEmailResult {
   action: 'created' | 'resent'
   email: string
@@ -72,46 +88,47 @@ interface WelcomeEmailResult {
   emailSent: boolean
 }
 
-/** User management: the "Admin" section of the unified Settings dialog. */
-export default function AdminUsersPanel() {
+function statusBadge(user: AdminUser) {
+  if (!user.enabled) return <Badge tone="danger">Disabled</Badge>
+  if (user.mustChangePassword) return <Badge tone="warning">Pending setup</Badge>
+  return <Badge tone="success">Active</Badge>
+}
+
+interface UserRowProps {
+  user: AdminUser
+  onWelcomeEmail: (result: WelcomeEmailResult) => void
+}
+
+/** One row of the user table, including its own floating editors for roles and business unit. */
+function UserRow({ user, onWelcomeEmail }: UserRowProps) {
   const queryClient = useQueryClient()
   const toast = useToast()
   const confirm = useConfirm()
   const { isAdmin, user: signedIn } = useAuth()
+  const isSelf = signedIn?.email === user.email
 
-  const [email, setEmail] = useState('')
-  const [roles, setRoles] = useState<AdminRole[]>(['USER'])
-  const [welcomeResult, setWelcomeResult] = useState<WelcomeEmailResult | null>(null)
+  const [rolesOpen, setRolesOpen] = useState(false)
+  const [buOpen, setBuOpen] = useState(false)
+  const [buDraft, setBuDraft] = useState(user.businessUnit ?? '')
 
-  const users = useQuery({ queryKey: queryKeys.adminUsers, queryFn: listUsers })
-
-  const create = useMutation({
-    mutationFn: () => createUser(email.trim(), roles),
-    onSuccess: result => {
-      setWelcomeResult({
-        action: 'created', email: result.user.email,
-        tempPassword: result.tempPassword, emailSent: result.emailSent,
-      })
-      setEmail('')
-      setRoles(['USER'])
-      void queryClient.invalidateQueries({ queryKey: queryKeys.adminUsers })
-    },
-    onError: error => toast.error('Could not create the user', toMessage(error, 'Please try again.')),
-  })
+  const rolesRef = useRef<HTMLDivElement>(null)
+  const buRef = useRef<HTMLDivElement>(null)
+  useDismiss(rolesRef, () => setRolesOpen(false), rolesOpen)
+  useDismiss(buRef, () => setBuOpen(false), buOpen)
 
   const applyUser = (updated: AdminUser) => {
     queryClient.setQueryData<AdminUser[]>(queryKeys.adminUsers, current =>
-      current?.map(user => (user.id === updated.id ? updated : user)))
+      current?.map(u => (u.id === updated.id ? updated : u)))
   }
 
   const toggle = useMutation({
-    mutationFn: (user: AdminUser) => setUserEnabled(user.id, !user.enabled),
+    mutationFn: () => setUserEnabled(user.id, !user.enabled),
     onSuccess: applyUser,
     onError: error => toast.error('Could not update the user', toMessage(error, 'Please try again.')),
   })
 
   const changeRoles = useMutation({
-    mutationFn: ({ user, next }: { user: AdminUser; next: AdminRole[] }) => setUserRoles(user.id, next),
+    mutationFn: (next: AdminRole[]) => setUserRoles(user.id, next),
     onSuccess: updated => {
       applyUser(updated)
       toast.success('Roles updated', `${updated.email} is now ${updated.roles.map(r => ROLE_LABELS[r]).join(', ')}.`)
@@ -119,11 +136,20 @@ export default function AdminUsersPanel() {
     onError: error => toast.error('Could not change the roles', toMessage(error, 'Please try again.')),
   })
 
+  const changeBusinessUnit = useMutation({
+    mutationFn: (next: string) => setUserBusinessUnit(user.id, next),
+    onSuccess: updated => {
+      applyUser(updated)
+      setBuOpen(false)
+    },
+    onError: error => toast.error('Could not update the business unit', toMessage(error, 'Please try again.')),
+  })
+
   const resend = useMutation({
-    mutationFn: (user: AdminUser) => resendWelcome(user.id),
-    onSuccess: (result, user) => {
+    mutationFn: () => resendWelcome(user.id),
+    onSuccess: result => {
       applyUser(result.user)
-      setWelcomeResult({
+      onWelcomeEmail({
         action: 'resent', email: user.email,
         tempPassword: result.tempPassword, emailSent: result.emailSent,
       })
@@ -132,8 +158,8 @@ export default function AdminUsersPanel() {
   })
 
   const remove = useMutation({
-    mutationFn: (user: AdminUser) => deleteUser(user.id),
-    onSuccess: (_result, user) => {
+    mutationFn: () => deleteUser(user.id),
+    onSuccess: () => {
       queryClient.setQueryData<AdminUser[]>(queryKeys.adminUsers, current =>
         current?.filter(u => u.id !== user.id))
       toast.success('User deleted', `${user.email} and everything scoped to their account is gone.`)
@@ -141,24 +167,177 @@ export default function AdminUsersPanel() {
     onError: error => toast.error('Could not delete the user', toMessage(error, 'Please try again.')),
   })
 
-  async function handleResend(user: AdminUser) {
+  function openBuEditor() {
+    setBuDraft(user.businessUnit ?? '')
+    setBuOpen(open => !open)
+  }
+
+  async function handleResend() {
     const confirmed = await confirm({
       title: `Resend welcome email to ${user.email}?`,
       description: 'This issues a brand new temporary password — the old one, if any, stops working.',
       confirmLabel: 'Resend',
     })
-    if (confirmed) resend.mutate(user)
+    if (confirmed) resend.mutate()
   }
 
-  async function handleDelete(user: AdminUser) {
+  async function handleDelete() {
     const confirmed = await confirm({
       title: `Delete ${user.email}?`,
       description: 'This permanently deletes the account and every chat, session and preference tied to it. This cannot be undone.',
       confirmLabel: 'Delete',
       tone: 'danger',
     })
-    if (confirmed) remove.mutate(user)
+    if (confirmed) remove.mutate()
   }
+
+  return (
+    <tr className="group text-foreground">
+      <td className="py-2 pr-4 font-mono text-2xs">{user.email}</td>
+      <td className="py-2 pr-4 text-2xs text-muted-foreground">{user.name ?? '—'}</td>
+      <td className="py-2 pr-4">
+        <div ref={buRef} className="relative inline-block">
+          <div className="flex items-center gap-1">
+            <span className="text-2xs text-muted-foreground">{user.businessUnit ?? '—'}</span>
+            {isAdmin && (
+              <IconButton
+                size="sm"
+                active={buOpen}
+                label={buOpen ? `Close business unit editor for ${user.email}` : `Edit business unit for ${user.email}`}
+                icon={<Pencil size={12} />}
+                onClick={openBuEditor}
+                disabled={changeBusinessUnit.isPending}
+                className={buOpen ? undefined : REVEAL_ON_HOVER}
+              />
+            )}
+          </div>
+          {buOpen && (
+            <form
+              className="absolute left-0 top-full z-dropdown mt-1.5 flex w-56 items-center gap-1.5 rounded-xl border border-border bg-surface p-2 shadow-overlay"
+              onSubmit={event => {
+                event.preventDefault()
+                changeBusinessUnit.mutate(buDraft.trim())
+              }}
+            >
+              <Input
+                aria-label={`Business unit for ${user.email}`}
+                autoFocus
+                value={buDraft}
+                onChange={event => setBuDraft(event.target.value)}
+                placeholder="e.g. Engineering"
+              />
+              <Button type="submit" size="sm" loading={changeBusinessUnit.isPending}>
+                Save
+              </Button>
+            </form>
+          )}
+        </div>
+      </td>
+      <td className="py-2 pr-4">
+        <div ref={rolesRef} className="relative inline-block">
+          <div className="flex items-center gap-1">
+            <RoleSummary roles={user.roles} />
+            {/* Your own row has no editor: the request that strips your own admin is the last
+                one you are allowed to make, so the API refuses it and so does this. */}
+            {isAdmin && !isSelf && (
+              <IconButton
+                size="sm"
+                active={rolesOpen}
+                label={rolesOpen ? `Close role editor for ${user.email}` : `Edit roles for ${user.email}`}
+                icon={<Pencil size={12} />}
+                onClick={() => setRolesOpen(open => !open)}
+                disabled={changeRoles.isPending}
+                className={rolesOpen ? undefined : REVEAL_ON_HOVER}
+              />
+            )}
+          </div>
+          {rolesOpen && (
+            <div className="absolute left-0 top-full z-dropdown mt-1.5 w-max rounded-xl border border-border bg-surface p-2 shadow-overlay">
+              <RoleToggleGroup
+                selected={user.roles}
+                disabled={changeRoles.isPending}
+                onToggle={role => {
+                  const next = toggleRole(user.roles, role)
+                  if (next !== user.roles) changeRoles.mutate(next)
+                }}
+              />
+            </div>
+          )}
+        </div>
+      </td>
+      <td className="py-2 pr-4 text-2xs text-muted-foreground">
+        {/* Worth a column of its own: a directory account has no password here, so there is
+            nothing to reset and nothing to hand somebody who is locked out. */}
+        {user.ssoLinked
+          ? (user.authProvider === 'SSO' ? 'Directory' : 'Password or directory')
+          : 'Password'}
+      </td>
+      <td className="py-2 pr-4">{statusBadge(user)}</td>
+      <td className="py-2 text-right">
+        <div className="flex justify-end gap-1">
+          {isAdmin && user.mustChangePassword && (
+            <IconButton
+              size="sm"
+              label={`Resend welcome email to ${user.email}`}
+              icon={<Mail size={14} />}
+              onClick={handleResend}
+              disabled={resend.isPending}
+              className={REVEAL_ON_HOVER}
+            />
+          )}
+          {isAdmin && !isSelf && (
+            <>
+              <IconButton
+                size="sm"
+                label={user.enabled ? `Disable ${user.email}` : `Enable ${user.email}`}
+                icon={user.enabled ? <Ban size={14} /> : <Check size={14} />}
+                onClick={() => toggle.mutate()}
+                disabled={toggle.isPending}
+                className={REVEAL_ON_HOVER}
+              />
+              <IconButton
+                size="sm"
+                variant="danger"
+                label={`Delete ${user.email}`}
+                icon={<Trash2 size={14} />}
+                onClick={handleDelete}
+                disabled={remove.isPending}
+                className={REVEAL_ON_HOVER}
+              />
+            </>
+          )}
+        </div>
+      </td>
+    </tr>
+  )
+}
+
+/** User management: the "Admin" section of the unified Settings dialog. */
+export default function AdminUsersPanel() {
+  const queryClient = useQueryClient()
+  const toast = useToast()
+
+  const [email, setEmail] = useState('')
+  const [roles, setRoles] = useState<AdminRole[]>(['USER'])
+  const [businessUnit, setBusinessUnit] = useState('')
+  const [welcomeResult, setWelcomeResult] = useState<WelcomeEmailResult | null>(null)
+
+  const users = useQuery({ queryKey: queryKeys.adminUsers, queryFn: listUsers })
+
+  const create = useMutation({
+    mutationFn: () => createUser(email.trim(), roles, undefined, businessUnit.trim() || undefined),
+    onSuccess: result => {
+      setWelcomeResult({
+        action: 'created', email: result.user.email,
+        tempPassword: result.tempPassword, emailSent: result.emailSent,
+      })
+      setEmail('')
+      setRoles(['USER'])
+      setBusinessUnit('')
+      void queryClient.invalidateQueries({ queryKey: queryKeys.adminUsers })
+    },
+    onError: error => toast.error('Could not create the user', toMessage(error, 'Please try again.')),
+  })
 
   return (
     <div className="space-y-6">
@@ -216,6 +395,15 @@ export default function AdminUsersPanel() {
           <RoleToggleGroup selected={roles} onToggle={role => setRoles(current => toggleRole(current, role))} />
         </div>
 
+        <div className="min-w-[10rem]">
+          <Input
+            label="Business unit"
+            value={businessUnit}
+            onChange={event => setBusinessUnit(event.target.value)}
+            placeholder="Optional"
+          />
+        </div>
+
         <Button type="submit" loading={create.isPending} disabled={!email.trim()}>
           <UserPlus size={15} aria-hidden="true" />
           Add user
@@ -239,89 +427,16 @@ export default function AdminUsersPanel() {
               <tr className="border-b border-border text-left">
                 <th scope="col" className="pb-2 font-medium text-muted-foreground">Email</th>
                 <th scope="col" className="pb-2 font-medium text-muted-foreground">Name</th>
+                <th scope="col" className="pb-2 font-medium text-muted-foreground">Business unit</th>
                 <th scope="col" className="pb-2 font-medium text-muted-foreground">Roles</th>
                 <th scope="col" className="pb-2 font-medium text-muted-foreground">Sign-in</th>
                 <th scope="col" className="pb-2 font-medium text-muted-foreground">Status</th>
-                <th scope="col" className="pb-2 font-medium text-muted-foreground">Must change password</th>
                 <th scope="col" className="pb-2"><span className="sr-only">Actions</span></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
               {users.data?.map(user => (
-                <tr key={user.id} className="text-foreground">
-                  <td className="py-2.5 pr-4 font-mono text-2xs">{user.email}</td>
-                  <td className="py-2.5 pr-4 text-2xs text-muted-foreground">{user.name ?? '—'}</td>
-                  <td className="py-2.5 pr-4">
-                    {isAdmin && signedIn?.email !== user.email ? (
-                      <RoleToggleGroup
-                        selected={user.roles}
-                        disabled={changeRoles.isPending}
-                        onToggle={role => {
-                          const next = toggleRole(user.roles, role)
-                          if (next !== user.roles) changeRoles.mutate({ user, next })
-                        }}
-                      />
-                    ) : (
-                      // Your own row stays a set of labels: the request that strips your own admin
-                      // is the last one you are allowed to make, so the API refuses it and so does
-                      // this.
-                      <div className="flex flex-wrap gap-1">
-                        {user.roles.map(userRole => (
-                          <Badge key={userRole} tone={userRole === 'USER' ? 'info' : 'accent'}>
-                            {ROLE_LABELS[userRole] ?? userRole}
-                          </Badge>
-                        ))}
-                      </div>
-                    )}
-                  </td>
-                  <td className="py-2.5 pr-4 text-2xs text-muted-foreground">
-                    {/* Worth a column of its own: a directory account has no password here, so
-                        there is nothing to reset and nothing to hand somebody who is locked out. */}
-                    {user.ssoLinked
-                      ? (user.authProvider === 'SSO' ? 'Directory' : 'Password or directory')
-                      : 'Password'}
-                  </td>
-                  <td className="py-2.5 pr-4">
-                    <Badge tone={user.enabled ? 'success' : 'danger'}>
-                      {user.enabled ? 'Active' : 'Disabled'}
-                    </Badge>
-                  </td>
-                  <td className="py-2.5 pr-4 text-2xs text-muted-foreground">
-                    {user.mustChangePassword ? 'Yes' : 'No'}
-                  </td>
-                  <td className="py-2.5 text-right">
-                    <div className="flex justify-end gap-1">
-                      {isAdmin && user.mustChangePassword && (
-                        <IconButton
-                          size="sm"
-                          label={`Resend welcome email to ${user.email}`}
-                          icon={<Mail size={14} />}
-                          onClick={() => handleResend(user)}
-                          disabled={resend.isPending}
-                        />
-                      )}
-                      {isAdmin && signedIn?.email !== user.email && (
-                        <>
-                          <IconButton
-                            size="sm"
-                            label={user.enabled ? `Disable ${user.email}` : `Enable ${user.email}`}
-                            icon={user.enabled ? <Ban size={14} /> : <Check size={14} />}
-                            onClick={() => toggle.mutate(user)}
-                            disabled={toggle.isPending}
-                          />
-                          <IconButton
-                            size="sm"
-                            variant="danger"
-                            label={`Delete ${user.email}`}
-                            icon={<Trash2 size={14} />}
-                            onClick={() => handleDelete(user)}
-                            disabled={remove.isPending}
-                          />
-                        </>
-                      )}
-                    </div>
-                  </td>
-                </tr>
+                <UserRow key={user.id} user={user} onWelcomeEmail={setWelcomeResult} />
               ))}
             </tbody>
           </table>

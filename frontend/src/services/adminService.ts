@@ -20,12 +20,34 @@ export interface AdminUser {
   enabled: boolean
   mustChangePassword: boolean
   createdAt: string
+  /** Set by an admin, typically at onboarding. Reporting only. */
+  businessUnit: string | null
   /** Where the account came from. An SSO account has no password here to reset. */
   authProvider: 'LOCAL' | 'SSO'
   /** Which identity provider it is linked to, or null if none. */
   ssoProviderId: string | null
   /** True once the account can sign in through a directory, however it was created. */
   ssoLinked: boolean
+}
+
+export interface OnboardingStats {
+  totalUsers: number
+  usersByRole: Array<{ role: string; count: number }>
+  createdLast30Days: number
+  resentLast30Days: number
+  deletedLast30Days: number
+  emailDeliveryFailuresLast30Days: number
+}
+
+export interface UsageStats {
+  totalQuestions: number
+  topUsers: Array<{ email: string; name: string | null; questionCount: number }>
+  byBusinessUnit: Array<{ businessUnit: string; questionCount: number }>
+}
+
+export interface AdminAnalytics {
+  onboarding: OnboardingStats
+  usage: UsageStats
 }
 
 export interface CreateUserResult {
@@ -63,16 +85,26 @@ export interface IngestionJob {
   errorMessage: string | null
 }
 
+export interface IngestionJobPage {
+  jobs: IngestionJob[]
+  page: number
+  size: number
+  totalElements: number
+  totalPages: number
+  hasNext: boolean
+}
+
 export const listUsers = (): Promise<AdminUser[]> => apiJson<AdminUser[]>('/admin/users')
 
 export const createUser = (
   email: string,
   roles: AdminRole[],
   tempPassword?: string,
+  businessUnit?: string,
 ): Promise<CreateUserResult> =>
   apiJson<CreateUserResult>('/admin/users', {
     method: 'POST',
-    ...jsonBody({ email, roles, tempPassword }),
+    ...jsonBody({ email, roles, tempPassword, businessUnit }),
   })
 
 export const setUserEnabled = (id: number, enabled: boolean): Promise<AdminUser> =>
@@ -80,6 +112,10 @@ export const setUserEnabled = (id: number, enabled: boolean): Promise<AdminUser>
 
 export const setUserRoles = (id: number, roles: AdminRole[]): Promise<AdminUser> =>
   apiJson<AdminUser>(`/admin/users/${id}/roles`, { method: 'PATCH', ...jsonBody({ roles }) })
+
+/** Reporting only. An empty string clears it. */
+export const setUserBusinessUnit = (id: number, businessUnit: string): Promise<AdminUser> =>
+  apiJson<AdminUser>(`/admin/users/${id}/business-unit`, { method: 'PATCH', ...jsonBody({ businessUnit }) })
 
 /** Cascades: every chat, session and preference scoped to this user goes with it. */
 export const deleteUser = (id: number): Promise<void> =>
@@ -91,13 +127,19 @@ export const resendWelcome = (id: number): Promise<CreateUserResult> =>
 
 export const listAuditEvents = (): Promise<AdminUserEvent[]> => apiJson<AdminUserEvent[]>('/admin/audit')
 
+/** Onboarding and usage analytics. Admin-only — the endpoint 403s for anyone else. */
+export const getAnalytics = (): Promise<AdminAnalytics> => apiJson<AdminAnalytics>('/admin/analytics')
+
 export const ingestSpace = (spaceKey: string, force = false): Promise<IngestionJob> =>
   apiJson<IngestionJob>('/ingest/space', { method: 'POST', ...jsonBody({ spaceKey, force }) })
 
 export const ingestPage = (pageId: string): Promise<IngestionJob> =>
   apiJson<IngestionJob>(`/ingest/page/${pageId}`, { method: 'POST' })
 
-export const listJobs = (): Promise<IngestionJob[]> => apiJson<IngestionJob[]>('/ingest/jobs')
+export const JOB_HISTORY_PAGE_SIZE = 5
+
+export const listJobs = (page = 0, size = JOB_HISTORY_PAGE_SIZE): Promise<IngestionJobPage> =>
+  apiJson<IngestionJobPage>(`/ingest/jobs?page=${page}&size=${size}`)
 
 export const getJob = (jobId: string): Promise<IngestionJob> =>
   apiJson<IngestionJob>(`/ingest/jobs/${jobId}`)
