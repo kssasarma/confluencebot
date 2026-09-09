@@ -8,6 +8,7 @@ import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
 @Tag(name = "Authentication", description = "Sign-in, token rotation and password management")
 @RestController
@@ -54,7 +55,11 @@ public class AuthController {
                     + "to send the browser. The password form is offered either way.")
     @GetMapping("/sso")
     public SsoStatusResponse sso() {
-        return ssoService.describe();
+        // The browser calls this endpoint on the backend's own origin directly — no reverse proxy
+        // sits in front of both services — so the current request's context path is exactly the
+        // origin the "Continue with ..." button must navigate to.
+        String baseUrl = ServletUriComponentsBuilder.fromCurrentContextPath().build().toUriString();
+        return ssoService.describe(baseUrl);
     }
 
     @Operation(summary = "Redeem the one-time code from a completed single sign-on",

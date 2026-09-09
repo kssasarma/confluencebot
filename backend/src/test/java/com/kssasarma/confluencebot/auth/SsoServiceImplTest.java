@@ -63,7 +63,7 @@ class SsoServiceImplTest {
         SsoServiceImpl disabled = new SsoServiceImpl(
                 SsoPropertiesFixture.aProvider().enabled(false).build(), loginCodeRepository, tokenIssuer);
 
-        SsoStatusResponse status = disabled.describe();
+        SsoStatusResponse status = disabled.describe("https://bot.example.com");
 
         assertThat(status.enabled()).isFalse();
         // Not even the provider's name: a signed-out visitor has not earned a description of the
@@ -76,14 +76,26 @@ class SsoServiceImplTest {
 
     @Test
     void anEnabledDeploymentAdvertisesTheNameAndWhereToStart() {
-        SsoStatusResponse status = service.describe();
+        SsoStatusResponse status = service.describe("https://bot.example.com");
 
         assertThat(status.enabled()).isTrue();
         assertThat(status.providerId()).isEqualTo("otds");
         assertThat(status.providerName()).isEqualTo("OpenText");
-        assertThat(status.authorizationUrl()).isEqualTo("/api/oauth2/authorization/otds");
+        assertThat(status.authorizationUrl())
+                .isEqualTo("https://bot.example.com/api/oauth2/authorization/otds");
         assertThat(status.logoutUrl()).isNull();
         assertThat(status.enforced()).isFalse();
+    }
+
+    @Test
+    void theStartUrlIsAbsoluteRegardlessOfWhereTheFrontendIsServedFrom() {
+        // No reverse proxy shares an origin between this service and the UI any more, so a
+        // path-only URL would resolve against the wrong host entirely when the browser navigates
+        // to it. The base URL passed in is what makes the answer absolute.
+        SsoStatusResponse status = service.describe("https://api.example.com/confluencebot-backend");
+
+        assertThat(status.authorizationUrl())
+                .isEqualTo("https://api.example.com/confluencebot-backend/api/oauth2/authorization/otds");
     }
 
     @Test
@@ -91,7 +103,7 @@ class SsoServiceImplTest {
         SsoServiceImpl enforced = new SsoServiceImpl(
                 SsoPropertiesFixture.aProvider().enforced(true).build(), loginCodeRepository, tokenIssuer);
 
-        assertThat(enforced.describe().enforced()).isTrue();
+        assertThat(enforced.describe("https://bot.example.com").enforced()).isTrue();
     }
 
     @Test
@@ -102,7 +114,7 @@ class SsoServiceImplTest {
                 SsoPropertiesFixture.aProvider().enabled(false).enforced(true).build(),
                 loginCodeRepository, tokenIssuer);
 
-        assertThat(disabled.describe().enforced()).isFalse();
+        assertThat(disabled.describe("https://bot.example.com").enforced()).isFalse();
     }
 
     @Test
@@ -111,8 +123,9 @@ class SsoServiceImplTest {
                 SsoPropertiesFixture.aProvider().providerId("entra").providerName("Microsoft").build(),
                 loginCodeRepository, tokenIssuer);
 
-        assertThat(entra.describe().authorizationUrl()).isEqualTo("/api/oauth2/authorization/entra");
-        assertThat(entra.describe().providerId()).isEqualTo("entra");
+        assertThat(entra.describe("https://bot.example.com").authorizationUrl())
+                .isEqualTo("https://bot.example.com/api/oauth2/authorization/entra");
+        assertThat(entra.describe("https://bot.example.com").providerId()).isEqualTo("entra");
     }
 
     @Test
@@ -121,7 +134,8 @@ class SsoServiceImplTest {
                 SsoPropertiesFixture.aProvider().logoutUri("https://idp.example.com/logout").build(),
                 loginCodeRepository, tokenIssuer);
 
-        assertThat(withLogout.describe().logoutUrl()).isEqualTo("https://idp.example.com/logout");
+        assertThat(withLogout.describe("https://bot.example.com").logoutUrl())
+                .isEqualTo("https://idp.example.com/logout");
     }
 
     @Test
