@@ -13,6 +13,8 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * Turns a verified directory identity into the local account the rest of the application works
@@ -59,6 +61,16 @@ public class SsoUserProvisioner {
         User user = userRepository.findBySsoProviderIdAndExternalId(providerId, subject)
                 .map(existing -> reconcile(existing, email))
                 .orElseGet(() -> linkOrCreate(providerId, subject, email));
+
+        // The directory's answer to "what is this person called" is authoritative, on every
+        // sign-in — not just the first. A name the person typed here before, or one the directory
+        // used to report, is overwritten rather than treated as a default only a blank field falls
+        // back to. Silent when the directory has nothing to say, so a provider without this claim
+        // does not blank out a name however it got there.
+        String name = nameOf(principal);
+        if (name != null) {
+            user.setName(name);
+        }
 
         if (!user.isEnabled()) {
             // The directory let them in; this application has not. Said plainly rather than as a
@@ -174,6 +186,20 @@ public class SsoUserProvisioner {
                         + String.join(", ", properties.emailClaims())
                         + "). Release one of those claims to this client, or point "
                         + "app.sso.email-claims at the one it does release.");
+    }
+
+    /** The claim named by {@code app.sso.name-attribute}, or given/family name combined. */
+    private String nameOf(OAuth2User principal) {
+        String name = asText(principal.getAttribute(properties.nameAttribute()));
+        if (!isBlank(name)) {
+            return name.trim();
+        }
+        String combined = Stream.of(
+                        asText(principal.getAttribute("given_name")),
+                        asText(principal.getAttribute("family_name")))
+                .filter(part -> !isBlank(part))
+                .collect(Collectors.joining(" "));
+        return isBlank(combined) ? null : combined;
     }
 
     private static String asText(Object value) {

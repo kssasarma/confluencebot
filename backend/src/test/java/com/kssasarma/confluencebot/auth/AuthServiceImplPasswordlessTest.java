@@ -81,6 +81,48 @@ class AuthServiceImplPasswordlessTest {
     }
 
     @Test
+    void changingThePasswordOfARegularAccountThatKeptItsPasswordAfterLinkingSsoSaysWhyItCannotBeDone() {
+        // The password survives linking so an admin has a break-glass path — but for a regular
+        // account it is no longer a valid way in, so there is nothing here to change either.
+        User migrated = new User();
+        migrated.setEmail("jane@corp.example");
+        migrated.setRoles(Set.of(UserRole.USER));
+        migrated.setAuthProvider(AuthProvider.LOCAL);
+        migrated.setPassword("still-here-from-before-linking");
+        migrated.setSsoProviderId("otds");
+        migrated.setExternalId("subject-1");
+        when(userRepository.findById(any())).thenReturn(Optional.of(migrated));
+
+        assertThatThrownBy(() -> service.changePassword(migrated,
+                new ChangePasswordRequest("whatever", "NewPassword1")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("identity provider");
+
+        assertThat(migrated.getPassword()).isEqualTo("still-here-from-before-linking");
+        verify(refreshTokenRepository, never()).revokeAllByUserId(any());
+        verify(tokenIssuer, never()).issue(any());
+    }
+
+    @Test
+    void requestingAPasswordResetForAnSsoOnlyAccountReportsSuccessWithoutEmailingAnything() {
+        User migrated = new User();
+        migrated.setEmail("jane@corp.example");
+        migrated.setRoles(Set.of(UserRole.USER));
+        migrated.setPassword("still-here-from-before-linking");
+        migrated.setSsoProviderId("otds");
+        migrated.setExternalId("subject-1");
+        when(userRepository.findByEmail("jane@corp.example")).thenReturn(Optional.of(migrated));
+
+        boolean result = service.requestPasswordReset(new ForgotPasswordRequest("jane@corp.example"));
+
+        // Same silent "check your email" outcome as an unregistered address, on purpose: whether
+        // an account is SSO-only is not this endpoint's business to reveal either.
+        assertThat(result).isTrue();
+        verify(emailService, never()).sendPasswordResetOtp(any(), any(), org.mockito.ArgumentMatchers.anyInt());
+        verify(otpRepository, never()).save(any());
+    }
+
+    @Test
     void anAbsentHashIsUnmatchableRatherThanMatchedByAnything() {
         // This is what makes a password sign-in against a directory-only account fail as bad
         // credentials instead of succeeding: DaoAuthenticationProvider asks exactly this question.

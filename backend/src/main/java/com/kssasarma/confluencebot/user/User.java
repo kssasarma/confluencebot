@@ -123,6 +123,19 @@ public class User implements UserDetails {
     /** True when there is no password to change, verify or reset here. */
     public boolean hasNoLocalPassword() { return password == null || password.isBlank(); }
 
+    /**
+     * True once this account must sign in through SSO and password login is refused.
+     *
+     * <p>Once someone has signed in through the directory, they keep signing in that way — a
+     * password left over from before is not a second front door. The one exception is an admin
+     * who still holds a local password: that password stays a break-glass path around a
+     * directory outage, so it must not become the same thing as losing the only way into the
+     * admin screen.
+     */
+    public boolean isSsoOnly() {
+        return isSsoLinked() && !(hasRole(UserRole.ADMIN) && !hasNoLocalPassword());
+    }
+
     public void setEmail(String email) { this.email = email; }
     public void setPassword(String password) { this.password = password; }
     public void setName(String name) { this.name = name; }
