@@ -35,6 +35,7 @@ public final class SsoPropertiesFixture {
     private String loginSuccessUri = "/sso/callback";
     private String logoutUri = "";
     private Duration codeTtl = Duration.ofMinutes(1);
+    private String publicBaseUrl = "";
 
     public static SsoPropertiesFixture aProvider() {
         return new SsoPropertiesFixture();
@@ -68,11 +69,12 @@ public final class SsoPropertiesFixture {
     public SsoPropertiesFixture loginSuccessUri(String value) { this.loginSuccessUri = value; return this; }
     public SsoPropertiesFixture logoutUri(String value) { this.logoutUri = value; return this; }
     public SsoPropertiesFixture codeTtl(Duration value) { this.codeTtl = value; return this; }
+    public SsoPropertiesFixture publicBaseUrl(String value) { this.publicBaseUrl = value; return this; }
 
     public SsoProperties build() {
         return new SsoProperties(enabled, enforced, providerId, providerName, issuerUri, clientId,
                 clientSecret, scopes, redirectUri, clientAuthenticationMethod, authorizationUri,
                 tokenUri, userInfoUri, jwkSetUri, userNameAttribute, emailClaims, defaultRoles,
-                loginSuccessUri, logoutUri, codeTtl);
+                loginSuccessUri, logoutUri, codeTtl, publicBaseUrl);
     }
 }

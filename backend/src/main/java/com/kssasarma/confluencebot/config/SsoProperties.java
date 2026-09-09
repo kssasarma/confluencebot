@@ -139,7 +139,21 @@ public record SsoProperties(
 
         /** Lifetime of the one-time code handed to the UI after a successful sign-in. It is
          *  redeemed by the page it lands on, so seconds are plenty. */
-        @DefaultValue("PT1M") Duration codeTtl
+        @DefaultValue("PT1M") Duration codeTtl,
+
+        /**
+         * This service's own externally-reachable origin, pinned literally. Empty means "work it
+         * out from the request" — which only comes out right if every proxy between the browser
+         * and this service adds correct {@code X-Forwarded-Host}/{@code X-Forwarded-Proto}
+         * headers, the same way {@link #redirectUri} only resolves correctly off {@code {baseUrl}}
+         * under that condition. A proxy that forwards the request with its own upstream target as
+         * the {@code Host} header (rather than the original public one) breaks that derivation
+         * silently — the authorization URL comes out pointed at an address only reachable from
+         * inside the proxy's own network. Set this once and the derivation is never attempted:
+         * {@code https://api.bot.example.com} or, behind a path-prefixing proxy,
+         * {@code https://api.bot.example.com/confluencebot-backend}.
+         */
+        @DefaultValue("") String publicBaseUrl
 ) {
 
     /** Where the browser starts the handshake, relative to this service's own origin. The UI turns
