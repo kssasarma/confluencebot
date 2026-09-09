@@ -64,7 +64,7 @@ class SmtpEmailServiceTest {
     void sendWelcomeEmail_success_returnsTrueAndIncludesCredentials() throws Exception {
         stubMimeMessage();
         SmtpEmailService service =
-                new SmtpEmailService(mailSender, "noreply@example.com", "", "https://bot.example.com");
+                new SmtpEmailService(mailSender, "noreply@example.com", "", "https://bot.example.com", "Confluence Bot");
 
         boolean result = service.sendWelcomeEmail("new@example.com", "admin@example.com", "temp-pass-123");
 
@@ -79,10 +79,30 @@ class SmtpEmailServiceTest {
     }
 
     @Test
+    void sendWelcomeEmail_usesConfiguredAppNameThroughoutTheEmail() throws Exception {
+        stubMimeMessage();
+        SmtpEmailService service =
+                new SmtpEmailService(mailSender, "noreply@example.com", "", "https://bot.example.com", "Acme Bot");
+
+        service.sendWelcomeEmail("new@example.com", "admin@example.com", "temp-pass-123");
+
+        ArgumentCaptor<MimeMessage> captor = ArgumentCaptor.forClass(MimeMessage.class);
+        verify(mailSender).send(captor.capture());
+        MimeMessage sent = captor.getValue();
+        assertThat(sent.getSubject()).isEqualTo("Your Acme Bot account is ready");
+        assertThat(part(sent, "text/plain")).contains("An account has been created for you on Acme Bot.");
+        assertThat(part(sent, "text/html"))
+                .contains("Your Acme Bot account is ready")
+                .contains("An account has been created for you on Acme Bot.")
+                .contains("Sign in to Acme Bot")
+                .doesNotContain("Confluence Bot");
+    }
+
+    @Test
     void sendWelcomeEmail_withFromName_setsDisplayNameOnFromAddress() throws Exception {
         stubMimeMessage();
         SmtpEmailService service =
-                new SmtpEmailService(mailSender, "noreply@example.com", "Confluence Bot", "");
+                new SmtpEmailService(mailSender, "noreply@example.com", "Confluence Bot", "", "Confluence Bot");
 
         service.sendWelcomeEmail("new@example.com", "admin@example.com", "temp-pass-123");
 
@@ -94,7 +114,7 @@ class SmtpEmailServiceTest {
     @Test
     void sendWelcomeEmail_neverCcsTheOnboardingAdmin() throws Exception {
         stubMimeMessage();
-        SmtpEmailService service = new SmtpEmailService(mailSender, "noreply@example.com", "", "");
+        SmtpEmailService service = new SmtpEmailService(mailSender, "noreply@example.com", "", "", "Confluence Bot");
 
         service.sendWelcomeEmail("new@example.com", "admin@example.com", "temp-pass-123");
 
@@ -106,7 +126,7 @@ class SmtpEmailServiceTest {
     @Test
     void sendWelcomeEmail_namesTheOnboardingAdminInTheBody() throws Exception {
         stubMimeMessage();
-        SmtpEmailService service = new SmtpEmailService(mailSender, "noreply@example.com", "", "");
+        SmtpEmailService service = new SmtpEmailService(mailSender, "noreply@example.com", "", "", "Confluence Bot");
 
         service.sendWelcomeEmail("new@example.com", "Priya Sharma", "temp-pass-123");
 
@@ -119,7 +139,7 @@ class SmtpEmailServiceTest {
     @Test
     void sendWelcomeEmail_blankOnboardedBy_omitsOnboardedByLine() throws Exception {
         stubMimeMessage();
-        SmtpEmailService service = new SmtpEmailService(mailSender, "noreply@example.com", "", "");
+        SmtpEmailService service = new SmtpEmailService(mailSender, "noreply@example.com", "", "", "Confluence Bot");
 
         service.sendWelcomeEmail("new@example.com", "", "temp-pass-123");
 
@@ -133,7 +153,7 @@ class SmtpEmailServiceTest {
     @Test
     void sendWelcomeEmail_relayThrows_returnsFalseInsteadOfPropagating() {
         stubMimeMessage();
-        SmtpEmailService service = new SmtpEmailService(mailSender, "noreply@example.com", "", "");
+        SmtpEmailService service = new SmtpEmailService(mailSender, "noreply@example.com", "", "", "Confluence Bot");
         doThrow(new MailSendException("relay unreachable")).when(mailSender).send(any(MimeMessage.class));
 
         boolean result = service.sendWelcomeEmail("new@example.com", "admin@example.com", "temp-pass-123");
@@ -144,7 +164,7 @@ class SmtpEmailServiceTest {
     @Test
     void sendWelcomeEmail_noBaseUrlConfigured_omitsSignInLine() throws Exception {
         stubMimeMessage();
-        SmtpEmailService service = new SmtpEmailService(mailSender, "noreply@example.com", "", "");
+        SmtpEmailService service = new SmtpEmailService(mailSender, "noreply@example.com", "", "", "Confluence Bot");
 
         service.sendWelcomeEmail("new@example.com", "admin@example.com", "temp-pass-123");
 
@@ -156,7 +176,7 @@ class SmtpEmailServiceTest {
 
     @Test
     void sendPasswordResetOtp_success_setsFromToAndBody() {
-        SmtpEmailService service = new SmtpEmailService(mailSender, "noreply@example.com", "Confluence Bot", "");
+        SmtpEmailService service = new SmtpEmailService(mailSender, "noreply@example.com", "Confluence Bot", "", "Confluence Bot");
 
         boolean result = service.sendPasswordResetOtp("new@example.com", "123456", 10);
 
