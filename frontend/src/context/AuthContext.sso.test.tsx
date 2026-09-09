@@ -211,7 +211,8 @@ describe('AuthProvider — signing out of a directory session', () => {
     const [target] = assign.mock.calls[0]
     const url = new URL(target)
     expect(`${url.origin}${url.pathname}`).toBe('https://otds.example.com/otdsws/logout')
-    expect(url.searchParams.get('post_logout_redirect_uri')).toBe(`${window.location.origin}/?password=1`)
+    expect(url.searchParams.get('post_logout_redirect_uri'))
+      .toBe(`${window.location.origin}/?password=1&logged_out=1`)
   })
 
   it('asks the provider to send the browser back to this app\'s sign-in screen, password form ready', async () => {
@@ -284,5 +285,77 @@ describe('AuthProvider — signing out of a directory session', () => {
     await userEvent.click(screen.getByRole('button', { name: /sign out/i }))
 
     expect(assign).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * The flag LogoutPage renders on, both for a session that ends without leaving this tab and for
+ * one that ends by way of a round trip to the provider's own logout endpoint.
+ */
+describe('AuthProvider — justLoggedOut', () => {
+  const token = `header.${btoa(JSON.stringify({ mustChangePassword: false }))}.signature`
+
+  function session(): AuthResponse {
+    return {
+      userId: 7, email: 'jane@corp.example', name: 'Jane', roles: ['USER'],
+      token, refreshToken: 'refresh-token', mustChangePassword: false,
+    }
+  }
+
+  function Probe() {
+    const { user, isLoading, justLoggedOut, logout } = useAuth()
+    if (isLoading) return <p>loading</p>
+    return (
+      <>
+        <p data-testid="user">{user?.email ?? 'signed out'}</p>
+        <p data-testid="just-logged-out">{String(justLoggedOut)}</p>
+        <button onClick={logout}>Sign out</button>
+      </>
+    )
+  }
+
+  beforeEach(() => {
+    localStorage.clear()
+    mockGetMe.mockReset()
+    mockRevokeSession.mockReset()
+    mockGetSsoConfig.mockResolvedValue({
+      enabled: false, providerId: null, providerName: null,
+      authorizationUrl: null, logoutUrl: null, enforced: false,
+    })
+  })
+
+  afterEach(() => {
+    window.history.replaceState(null, '', '/')
+    vi.restoreAllMocks()
+  })
+
+  it('is set once a password session signs out with nowhere else to redirect', async () => {
+    localStorage.setItem(TOKEN_KEY, token)
+    mockGetMe.mockResolvedValue(session())
+    mockRevokeSession.mockResolvedValue(undefined)
+
+    render(<AuthProvider><Probe /></AuthProvider>)
+    await waitFor(() => expect(screen.getByTestId('user')).toHaveTextContent('jane@corp.example'))
+
+    await userEvent.click(screen.getByRole('button', { name: /sign out/i }))
+
+    await waitFor(() => expect(screen.getByTestId('just-logged-out')).toHaveTextContent('true'))
+  })
+
+  it('is set from the logout marker when the browser lands back from the provider', async () => {
+    // What a real return trip looks like: the session was already cleared before the browser left
+    // for the provider, so there is nothing in storage and nothing to fetch — just the marker
+    // `withPostLogoutRedirect` put in the URL on the way out.
+    window.history.replaceState(null, '', '/?password=1&logged_out=1')
+
+    render(<AuthProvider><Probe /></AuthProvider>)
+
+    await waitFor(() => expect(screen.getByTestId('just-logged-out')).toHaveTextContent('true'))
+    expect(screen.getByTestId('user')).toHaveTextContent('signed out')
+    // Read once and removed, so a later reload of this same URL shows the sign-in screen rather
+    // than "you've been signed out" a second time — but the password escape hatch stays, since an
+    // enforced deployment must not auto-redirect once LogoutPage hands off to LoginPage either.
+    expect(window.location.search).not.toContain('logged_out')
+    expect(window.location.search).toContain('password=1')
   })
 })

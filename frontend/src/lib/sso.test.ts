@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  clearSsoHandoff, readSsoHandoff, requestPasswordSignIn, wantsPasswordSignIn, withPostLogoutRedirect,
+  clearJustLoggedOutMarker, clearSsoHandoff, readSsoHandoff, requestPasswordSignIn,
+  wantsPasswordSignIn, wasJustLoggedOut, withPostLogoutRedirect,
 } from './sso'
 
 /**
@@ -166,5 +167,44 @@ describe('withPostLogoutRedirect', () => {
     const url = new URL(withPostLogoutRedirect(configured))
 
     expect(url.searchParams.get('post_logout_redirect_uri')).toBe('https://other.example.com/bye')
+  })
+
+  it('also marks the return trip as coming from a logout', () => {
+    // So LogoutPage renders on the way back even when SSO is enforced — the enforced redirect
+    // lives inside LoginPage, which this landing must not reach before AuthContext has had a
+    // chance to read this marker and show LogoutPage instead.
+    const url = new URL(withPostLogoutRedirect('https://otds.example.com/otdsws/logout'))
+
+    const returnUrl = new URL(url.searchParams.get('post_logout_redirect_uri')!)
+    expect(returnUrl.searchParams.get('logged_out')).toBe('1')
+  })
+})
+
+/**
+ * The one-time notice that this page load is the browser landing back from ending a session at
+ * the provider, not an ordinary visit to the sign-in screen.
+ */
+describe('wasJustLoggedOut / clearJustLoggedOutMarker', () => {
+  afterEach(() => land('/'))
+
+  it('is false for an ordinary page load', () => {
+    land('/?password=1')
+
+    expect(wasJustLoggedOut()).toBe(false)
+  })
+
+  it('is true once the logout marker is in the query string', () => {
+    land('/?password=1&logged_out=1')
+
+    expect(wasJustLoggedOut()).toBe(true)
+  })
+
+  it('removes only the logout marker, leaving the password escape hatch alone', () => {
+    land('/?password=1&logged_out=1')
+
+    clearJustLoggedOutMarker()
+
+    expect(wasJustLoggedOut()).toBe(false)
+    expect(wantsPasswordSignIn()).toBe(true)
   })
 })
