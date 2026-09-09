@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { AuthProvider, useAuth } from './AuthContext'
-import { exchangeSsoCode, getSsoConfig, getMe } from '../services/authService'
+import { exchangeSsoCode, getSsoConfig, getMe, revokeSession } from '../services/authService'
 import { REFRESH_KEY, SSO_SESSION_KEY, TOKEN_KEY } from '../lib/token'
 import type { AuthResponse } from '../types'
 
@@ -10,11 +11,13 @@ vi.mock('../services/authService', async importOriginal => ({
   getSsoConfig: vi.fn(),
   exchangeSsoCode: vi.fn(),
   getMe: vi.fn(),
+  revokeSession: vi.fn(),
 }))
 
 const mockGetSsoConfig = vi.mocked(getSsoConfig)
 const mockExchange = vi.mocked(exchangeSsoCode)
 const mockGetMe = vi.mocked(getMe)
+const mockRevokeSession = vi.mocked(revokeSession)
 
 /**
  * The moment the provider drops the browser back on this origin.
@@ -141,5 +144,90 @@ describe('AuthProvider — returning from the identity provider', () => {
     await waitFor(() => expect(screen.getByTestId('user')).toHaveTextContent('signed out'))
     expect(mockExchange).not.toHaveBeenCalled()
     expect(screen.getByTestId('error')).toHaveTextContent('')
+  })
+})
+
+/**
+ * Signing out of a directory-originated session, when the deployment can also end it there.
+ *
+ * With SSO enforced, the sign-in screen this app renders the instant it goes unauthenticated
+ * redirects straight back to the provider on its own. So the redirect to the provider's own
+ * logout endpoint cannot wait on anything — least of all a network round trip to revoke the
+ * local refresh token — or the enforced redirect wins the race, finds the provider's session
+ * still alive, and signs back in before the browser ever leaves for the logout endpoint.
+ */
+describe('AuthProvider — signing out of a directory session', () => {
+  const token = `header.${btoa(JSON.stringify({ mustChangePassword: false }))}.signature`
+
+  function session(): AuthResponse {
+    return {
+      userId: 7, email: 'jane@corp.example', name: 'Jane', roles: ['USER'],
+      token, refreshToken: 'refresh-token', mustChangePassword: false,
+    }
+  }
+
+  function LogoutProbe() {
+    const { user, isLoading, logout } = useAuth()
+    if (isLoading) return <p>loading</p>
+    return (
+      <>
+        <p data-testid="user">{user?.email ?? 'signed out'}</p>
+        <button onClick={logout}>Sign out</button>
+      </>
+    )
+  }
+
+  beforeEach(() => {
+    localStorage.clear()
+    mockGetMe.mockReset()
+    mockRevokeSession.mockReset()
+  })
+
+  afterEach(() => {
+    window.history.replaceState(null, '', '/')
+    vi.restoreAllMocks()
+  })
+
+  it('leaves for the provider logout endpoint without waiting for the revoke request to settle', async () => {
+    mockGetSsoConfig.mockResolvedValue({
+      enabled: true, providerId: 'otds', providerName: 'OpenText',
+      authorizationUrl: '/api/oauth2/authorization/otds',
+      logoutUrl: 'https://otds.example.com/otdsws/logout', enforced: true,
+    })
+    localStorage.setItem(TOKEN_KEY, token)
+    localStorage.setItem(REFRESH_KEY, 'refresh-token')
+    localStorage.setItem(SSO_SESSION_KEY, 'otds')
+    mockGetMe.mockResolvedValue(session())
+    // Never resolves during the test — proves the redirect below does not wait on it.
+    mockRevokeSession.mockReturnValue(new Promise(() => {}))
+    const assign = vi.fn()
+    vi.spyOn(window, 'location', 'get').mockReturnValue({ ...window.location, assign } as Location)
+
+    render(<AuthProvider><LogoutProbe /></AuthProvider>)
+    await waitFor(() => expect(screen.getByTestId('user')).toHaveTextContent('jane@corp.example'))
+
+    await userEvent.click(screen.getByRole('button', { name: /sign out/i }))
+
+    expect(assign).toHaveBeenCalledWith('https://otds.example.com/otdsws/logout')
+  })
+
+  it('does not redirect a password session, even with a directory configured', async () => {
+    mockGetSsoConfig.mockResolvedValue({
+      enabled: true, providerId: 'otds', providerName: 'OpenText',
+      authorizationUrl: '/api/oauth2/authorization/otds',
+      logoutUrl: 'https://otds.example.com/otdsws/logout', enforced: false,
+    })
+    localStorage.setItem(TOKEN_KEY, token)
+    mockGetMe.mockResolvedValue(session())
+    mockRevokeSession.mockResolvedValue(undefined)
+    const assign = vi.fn()
+    vi.spyOn(window, 'location', 'get').mockReturnValue({ ...window.location, assign } as Location)
+
+    render(<AuthProvider><LogoutProbe /></AuthProvider>)
+    await waitFor(() => expect(screen.getByTestId('user')).toHaveTextContent('jane@corp.example'))
+
+    await userEvent.click(screen.getByRole('button', { name: /sign out/i }))
+
+    expect(assign).not.toHaveBeenCalled()
   })
 })

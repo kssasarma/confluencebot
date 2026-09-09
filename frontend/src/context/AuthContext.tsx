@@ -192,7 +192,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const refreshToken = getRefreshToken()
     // Read before clearing: clearing the session is what forgets where it came from.
     const sessionProvider = getSsoSessionProvider()
-    const revoked = refreshToken ? revokeSession(refreshToken) : Promise.resolve()
+    if (refreshToken) void revokeSession(refreshToken)
     clearSession()
 
     // Ending the session here is not ending the one at the provider. Without this, signing out and
@@ -200,9 +200,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // signing out at all. Only for a session that came from the provider now configured, though:
     // somebody who signed in with a password has no provider session to end, and one left over
     // from a provider this deployment no longer points at is not ours to end either.
+    //
+    // This has to happen synchronously, in the same tick as clearSession() above, and not after the
+    // revoke request settles. clearSession() is what flips the app into its signed-out state, and
+    // with SSO enforced that state redirects straight back to the provider on its own — so a
+    // redirect here that waits on a network round trip loses the race: the enforced redirect fires
+    // first, finds the provider's own session still alive, and signs back in before the browser
+    // ever leaves for the provider's logout endpoint.
     const logoutUrl = sso?.logoutUrl
     if (logoutUrl && sessionProvider && sessionProvider === sso?.providerId) {
-      void revoked.finally(() => window.location.assign(logoutUrl))
+      window.location.assign(logoutUrl)
     }
   }, [sso])
 
