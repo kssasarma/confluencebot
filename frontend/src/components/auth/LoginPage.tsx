@@ -1,9 +1,11 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { KeyRound } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
+import { requestPasswordSignIn, wantsPasswordSignIn } from '../../lib/sso'
 import AuthLayout from './AuthLayout'
 import Input from '../ui/Input'
 import Button from '../ui/Button'
+import Spinner from '../ui/Spinner'
 
 export default function LoginPage({ onForgotPassword }: { onForgotPassword: () => void }) {
   const { login, sso, ssoError, dismissSsoError } = useAuth()
@@ -11,8 +13,20 @@ export default function LoginPage({ onForgotPassword }: { onForgotPassword: () =
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [showPasswordForm, setShowPasswordForm] = useState(wantsPasswordSignIn)
 
   const ssoEnabled = sso?.enabled && !!sso.authorizationUrl
+  // A deployment can skip the button entirely, but never the escape hatch: a directory outage
+  // must not also strand the bootstrap administrator, who exists in no directory. A failed round
+  // trip (ssoError set) holds the screen too — leaving again immediately would bounce whoever just
+  // saw a rejection straight back to the provider without ever reading why.
+  const ssoEnforced = !!ssoEnabled && !!sso!.enforced && !showPasswordForm && !ssoError
+
+  useEffect(() => {
+    if (ssoEnforced) {
+      window.location.assign(sso!.authorizationUrl!)
+    }
+  }, [ssoEnforced, sso])
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -33,6 +47,33 @@ export default function LoginPage({ onForgotPassword }: { onForgotPassword: () =
   function startSso() {
     dismissSsoError()
     window.location.assign(sso!.authorizationUrl!)
+  }
+
+  function usePasswordInstead() {
+    requestPasswordSignIn()
+    setShowPasswordForm(true)
+  }
+
+  if (ssoEnforced) {
+    // The effect above is already leaving; this is what shows for the instant before it does —
+    // long enough to offer the one way to stay.
+    return (
+      <AuthLayout title="Sign in to your account">
+        <div className="flex flex-col items-center gap-4 py-6 text-center">
+          <Spinner size="lg" />
+          <p className="text-sm text-muted-foreground">
+            Redirecting you to {sso!.providerName ?? 'your identity provider'}…
+          </p>
+          <button
+            type="button"
+            onClick={usePasswordInstead}
+            className="text-sm text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+          >
+            Sign in with a password instead
+          </button>
+        </div>
+      </AuthLayout>
+    )
   }
 
   return (

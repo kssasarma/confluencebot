@@ -49,7 +49,7 @@ describe('AuthProvider — returning from the identity provider', () => {
     localStorage.clear()
     mockGetSsoConfig.mockResolvedValue({
       enabled: true, providerId: 'otds', providerName: 'OpenText',
-      authorizationUrl: '/api/oauth2/authorization/otds', logoutUrl: null,
+      authorizationUrl: '/api/oauth2/authorization/otds', logoutUrl: null, enforced: false,
     })
     mockExchange.mockReset()
     mockGetMe.mockReset()

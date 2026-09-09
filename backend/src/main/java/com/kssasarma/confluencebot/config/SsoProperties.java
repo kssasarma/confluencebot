@@ -48,6 +48,18 @@ public record SsoProperties(
         @DefaultValue("false") boolean enabled,
 
         /**
+         * Skips the button. The sign-in screen leaves for the provider on its own, without
+         * anyone clicking anything — the deployment's choice, not each visitor's.
+         *
+         * <p>The password form is never actually removed: a directory outage must not also strand
+         * the bootstrap administrator, who exists in no directory. What this decides is only
+         * whether the screen leaves immediately, and the frontend keeps a deliberately quiet
+         * "sign in with a password instead" escape hatch even here. Ignored while {@code enabled}
+         * is false — there is nothing to redirect to.
+         */
+        @DefaultValue("false") boolean enforced,
+
+        /**
          * Short identifier for the provider, used in URLs rather than shown to anyone.
          *
          * <p>It is the last segment of both OAuth URLs, so the redirect URL registered with the

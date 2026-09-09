@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { clearSsoHandoff, readSsoHandoff } from './sso'
+import { clearSsoHandoff, readSsoHandoff, requestPasswordSignIn, wantsPasswordSignIn } from './sso'
 
 /**
  * Reading the identity provider's answer out of the URL.
@@ -81,5 +81,40 @@ describe('clearSsoHandoff', () => {
     clearSsoHandoff()
 
     expect(window.location.pathname).toBe('/ot-confluence-bot/')
+  })
+})
+
+/**
+ * The one thing enforcing SSO is not allowed to remove.
+ *
+ * A deployment can send every visitor straight to the provider, but the choice to type a password
+ * instead has to survive the reload someone mid-typing is most likely to trigger by accident — so
+ * it lives in the address bar, not in component state.
+ */
+describe('wantsPasswordSignIn / requestPasswordSignIn', () => {
+  afterEach(() => land('/'))
+
+  it('says no on an ordinary page load', () => {
+    land('/')
+
+    expect(wantsPasswordSignIn()).toBe(false)
+  })
+
+  it('remembers the choice in the address bar', () => {
+    land('/')
+
+    requestPasswordSignIn()
+
+    expect(wantsPasswordSignIn()).toBe(true)
+  })
+
+  it('leaves the rest of the URL alone', () => {
+    land('/sso/callback#sso_error=Sign-in%20failed.')
+
+    requestPasswordSignIn()
+
+    expect(window.location.pathname).toBe('/sso/callback')
+    expect(window.location.hash).toBe('#sso_error=Sign-in%20failed.')
+    expect(wantsPasswordSignIn()).toBe(true)
   })
 })

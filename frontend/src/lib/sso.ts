@@ -49,3 +49,24 @@ export function readSsoHandoff(): SsoHandoff | null {
 export function clearSsoHandoff(): void {
   window.history.replaceState(null, '', import.meta.env.BASE_URL)
 }
+
+const PASSWORD_PARAM = 'password'
+
+/**
+ * Whether this visitor has already asked to skip straight to the password form.
+ *
+ * Enforced SSO leaves for the provider before the sign-in screen renders anything else, so the
+ * escape hatch has to be readable before that decision is made — a piece of component state would
+ * reset on the very reload someone mid-typing a password is most likely to trigger by accident.
+ */
+export function wantsPasswordSignIn(): boolean {
+  return new URLSearchParams(window.location.search).has(PASSWORD_PARAM)
+}
+
+/** Remembers that choice in the address bar, so a reload does not bounce the visitor straight back
+ *  to the provider mid-typing. */
+export function requestPasswordSignIn(): void {
+  const url = new URL(window.location.href)
+  url.searchParams.set(PASSWORD_PARAM, '1')
+  window.history.replaceState(null, '', url.pathname + url.search + url.hash)
+}

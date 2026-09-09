@@ -51,6 +51,20 @@ class SsoPropertiesTest {
     }
 
     @Test
+    void enforcementIsOffUntilAskedForToo() {
+        // Turning SSO on must not silently take the password form away with it.
+        runner.withPropertyValues("app.sso.enabled=true", "app.sso.client-id=confluence-bot")
+                .run(context -> assertThat(context.getBean(SsoProperties.class).enforced()).isFalse());
+    }
+
+    @Test
+    void aDeploymentCanSkipTheButtonEntirely() {
+        runner.withPropertyValues(
+                "app.sso.enabled=true", "app.sso.client-id=confluence-bot", "app.sso.enforced=true")
+                .run(context -> assertThat(context.getBean(SsoProperties.class).enforced()).isTrue());
+    }
+
+    @Test
     void discoveryIsTheDefaultRouteAndExplicitEndpointsNeedBothHalves() {
         runner.run(context -> assertThat(context.getBean(SsoProperties.class).hasExplicitEndpoints()).isFalse());
 

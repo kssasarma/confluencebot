@@ -46,6 +46,8 @@ export interface SsoConfig {
   authorizationUrl: string | null
   /** Where to send it after signing out, to end the provider's session too. Often null. */
   logoutUrl: string | null
+  /** The deployment's choice, not the visitor's: leave for the provider without a click. */
+  enforced: boolean
 }
 
 export type ResponseStyle = 'concise' | 'balanced' | 'detailed'

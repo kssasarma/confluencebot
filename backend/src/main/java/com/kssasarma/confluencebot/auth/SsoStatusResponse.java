@@ -19,9 +19,12 @@ public record SsoStatusResponse(
         /** Where to send the browser to begin. Null when SSO is off. */
         String authorizationUrl,
         /** Where to send it after signing out, to end the session at the provider too. Optional. */
-        String logoutUrl
+        String logoutUrl,
+        /** Deployment's choice, not the visitor's: leave for the provider without anyone clicking
+         *  the button. Always false when {@code enabled} is false. */
+        boolean enforced
 ) {
     public static SsoStatusResponse disabled() {
-        return new SsoStatusResponse(false, null, null, null, null);
+        return new SsoStatusResponse(false, null, null, null, null, false);
     }
 }

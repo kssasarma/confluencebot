@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { renderWithProviders } from '../../test/render'
@@ -27,6 +27,8 @@ describe('LoginPage', () => {
     mockGetSsoConfig.mockReset()
   })
 
+  afterEach(() => window.history.replaceState(null, '', '/'))
+
   function ssoConfig(overrides: Partial<SsoConfig> = {}): SsoConfig {
     return {
       enabled: true,
@@ -34,6 +36,7 @@ describe('LoginPage', () => {
       providerName: 'OpenText',
       authorizationUrl: '/api/oauth2/authorization/otds',
       logoutUrl: null,
+      enforced: false,
       ...overrides,
     }
   }
@@ -114,5 +117,74 @@ describe('LoginPage', () => {
     renderWithProviders(<LoginPage onForgotPassword={() => {}} />)
 
     expect(await screen.findByRole('button', { name: /continue with single sign-on/i })).toBeInTheDocument()
+  })
+
+  /**
+   * A deployment can decide for everyone, rather than leaving it to each visitor's click.
+   *
+   * What must never disappear alongside the button is the way back: a directory outage cannot
+   * also be the day the bootstrap administrator — who exists in no directory — is locked out.
+   */
+  describe('when the deployment enforces it', () => {
+    it('leaves for the provider without anyone clicking anything', async () => {
+      const assign = vi.fn()
+      vi.spyOn(window, 'location', 'get').mockReturnValue({ ...window.location, assign } as Location)
+      mockGetSsoConfig.mockResolvedValue(ssoConfig({ enforced: true }))
+
+      renderWithProviders(<LoginPage onForgotPassword={() => {}} />)
+
+      await waitFor(() => expect(assign).toHaveBeenCalledWith('/api/oauth2/authorization/otds'))
+      vi.restoreAllMocks()
+    })
+
+    it('offers a quiet way to sign in with a password instead, and honours it', async () => {
+      const assign = vi.fn()
+      vi.spyOn(window, 'location', 'get').mockReturnValue({ ...window.location, assign } as Location)
+      mockGetSsoConfig.mockResolvedValue(ssoConfig({ enforced: true }))
+
+      renderWithProviders(<LoginPage onForgotPassword={() => {}} />)
+      await waitFor(() => expect(assign).toHaveBeenCalledTimes(1))
+
+      await userEvent.click(await screen.findByRole('button', { name: /sign in with a password instead/i }))
+
+      expect(screen.getByLabelText(/email/i)).toBeInTheDocument()
+      expect(screen.getByLabelText(/password/i)).toBeInTheDocument()
+      // Never redirected a second time. That the choice also survives a reload is covered by
+      // requestPasswordSignIn's own tests in sso.test.ts — window.location is stubbed here to
+      // observe `assign`, which freezes the rest of the object and makes `search` unreliable to
+      // read back through this same mock.
+      expect(assign).toHaveBeenCalledTimes(1)
+      vi.restoreAllMocks()
+    })
+
+    it('respects that choice from the very first render, before ever redirecting', async () => {
+      window.history.replaceState(null, '', '/?password=1')
+      const assign = vi.fn()
+      vi.spyOn(window, 'location', 'get').mockReturnValue({ ...window.location, assign } as Location)
+      mockGetSsoConfig.mockResolvedValue(ssoConfig({ enforced: true }))
+
+      renderWithProviders(<LoginPage onForgotPassword={() => {}} />)
+
+      await screen.findByRole('button', { name: /continue with opentext/i })
+      expect(screen.getByLabelText(/email/i)).toBeInTheDocument()
+      expect(assign).not.toHaveBeenCalled()
+      vi.restoreAllMocks()
+    })
+
+    it('does not bounce a rejected sign-in straight back without showing why', async () => {
+      // A failed round trip already landed here with something to say; leaving again immediately
+      // would erase it before anyone read it.
+      window.history.replaceState(null, '', '/sso/callback#sso_error=This+account+has+been+disabled.')
+      const assign = vi.fn()
+      vi.spyOn(window, 'location', 'get').mockReturnValue({ ...window.location, assign } as Location)
+      mockGetSsoConfig.mockResolvedValue(ssoConfig({ enforced: true }))
+
+      renderWithProviders(<LoginPage onForgotPassword={() => {}} />)
+
+      expect(await screen.findByText('This account has been disabled.')).toBeInTheDocument()
+      expect(screen.getByLabelText(/email/i)).toBeInTheDocument()
+      expect(assign).not.toHaveBeenCalled()
+      vi.restoreAllMocks()
+    })
   })
 })

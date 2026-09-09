@@ -83,6 +83,26 @@ class SsoServiceImplTest {
         assertThat(status.providerName()).isEqualTo("OpenText");
         assertThat(status.authorizationUrl()).isEqualTo("/api/oauth2/authorization/otds");
         assertThat(status.logoutUrl()).isNull();
+        assertThat(status.enforced()).isFalse();
+    }
+
+    @Test
+    void aDeploymentThatSkipsTheButtonSaysSoOverTheSameEndpoint() {
+        SsoServiceImpl enforced = new SsoServiceImpl(
+                SsoPropertiesFixture.aProvider().enforced(true).build(), loginCodeRepository, tokenIssuer);
+
+        assertThat(enforced.describe().enforced()).isTrue();
+    }
+
+    @Test
+    void aDisabledDeploymentIsNeverReportedAsEnforced() {
+        // enforced=true configured alongside enabled=false would be a contradiction to hand the
+        // frontend; the disabled answer is a flat "no" on every field.
+        SsoServiceImpl disabled = new SsoServiceImpl(
+                SsoPropertiesFixture.aProvider().enabled(false).enforced(true).build(),
+                loginCodeRepository, tokenIssuer);
+
+        assertThat(disabled.describe().enforced()).isFalse();
     }
 
     @Test

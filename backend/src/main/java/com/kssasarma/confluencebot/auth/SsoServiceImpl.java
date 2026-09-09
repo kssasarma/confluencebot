@@ -52,7 +52,8 @@ public class SsoServiceImpl implements SsoService {
                 properties.providerId(),
                 properties.providerName(),
                 properties.authorizationRequestUri(),
-                StringUtils.hasText(properties.logoutUri()) ? properties.logoutUri() : null);
+                StringUtils.hasText(properties.logoutUri()) ? properties.logoutUri() : null,
+                properties.enforced());
     }
 
     @Override

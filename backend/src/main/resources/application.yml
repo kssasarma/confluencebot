@@ -45,6 +45,12 @@ app:
   sso:
     enabled: ${SSO_ENABLED:false}
 
+    # Skips the button: the sign-in screen leaves for the provider on its own. The password form is
+    # never actually removed — only the frontend's quiet "sign in with a password instead" link
+    # stands between a visitor and it — because a directory outage must not also strand the
+    # bootstrap administrator, who exists in no directory.
+    enforced: ${SSO_ENFORCED:false}
+
     # Short id used in URLs, not shown to anyone. It is the last segment of both OAuth URLs, so
     # the redirect URL ends /api/login/oauth2/code/<this>. Defaulted to the directory this is
     # deployed against, so the common case sets neither of these two; point them elsewhere and

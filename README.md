@@ -290,6 +290,14 @@ how you get back in when the directory is unreachable, and the only way in for t
 administrator, who exists in no directory. Switch SSO on and a **Continue with …** button appears
 next to the password form; leave it off and the sign-in screen is exactly what it was.
 
+A deployment can also decide for everyone rather than leaving it to each visitor's click: set
+`SSO_ENFORCED=true` and the sign-in screen leaves for the provider on its own, no button needed.
+This still does not remove the password form — only the button that would otherwise sit next to
+it — because a directory outage must not also strand the one account with no directory to sign
+into. A quiet **Sign in with a password instead** link stays reachable from the redirect screen,
+and a failed round trip lands back here with the reason shown rather than bouncing straight out
+again.
+
 **Nothing in the code names a vendor.** This was built against OpenText Directory Services, but
 OTDS is an ordinary OIDC authorization server and so is every alternative — Entra ID, Okta,
 Keycloak, Ping, Auth0. Pointing this at a different one is a change to `SSO_*` values and to
@@ -432,6 +440,7 @@ rework — but it is not built.
 | Variable | Default | Description |
 |---|---|---|
 | `SSO_ENABLED` | `false` | Master switch. Off, none of the below is read and no OAuth beans exist |
+| `SSO_ENFORCED` | `false` | Skips the button: the sign-in screen leaves for the provider on its own. Password sign-in stays reachable through a quiet link, never removed. Ignored while `SSO_ENABLED` is not also true |
 | `SSO_PROVIDER_ID` | `otds` | Short id used in URLs. Last segment of the redirect URL |
 | `SSO_PROVIDER_NAME` | `OpenText` | What the button says: "Continue with …" |
 | `SSO_ISSUER_URI` | | Issuer to discover the endpoints from. Alone, this is the whole configuration |

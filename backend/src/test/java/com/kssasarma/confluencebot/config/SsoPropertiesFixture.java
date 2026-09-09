@@ -16,6 +16,7 @@ import java.util.Set;
 public final class SsoPropertiesFixture {
 
     private boolean enabled = true;
+    private boolean enforced = false;
     private String providerId = "otds";
     private String providerName = "OpenText";
     private String issuerUri = "";
@@ -48,6 +49,7 @@ public final class SsoPropertiesFixture {
     }
 
     public SsoPropertiesFixture enabled(boolean value) { this.enabled = value; return this; }
+    public SsoPropertiesFixture enforced(boolean value) { this.enforced = value; return this; }
     public SsoPropertiesFixture providerId(String value) { this.providerId = value; return this; }
     public SsoPropertiesFixture providerName(String value) { this.providerName = value; return this; }
     public SsoPropertiesFixture issuerUri(String value) { this.issuerUri = value; return this; }
@@ -68,7 +70,7 @@ public final class SsoPropertiesFixture {
     public SsoPropertiesFixture codeTtl(Duration value) { this.codeTtl = value; return this; }
 
     public SsoProperties build() {
-        return new SsoProperties(enabled, providerId, providerName, issuerUri, clientId,
+        return new SsoProperties(enabled, enforced, providerId, providerName, issuerUri, clientId,
                 clientSecret, scopes, redirectUri, clientAuthenticationMethod, authorizationUri,
                 tokenUri, userInfoUri, jwkSetUri, userNameAttribute, emailClaims, defaultRoles,
                 loginSuccessUri, logoutUri, codeTtl);
