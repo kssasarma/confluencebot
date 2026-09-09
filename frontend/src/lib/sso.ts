@@ -71,54 +71,22 @@ export function requestPasswordSignIn(): void {
   window.history.replaceState(null, '', url.pathname + url.search + url.hash)
 }
 
-const RETURN_PARAM = 'post_logout_redirect_uri'
-const LOGGED_OUT_PARAM = 'logged_out'
-
 /**
- * Sends the provider's end-session endpoint back to this app's own sign-in screen, with the
- * password escape hatch already requested.
+ * Ends the session at the identity provider without moving the browser there.
  *
- * Without that marker, a deployment with SSO enforced would land back here, see nobody signed in,
- * and leave for the provider all over again — the provider's own session is gone by then, so it
- * is not an infinite loop, but it does mean "sign out" bounces the visitor through the provider a
- * second time instead of showing them anything of this app's. Requesting the password form up
- * front keeps the landing on this screen.
- *
- * Also carries `logged_out`, so `LogoutPage` renders on the way back through here too — an
- * enforced deployment never reaches `AuthContext.logout()`'s own `justLoggedOut` flag, since the
- * browser has already navigated away to the provider by the time that state would matter. This
- * marker survives the round trip in the URL instead; see `wasJustLoggedOut`.
- *
- * Standard OpenID Connect RP-Initiated Logout names this parameter `post_logout_redirect_uri`,
- * and every provider this app targets (OTDS, Entra ID, Okta, Keycloak) honors it. Left alone if
- * the configured logout URL already carries one, so a deployment that baked in its own return
- * address is not overridden.
+ * A full-page redirect to the provider's end-session endpoint depends on it honoring
+ * `post_logout_redirect_uri` and actually sending the browser back — support for that varies
+ * enough across deployments (OTDS, Entra ID, Okta, Keycloak) that when it does not work, the
+ * visitor is simply stranded on the provider's own page instead of seeing this app again. Loading
+ * the same endpoint in a hidden iframe asks the provider to clear its session cookie the same way
+ * a top-level visit would, but this tab never leaves, so `LogoutPage` renders immediately either
+ * way. Nothing here waits on the iframe: there is no response worth reading, and no result that
+ * would change what the visitor should see next.
  */
-export function withPostLogoutRedirect(logoutUrl: string): string {
-  const url = new URL(logoutUrl)
-  if (!url.searchParams.has(RETURN_PARAM)) {
-    const target = new URL(import.meta.env.BASE_URL, window.location.origin)
-    target.searchParams.set(PASSWORD_PARAM, '1')
-    target.searchParams.set(LOGGED_OUT_PARAM, '1')
-    url.searchParams.set(RETURN_PARAM, target.toString())
-  }
-  return url.toString()
-}
-
-/**
- * Whether this page load is the browser landing back from a provider-initiated logout.
- *
- * Read once on mount and then stripped from the address bar (see `clearJustLoggedOutMarker`) —
- * unlike the password escape hatch, this one is a one-time notice, not a standing preference: a
- * later reload of the same URL should show the sign-in screen, not "you've been signed out" again.
- */
-export function wasJustLoggedOut(): boolean {
-  return new URLSearchParams(window.location.search).has(LOGGED_OUT_PARAM)
-}
-
-/** Removes the one-time logout marker from the address bar without disturbing `password=1`. */
-export function clearJustLoggedOutMarker(): void {
-  const url = new URL(window.location.href)
-  url.searchParams.delete(LOGGED_OUT_PARAM)
-  window.history.replaceState(null, '', url.pathname + url.search + url.hash)
+export function endProviderSession(logoutUrl: string): void {
+  const iframe = document.createElement('iframe')
+  iframe.hidden = true
+  iframe.src = logoutUrl
+  document.body.appendChild(iframe)
+  window.setTimeout(() => iframe.remove(), 10_000)
 }

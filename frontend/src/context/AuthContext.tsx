@@ -9,10 +9,7 @@ import {
   clearSession, getRefreshToken, getSsoSessionProvider, getToken, markSsoSession, onSessionChange,
   storeSession,
 } from '../lib/token'
-import {
-  clearJustLoggedOutMarker, clearSsoHandoff, readSsoHandoff, wasJustLoggedOut,
-  withPostLogoutRedirect,
-} from '../lib/sso'
+import { clearSsoHandoff, endProviderSession, readSsoHandoff } from '../lib/sso'
 
 interface AuthContextValue {
   user: AuthUser | null
@@ -143,18 +140,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSsoError(handoff.error)
     }
 
-    // Landing back from a provider-initiated logout (see `withPostLogoutRedirect`): the session
-    // was already cleared before the browser left for the provider, so there is nothing to load —
-    // just show LogoutPage instead of the sign-in screen, and don't let SSO-enforced auto-redirect
-    // straight back into the provider (App.tsx checks `justLoggedOut` before it ever renders
-    // LoginPage).
-    if (wasJustLoggedOut()) {
-      clearJustLoggedOutMarker()
-      setJustLoggedOut(true)
-      setIsLoading(false)
-      return
-    }
-
     const stored = getToken()
     if (!stored) {
       setIsLoading(false)
@@ -223,23 +208,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // somebody who signed in with a password has no provider session to end, and one left over
     // from a provider this deployment no longer points at is not ours to end either.
     //
-    // This has to happen synchronously, in the same tick as clearSession() above, and not after the
-    // revoke request settles. clearSession() is what flips the app into its signed-out state, and
-    // with SSO enforced that state redirects straight back to the provider on its own — so a
-    // redirect here that waits on a network round trip loses the race: the enforced redirect fires
-    // first, finds the provider's own session still alive, and signs back in before the browser
-    // ever leaves for the provider's logout endpoint.
+    // Done silently, in a hidden iframe, rather than by sending the browser there — see
+    // `endProviderSession`. That also means this tab never leaves, so LogoutPage always shows next
+    // regardless of what the provider does with the request.
     const logoutUrl = sso?.logoutUrl
     if (logoutUrl && sessionProvider && sessionProvider === sso?.providerId) {
-      // Told where to send the browser back, so it lands on this app's own sign-in screen
-      // instead of whatever the provider shows by default — and with the password form already
-      // requested, so an enforced deployment does not immediately leave for the provider again.
-      window.location.assign(withPostLogoutRedirect(logoutUrl))
-      return
+      endProviderSession(logoutUrl)
     }
 
-    // No provider round trip to make: stay on this page and show LogoutPage instead of jumping
-    // straight back to LoginPage, so signing out reads as something that happened.
     setJustLoggedOut(true)
   }, [sso])
 

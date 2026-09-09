@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  clearJustLoggedOutMarker, clearSsoHandoff, readSsoHandoff, requestPasswordSignIn,
-  wantsPasswordSignIn, wasJustLoggedOut, withPostLogoutRedirect,
+  clearSsoHandoff, endProviderSession, readSsoHandoff, requestPasswordSignIn, wantsPasswordSignIn,
 } from './sso'
 
 /**
@@ -123,88 +122,42 @@ describe('wantsPasswordSignIn / requestPasswordSignIn', () => {
 })
 
 /**
- * Telling the provider's end-session endpoint where to send the browser back.
+ * Ending the session at the provider without the browser ever going there.
  *
- * Left unset, "sign out" ends the session at the provider and leaves the browser on whatever
- * page it shows by default — never this app's. And with SSO enforced, a return with nobody
- * signed in bounces straight back to the provider unless the password form was already
- * requested, which is what makes this landing show the sign-in screen instead of another trip
- * through the provider.
+ * A full-page redirect to the provider's end-session endpoint depends on it honoring
+ * `post_logout_redirect_uri` and actually sending the browser back, which does not hold for every
+ * deployment. Loading the same endpoint in a hidden iframe asks the provider to end its session
+ * the same way, but this tab never leaves, so there is no return trip that can fail to arrive.
  */
-describe('withPostLogoutRedirect', () => {
+describe('endProviderSession', () => {
   afterEach(() => {
-    vi.unstubAllEnvs()
-    land('/')
+    document.querySelectorAll('iframe').forEach(el => el.remove())
+    vi.useRealTimers()
   })
 
-  it('sends the provider back to this app with the password form requested', () => {
-    const url = new URL(withPostLogoutRedirect('https://otds.example.com/otdsws/logout'))
+  it('loads the logout endpoint in a hidden iframe rather than navigating the tab', () => {
+    const assign = vi.fn()
+    vi.spyOn(window, 'location', 'get').mockReturnValue({ ...window.location, assign } as Location)
 
-    expect(`${url.origin}${url.pathname}`).toBe('https://otds.example.com/otdsws/logout')
-    const returnUrl = new URL(url.searchParams.get('post_logout_redirect_uri')!)
-    expect(returnUrl.origin).toBe(window.location.origin)
-    expect(returnUrl.searchParams.get('password')).toBe('1')
+    endProviderSession('https://otds.example.com/otdsws/logout')
+
+    const iframe = document.querySelector('iframe')
+    expect(iframe).not.toBeNull()
+    expect(iframe!.hidden).toBe(true)
+    expect(iframe!.src).toBe('https://otds.example.com/otdsws/logout')
+    expect(assign).not.toHaveBeenCalled()
+
+    vi.restoreAllMocks()
   })
 
-  it('returns to the base path the app is served from, not the site root', () => {
-    vi.stubEnv('BASE_URL', '/ot-confluence-bot/')
+  it('cleans the iframe up after giving the provider a chance to respond', () => {
+    vi.useFakeTimers()
 
-    const url = new URL(withPostLogoutRedirect('https://otds.example.com/otdsws/logout'))
+    endProviderSession('https://otds.example.com/otdsws/logout')
+    expect(document.querySelector('iframe')).not.toBeNull()
 
-    const returnUrl = new URL(url.searchParams.get('post_logout_redirect_uri')!)
-    expect(returnUrl.pathname).toBe('/ot-confluence-bot/')
-  })
+    vi.runAllTimers()
 
-  it('keeps the rest of the logout endpoint\'s own query string', () => {
-    const url = new URL(withPostLogoutRedirect('https://otds.example.com/otdsws/logout?client_id=bot'))
-
-    expect(url.searchParams.get('client_id')).toBe('bot')
-  })
-
-  it('does not override a return address the deployment already configured', () => {
-    const configured = 'https://otds.example.com/otdsws/logout?post_logout_redirect_uri=https%3A%2F%2Fother.example.com%2Fbye'
-
-    const url = new URL(withPostLogoutRedirect(configured))
-
-    expect(url.searchParams.get('post_logout_redirect_uri')).toBe('https://other.example.com/bye')
-  })
-
-  it('also marks the return trip as coming from a logout', () => {
-    // So LogoutPage renders on the way back even when SSO is enforced — the enforced redirect
-    // lives inside LoginPage, which this landing must not reach before AuthContext has had a
-    // chance to read this marker and show LogoutPage instead.
-    const url = new URL(withPostLogoutRedirect('https://otds.example.com/otdsws/logout'))
-
-    const returnUrl = new URL(url.searchParams.get('post_logout_redirect_uri')!)
-    expect(returnUrl.searchParams.get('logged_out')).toBe('1')
-  })
-})
-
-/**
- * The one-time notice that this page load is the browser landing back from ending a session at
- * the provider, not an ordinary visit to the sign-in screen.
- */
-describe('wasJustLoggedOut / clearJustLoggedOutMarker', () => {
-  afterEach(() => land('/'))
-
-  it('is false for an ordinary page load', () => {
-    land('/?password=1')
-
-    expect(wasJustLoggedOut()).toBe(false)
-  })
-
-  it('is true once the logout marker is in the query string', () => {
-    land('/?password=1&logged_out=1')
-
-    expect(wasJustLoggedOut()).toBe(true)
-  })
-
-  it('removes only the logout marker, leaving the password escape hatch alone', () => {
-    land('/?password=1&logged_out=1')
-
-    clearJustLoggedOutMarker()
-
-    expect(wasJustLoggedOut()).toBe(false)
-    expect(wantsPasswordSignIn()).toBe(true)
+    expect(document.querySelector('iframe')).toBeNull()
   })
 })
