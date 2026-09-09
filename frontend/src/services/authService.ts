@@ -1,6 +1,6 @@
 import { API_BASE } from '../config/env'
 import { apiFetch, apiJson, jsonBody, toApiError } from './http'
-import type { AuthResponse, UserInfoResponse } from '../types'
+import type { AuthResponse, SsoConfig, UserInfoResponse } from '../types'
 
 /**
  * Sign-in and token rotation.
@@ -20,6 +20,24 @@ async function postUnauthenticatedJson<T>(path: string, body: unknown): Promise<
 
 const postUnauthenticated = (path: string, body: unknown): Promise<AuthResponse> =>
   postUnauthenticatedJson<AuthResponse>(path, body)
+
+async function getUnauthenticated<T>(path: string): Promise<T> {
+  const response = await fetch(`${API_BASE}${path}`, { headers: { Accept: 'application/json' } })
+  if (!response.ok) throw await toApiError(response)
+  return response.json() as Promise<T>
+}
+
+/** Whether this deployment has a directory to sign in through, and where its button goes. */
+export const getSsoConfig = (): Promise<SsoConfig> => getUnauthenticated<SsoConfig>('/auth/sso')
+
+/**
+ * Redeems the one-time code the provider handed the browser.
+ *
+ * Single-use and short-lived, so this is called exactly once per sign-in and a failure is final —
+ * there is nothing to retry, only another trip through the provider.
+ */
+export const exchangeSsoCode = (code: string): Promise<AuthResponse> =>
+  postUnauthenticated('/auth/sso/exchange', { code })
 
 export const login = (email: string, password: string): Promise<AuthResponse> =>
   postUnauthenticated('/auth/login', { email, password })

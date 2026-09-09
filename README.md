@@ -52,7 +52,8 @@ IngestionService
 | Embedding model | `snowflake-arctic-embed-l` (1024 dimensions) |
 | LLM | `llama-4-17b-maverick` (via OpenAI-compatible endpoint) |
 | Confluence | Server 7.19+ — REST API v1, Storage Format |
-| Auth | Personal Access Token (PAT) |
+| Confluence auth | Personal Access Token (PAT) |
+| User auth | JWT access/refresh pair; optional OAuth 2.0 / OpenID Connect SSO (OTDS, Entra ID, Okta, Keycloak, …) |
 
 ## Prerequisites
 
@@ -226,26 +227,15 @@ CHAT_BASE_URL=https://api.openai.com/v1   # answers come from somewhere else
 CHAT_API_KEY=sk-...
 CHAT_MODEL=gpt-4.1
 
-RERANK_BASE_URL=https://litellm.example/v1
-RERANK_MODEL=mmarco-rerank                # LiteLLM model alias configured with mode: rerank
-# RERANK_TRANSPORT=native                  # the default: POST /rerank
+RERANK_MODEL=qwen2.5:3b                   # local, and much cheaper than the answer model
 ```
 
-Re-ranking is the one most worth moving. It is a single native `POST /rerank` call with a query and
-the candidate excerpts — not a chat-completion call. Set `RERANK_MODEL` to the LiteLLM alias whose
-configuration has `mode: rerank`; set `RERANK_BASE_URL` to the LiteLLM proxy base URL (normally
-ending in `/v1`). If the call fails or is refused by its circuit breaker, retrieval keeps the MMR
-ordering and the answer is unaffected.
-
-To use an OpenAI-compatible chat model for this pass instead, set
-`RERANK_TRANSPORT=chat-completions`. The app then calls `/chat/completions` with `CHAT_MODEL`
-(and deliberately ignores `RERANK_MODEL`) and asks for a JSON permutation of the excerpts. Its
-endpoint and API key can still be overridden by `RERANK_BASE_URL` and `RERANK_API_KEY`. For
-example, to use the same model and endpoint that answer questions:
-
-```dotenv
-RERANK_TRANSPORT=chat-completions
-```
+Re-ranking is the one most worth moving. It is a single short call that emits a handful of tokens,
+it runs before the first token of the answer is streamed, and every question pays for it — so the
+model that writes well is rarely the one that should be doing it. Set `RERANK_MODEL` alone to keep
+it on the same server, or `RERANK_BASE_URL` too to move it elsewhere. If the call fails, is refused
+by its circuit breaker, or returns something that is not an order, retrieval keeps the MMR ordering
+and the answer is unaffected.
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
@@ -262,10 +252,9 @@ RERANK_TRANSPORT=chat-completions
 | `EMBED_BASE_URL` | | `AI_BASE_URL` | Endpoint that produces embeddings |
 | `EMBED_API_KEY` | | `AI_API_KEY` | Key for the embedding endpoint |
 | `EMBED_MODEL` | | `openai/snowflake-arctic` | Embedding model name (must produce 1024-dim vectors) |
-| `RERANK_BASE_URL` | | `CHAT_BASE_URL` | Re-ranking API base URL; used for `/rerank` or `/chat/completions`, according to transport |
-| `RERANK_API_KEY` | | `CHAT_API_KEY` | Key for the re-ranking connection |
-| `RERANK_MODEL` | | `CHAT_MODEL` | Native rerank alias in `native` mode; ignored in `chat-completions` mode |
-| `RERANK_TRANSPORT` | | `native` | `native` calls `/rerank`; `chat-completions` prompts the configured chat model for the excerpt order |
+| `RERANK_BASE_URL` | | `CHAT_BASE_URL` | Endpoint that re-ranks retrieved excerpts |
+| `RERANK_API_KEY` | | `CHAT_API_KEY` | Key for the re-ranking endpoint |
+| `RERANK_MODEL` | | `CHAT_MODEL` | Model that re-ranks retrieved excerpts |
 | `RERANK_TEMPERATURE` | | `0.0` | Ranking should be repeatable, so lower than the answer model |
 | `RERANK_MAX_TOKENS` | | `64` | A permutation needs few tokens; raise it for a reasoning model |
 | `CHAT_RERANK_LLM_ENABLED` | | `true` | Off: keep the MMR order and skip the re-rank call entirely |
@@ -290,6 +279,258 @@ RERANK_TRANSPORT=chat-completions
 | `LOG_LEVEL_APP` | | `INFO` | Log level for `com.kssasarma.confluencebot` |
 | `LOG_LEVEL_SPRING_AI` | | `WARN` | Log level for Spring AI |
 | `LOG_LEVEL_FLYWAY` | | `INFO` | Log level for Flyway |
+| `FORWARD_HEADERS_STRATEGY` | | `framework` | Trust `X-Forwarded-*` from the proxy; `none` if exposed directly |
+
+---
+
+## Single Sign-On (OAuth 2.0 / OpenID Connect)
+
+Two ways in, offered side by side. **Password sign-in is unchanged and always available** — it is
+how you get back in when the directory is unreachable, and the only way in for the bootstrap
+administrator, who exists in no directory. Switch SSO on and a **Continue with …** button appears
+next to the password form; leave it off and the sign-in screen is exactly what it was.
+
+A deployment can also decide for everyone rather than leaving it to each visitor's click: set
+`SSO_ENFORCED=true` and the sign-in screen leaves for the provider on its own, no button needed.
+This still does not remove the password form — only the button that would otherwise sit next to
+it — because a directory outage must not also strand the one account with no directory to sign
+into. A quiet **Sign in with a password instead** link stays reachable from the redirect screen,
+and a failed round trip lands back here with the reason shown rather than bouncing straight out
+again.
+
+**Nothing in the code names a vendor.** This was built against OpenText Directory Services, but
+OTDS is an ordinary OIDC authorization server and so is every alternative — Entra ID, Okta,
+Keycloak, Ping, Auth0. Pointing this at a different one is a change to `SSO_*` values and to
+nothing else: no code, no rebuild of the frontend, no migration.
+
+**This is authentication only.** Everyone who signs in through a directory is seated as
+`SSO_DEFAULT_ROLES`. Directory groups are not read and grant nothing; roles are still changed from
+the admin screen.
+
+### How it works
+
+```
+Browser                     This service                  Identity provider
+   │  click "Continue with <provider>"
+   ├──────────────────────────►│
+   │                           │  redirect to the provider with state + PKCE
+   │◄──────────────────────────┤
+   ├───────────────────────────────────────────────────────────►│
+   │                the person signs in, the provider redirects back
+   │◄───────────────────────────────────────────────────────────┤
+   ├──────────────────────────►│  GET /api/login/oauth2/code/<provider-id>?code=…
+   │                           ├──── exchange code for tokens ──►│
+   │                           │◄──── ID token + access token ───┤
+   │                           │  find or create the local account
+   │◄──────────────────────────┤  redirect to /sso/callback#sso_code=…&sso_provider=…
+   ├──────────────────────────►│  POST /api/auth/sso/exchange
+   │◄──────────────────────────┤  the same JWT + refresh pair a password login issues
+```
+
+The handshake ends by minting the ordinary token pair, so every other endpoint, the refresh
+rotation and the JWT filter are untouched. Adding a directory did not add a second kind of session
+to reason about.
+
+Three things are worth pulling out of that diagram.
+
+**The token pair never travels in a URL.** The redirect carries a random, single-use, one-minute
+code instead, which the landing page redeems over a POST. A 30-day refresh token in a URL would
+outlive the sign-in in browser history and leak through the `Referer` of the next request the page
+makes. Only the SHA-256 of the code is stored, so a database dump is not a set of usable sign-ins.
+
+**Identity is keyed on the provider's subject, not the address** — and scoped to the provider that
+issued it. Directories rename mailboxes and reassign them; keying on the address alone follows
+both, and following the second means seating a new employee in a departed one's conversations. A
+subject is only unique inside its own directory, so a deployment that switches provider does not
+seat the new directory's users in the old one's accounts.
+
+**Which provider answered is read off the authentication**, never assumed from configuration —
+which is also what would let a second provider be added as configuration rather than as another
+change here.
+
+### Setting it up
+
+**1. Register an OAuth client with your identity provider.** It needs the authorization code grant
+and this redirect URL:
+
+```
+https://your-host/api/login/oauth2/code/otds
+```
+
+The last segment is `SSO_PROVIDER_ID`, which defaults to `otds`. Change it and this URL changes
+with it, so register whichever you settle on.
+
+Under `/api` on purpose — the bundled nginx already proxies `/api` and nothing else, so SSO needs
+no new proxy rule. Providers compare the URL exactly, so scheme, host, port and path all have to
+match what the browser will actually use.
+
+**2. Point this application at it**, one of two ways.
+
+*Discovery* — the shorter configuration, and the one that survives the provider moving a path.
+`SSO_PROVIDER_ID` and `SSO_PROVIDER_NAME` default to `otds` and `OpenText`, so an OTDS deployment
+sets neither:
+
+```dotenv
+SSO_ENABLED=true
+SSO_ISSUER_URI=https://otds.example.com/otdsws/oauth2
+SSO_CLIENT_ID=confluence-chatbot
+SSO_CLIENT_SECRET=the-secret-otds-generated
+```
+
+The endpoints, the JWKS location and the signing algorithms are read from
+`{issuer}/.well-known/openid-configuration` at startup. A mistyped issuer or an unreachable
+directory therefore fails the deployment rather than the first person who tries to sign in.
+
+*Explicit endpoints* — for a provider that publishes no discovery document, or when the browser and
+this service reach it under different host names. Nothing is fetched:
+
+```dotenv
+SSO_ENABLED=true
+SSO_CLIENT_ID=confluence-chatbot
+SSO_CLIENT_SECRET=the-secret-otds-generated
+SSO_AUTHORIZATION_URI=https://otds.example.com/otdsws/oauth2/auth
+SSO_TOKEN_URI=https://otds.example.com/otdsws/oauth2/token
+SSO_JWK_SET_URI=https://otds.example.com/otdsws/oauth2/jwks
+```
+
+> OTDS endpoint paths differ between releases and between on-premises and the OpenText cloud, so
+> read them off your own server rather than copying them from here. Try
+> `{OTDS_BASE}/otdsws/oauth2/.well-known/openid-configuration` first; if it answers, use discovery
+> and skip this block entirely.
+
+**3. Restart.** `docker compose up -d --build backend`, then load the UI: the button appears when
+`GET /api/auth/sso` reports `enabled: true`.
+
+### Other providers
+
+OTDS is the default, not an assumption. Overriding the id and the issuer is the whole of pointing
+this somewhere else — no code, no rebuild, no migration.
+
+```dotenv
+# Microsoft Entra ID
+SSO_PROVIDER_ID=entra
+SSO_PROVIDER_NAME=Microsoft
+SSO_ISSUER_URI=https://login.microsoftonline.com/<tenant-id>/v2.0
+
+# Okta
+SSO_PROVIDER_ID=okta
+SSO_PROVIDER_NAME=Okta
+SSO_ISSUER_URI=https://<your-org>.okta.com/oauth2/default
+
+# Keycloak
+SSO_PROVIDER_ID=keycloak
+SSO_PROVIDER_NAME=Keycloak
+SSO_ISSUER_URI=https://kc.example.com/realms/<realm>
+
+# Google Workspace
+SSO_PROVIDER_ID=google
+SSO_PROVIDER_NAME=Google
+SSO_ISSUER_URI=https://accounts.google.com
+```
+
+Remember that `SSO_PROVIDER_ID` is the last segment of the redirect URL, so changing it means
+re-registering that URL with the provider.
+
+Only one provider can be configured at a time. The database records which provider each account
+came from and the API reports it, so offering several at once is an additive change rather than a
+rework — but it is not built.
+
+### All the settings
+
+| Variable | Default | Description |
+|---|---|---|
+| `SSO_ENABLED` | `false` | Master switch. Off, none of the below is read and no OAuth beans exist |
+| `SSO_ENFORCED` | `false` | Skips the button: the sign-in screen leaves for the provider on its own. Password sign-in stays reachable through a quiet link, never removed. Ignored while `SSO_ENABLED` is not also true |
+| `SSO_PROVIDER_ID` | `otds` | Short id used in URLs. Last segment of the redirect URL |
+| `SSO_PROVIDER_NAME` | `OpenText` | What the button says: "Continue with …" |
+| `SSO_ISSUER_URI` | | Issuer to discover the endpoints from. Alone, this is the whole configuration |
+| `SSO_CLIENT_ID` | | The OAuth client registered with the provider. Required |
+| `SSO_CLIENT_SECRET` | | Its secret. Empty marks the client public and forces `none` |
+| `SSO_SCOPES` | `openid,profile,email` | `openid` is required, or no ID token comes back |
+| `SSO_REDIRECT_URI` | built from the request | Must match what is registered with the provider, exactly |
+| `SSO_CLIENT_AUTHENTICATION_METHOD` | `client_secret_basic` | Or `client_secret_post`, `none` |
+| `SSO_AUTHORIZATION_URI` | | Explicit endpoint; set with `SSO_TOKEN_URI` to skip discovery |
+| `SSO_TOKEN_URI` | | Explicit endpoint |
+| `SSO_JWK_SET_URI` | | Where ID token signatures are verified against |
+| `SSO_USER_INFO_URI` | | Alternative to the JWKS URL when reading identity from the provider directly |
+| `SSO_USER_NAME_ATTRIBUTE` | `sub` | The claim an account is keyed on |
+| `SSO_EMAIL_CLAIMS` | `email,mail,upn,preferred_username` | Searched in order for the address |
+| `SSO_DEFAULT_ROLES` | `USER` | Roles for an account created on first sign-in (comma-separated) |
+| `SSO_LOGIN_SUCCESS_URI` | `/sso/callback` | Where the browser lands afterwards — see the note below |
+| `SSO_CODE_TTL` | `PT1M` | Life of the single-use hand-off code |
+| `SSO_LOGOUT_URI` | | The provider's end-session endpoint; set it to make signing out reach it |
+
+`SSO_LOGIN_SUCCESS_URI` is where the browser is dropped with its one-time code, so it has to be a
+URL the UI is actually served from. Relative resolves against this service, which is what the
+bundled nginx wants. Two cases need it set explicitly:
+
+```dotenv
+# UI on its own origin — a Vite dev server, say
+SSO_LOGIN_SUCCESS_URI=http://localhost:5173/sso/callback
+
+# UI published under a sub-path (VITE_BASE_PATH=/ot-confluence-bot/)
+SSO_LOGIN_SUCCESS_URI=/ot-confluence-bot/sso/callback
+```
+
+### Behind a reverse proxy
+
+This service builds its own OAuth redirect URI from the incoming request. Behind a
+TLS-terminating proxy that means it needs `X-Forwarded-Proto`, or it will build an `http://` URI
+the provider rejects for not matching what is registered. The bundled `nginx.conf` sets those
+headers and `FORWARD_HEADERS_STRATEGY` defaults to `framework`, so the shipped setup is already
+correct. For any other proxy, either forward `X-Forwarded-Proto` / `X-Forwarded-Host`, or side-step
+the question by pinning the URL:
+
+```dotenv
+SSO_REDIRECT_URI=https://bot.example.com/api/login/oauth2/code/otds
+```
+
+One scaling note: the authorization-code flow keeps `state` and the PKCE verifier in a server-side
+session for the few seconds of the round trip, so a load balancer must keep one sign-in on one
+instance. Everything after sign-in is bearer-token authenticated and does not care.
+
+### Accounts
+
+| Situation | What happens |
+|---|---|
+| Nobody here has this subject or address | An account is created: `SSO_DEFAULT_ROLES`, no password, enabled |
+| An account already exists with that address | It is linked to the subject and keeps its role **and its password** |
+| The address is already linked to a different subject | Refused — the address was reassigned, and the old account is not the new person's |
+| The subject is known but the address changed | The address follows the subject |
+| The same subject arrives from a different provider | Treated as a different person, because a subject is only unique within its own directory |
+| The account is disabled here | Refused, with a message saying so, even though the provider let them through |
+
+An account created from a directory has a null password rather than an unusable placeholder, so a
+password sign-in against one fails as bad credentials and `/api/auth/change-password` says plainly
+that there is nothing to change. The admin screen shows a **Sign-in** column so it is obvious which
+accounts have no password to reset.
+
+### Signing out
+
+Signing out revokes the refresh token and clears the browser's session — but not the provider's, so
+signing straight back in returns the same person with nothing asked of them. Set the end-session
+endpoint to end both:
+
+```dotenv
+SSO_LOGOUT_URI=https://otds.example.com/otdsws/logout
+```
+
+This only redirects sessions that actually came from the provider now configured. Someone who
+signed in with a password is signed out locally and left where they are.
+
+### When it does not work
+
+| Symptom | Cause |
+|---|---|
+| App will not start, `Could not read OpenID provider metadata` | The issuer is wrong or unreachable from the container. Curl it from inside, or switch to explicit endpoints |
+| App will not start, `app.sso.client-id must be set` | `SSO_ENABLED=true` with nothing else configured |
+| The provider shows an invalid redirect URI | What is registered and what this service built differ. Pin `SSO_REDIRECT_URI` and compare them character for character |
+| `Sign-in with … failed (invalid_client)` | Wrong client secret, or the provider expects `client_secret_post` — set `SSO_CLIENT_AUTHENTICATION_METHOD` |
+| `The identity provider returned no email address` | Your provider releases the address under a claim not in the list. Add it to `SSO_EMAIL_CLAIMS` |
+| `This sign-in link is no longer valid` | The one-time code was already redeemed or older than `SSO_CODE_TTL` — usually a reloaded callback page. Sign in again |
+
+Raise `LOG_LEVEL_APP=DEBUG` to see the provisioning decisions; the OAuth handshake itself logs
+under `org.springframework.security.oauth2`.
 
 ---
 
@@ -503,9 +744,15 @@ Untitled conversations that never received a message are cleaned up once they ar
 | `POST` | `/api/auth/logout` | Revoke a refresh token |
 | `GET` | `/api/auth/me` | Describe the signed-in user |
 | `POST` | `/api/auth/change-password` | Change the password and re-issue tokens |
+| `GET` | `/api/auth/sso` | Whether a directory sign-in is offered alongside the password form, and where it starts (public) |
+| `POST` | `/api/auth/sso/exchange` | Redeem the one-time code from a completed SSO sign-in (public) |
 
 Failures are ProblemDetail responses, not 200s with an error field: bad credentials and expired
 refresh tokens both return `401`.
+
+Two more paths exist only when SSO is enabled, and are visited by the browser rather than called
+by the app: `/api/oauth2/authorization/<provider-id>` starts the handshake and
+`/api/login/oauth2/code/<provider-id>` is where the provider sends the browser back.
 
 ### Health check
 
@@ -603,6 +850,7 @@ src/main/java/com/kssasarma/confluencebot/
 ├── rag/                        Hybrid search, rank fusion, re-ranking
 ├── repository/                 Spring Data JPA repositories
 ├── security/                   JWT filter, security config, user details
+│   └── sso/                    OIDC client registration, provisioning, OAuth filter chain
 └── user/                       Users, conversations, transcripts, preferences (+ dto/)
 
 src/main/resources/
@@ -616,5 +864,14 @@ src/main/resources/
     ├── V6__create_users.sql               (users, refresh tokens, default admin)
     ├── V7__create_user_preferences.sql    (preferences, chat sessions)
     ├── V8__fix_admin_password_hash.sql
-    └── V9__create_chat_messages.sql       (transcripts + chat_preferences FK)
+    ├── V9__create_chat_messages.sql       (transcripts + chat_preferences FK)
+    ├── V10__chat_grounding_and_search.sql
+    ├── V11__multi_role_users.sql          (role moves to its own table)
+    ├── V12__add_user_name.sql
+    ├── V13__admin_user_events.sql         (onboarding audit trail)
+    ├── V14__add_space_filtering_support.sql
+    ├── V15__space_suggestions.sql
+    ├── V16__user_business_unit.sql
+    ├── V17__password_reset_otps.sql
+    └── V18__sso_accounts.sql              (nullable password, provider link, hand-off codes)
 ```

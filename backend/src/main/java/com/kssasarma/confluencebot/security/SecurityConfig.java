@@ -3,6 +3,8 @@ package com.kssasarma.confluencebot.security;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ProblemDetail;
@@ -46,7 +48,16 @@ public class SecurityConfig {
         this.objectMapper = objectMapper;
     }
 
+    /**
+     * The application's chain, and deliberately the last one consulted.
+     *
+     * <p>Single sign-on registers a chain ahead of this one for the two OAuth URLs it needs a
+     * session on (see {@code SsoSecurityConfig}); everything else lands here and is authenticated
+     * by bearer token with no session at all. Spelling the order out rather than leaning on the
+     * default keeps that relationship readable from either end.
+     */
     @Bean
+    @Order(Ordered.LOWEST_PRECEDENCE)
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         return http
                 .csrf(AbstractHttpConfigurer::disable)
@@ -65,6 +76,10 @@ public class SecurityConfig {
                                 "/api/auth/refresh",
                                 "/api/auth/logout",
                                 "/api/auth/forgot-password/**",
+                                // A signed-out visitor asks whether there is a directory to sign in
+                                // through, and redeems the code the directory sent them back with.
+                                "/api/auth/sso",
+                                "/api/auth/sso/exchange",
                                 "/actuator/health",
                                 "/v3/api-docs/**",
                                 "/swagger-ui/**",

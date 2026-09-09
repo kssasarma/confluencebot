@@ -2,7 +2,6 @@ package com.kssasarma.confluencebot.auth;
 
 import com.kssasarma.confluencebot.email.EmailService;
 import com.kssasarma.confluencebot.exception.InvalidRefreshTokenException;
-import com.kssasarma.confluencebot.security.JwtService;
 import com.kssasarma.confluencebot.user.PasswordResetOtp;
 import com.kssasarma.confluencebot.user.PasswordResetOtpRepository;
 import com.kssasarma.confluencebot.user.RefreshToken;
@@ -24,10 +23,9 @@ import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
-import java.util.UUID;
 
 /**
- * All four flows run inside a transaction, which is what the refresh flow needs: the refresh token
+ * All flows run inside a transaction, which is what the refresh flow needs: the refresh token
  * carries a lazily-loaded user, and reading it outside a session is exactly what used to blow up
  * with a LazyInitializationException.
  */
@@ -42,33 +40,30 @@ public class AuthServiceImpl implements AuthService {
     private static final int OTP_DIGITS = 6;
 
     private final AuthenticationManager authenticationManager;
-    private final JwtService jwtService;
     private final UserRepository userRepository;
     private final RefreshTokenRepository refreshTokenRepository;
     private final PasswordResetOtpRepository otpRepository;
     private final EmailService emailService;
     private final PasswordEncoder passwordEncoder;
-    private final Duration refreshTokenTtl;
+    private final TokenIssuer tokenIssuer;
     private final Duration otpTtl;
     private final SecureRandom secureRandom = new SecureRandom();
 
     public AuthServiceImpl(AuthenticationManager authenticationManager,
-                           JwtService jwtService,
                            UserRepository userRepository,
                            RefreshTokenRepository refreshTokenRepository,
                            PasswordResetOtpRepository otpRepository,
                            EmailService emailService,
                            PasswordEncoder passwordEncoder,
-                           @Value("${app.jwt.refresh-token-ttl:P30D}") Duration refreshTokenTtl,
+                           TokenIssuer tokenIssuer,
                            @Value("${app.otp.ttl:PT10M}") Duration otpTtl) {
         this.authenticationManager = authenticationManager;
-        this.jwtService = jwtService;
         this.userRepository = userRepository;
         this.refreshTokenRepository = refreshTokenRepository;
         this.otpRepository = otpRepository;
         this.emailService = emailService;
         this.passwordEncoder = passwordEncoder;
-        this.refreshTokenTtl = refreshTokenTtl;
+        this.tokenIssuer = tokenIssuer;
         this.otpTtl = otpTtl;
     }
 
@@ -80,7 +75,7 @@ public class AuthServiceImpl implements AuthService {
         User user = userRepository.findByEmail(request.email())
                 .orElseThrow(() -> new BadCredentialsException("Invalid email or password"));
 
-        return issueTokens(user);
+        return tokenIssuer.issue(user);
     }
 
     @Override
@@ -93,7 +88,7 @@ public class AuthServiceImpl implements AuthService {
         }
 
         token.setRevoked(true);
-        return issueTokens(token.getUser());
+        return tokenIssuer.issue(token.getUser());
     }
 
     @Override
@@ -107,6 +102,14 @@ public class AuthServiceImpl implements AuthService {
         User managed = userRepository.findById(user.getId())
                 .orElseThrow(() -> new BadCredentialsException("Invalid email or password"));
 
+        // A directory-provisioned account has no password here to be current, new, or wrong. So
+        // is kinder than the "current password is incorrect" every attempt would otherwise get,
+        // and it is the whole reason the change-password wall is not shown to those accounts.
+        if (managed.hasNoLocalPassword()) {
+            throw new IllegalArgumentException(
+                    "This account signs in through your identity provider and has no password to change.");
+        }
+
         if (!passwordEncoder.matches(request.currentPassword(), managed.getPassword())) {
             throw new BadCredentialsException("Current password is incorrect");
         }
@@ -117,7 +120,7 @@ public class AuthServiceImpl implements AuthService {
         // Every previously issued refresh token dies with the old password.
         refreshTokenRepository.revokeAllByUserId(managed.getId());
 
-        return issueTokens(managed);
+        return tokenIssuer.issue(managed);
     }
 
     @Override
@@ -189,28 +192,12 @@ public class AuthServiceImpl implements AuthService {
         // survive that password being reset out from under it.
         refreshTokenRepository.revokeAllByUserId(user.getId());
 
-        return issueTokens(user);
+        return tokenIssuer.issue(user);
     }
 
     private String generateOtp() {
         int bound = (int) Math.pow(10, OTP_DIGITS);
         int value = secureRandom.nextInt(bound);
         return String.format("%0" + OTP_DIGITS + "d", value);
-    }
-
-    // ── Internals ─────────────────────────────────────────────────────────────
-
-    private AuthResponse issueTokens(User user) {
-        String accessToken = jwtService.generateToken(user);
-
-        RefreshToken refreshToken = new RefreshToken();
-        refreshToken.setUser(user);
-        refreshToken.setToken(UUID.randomUUID().toString());
-        refreshToken.setExpiresAt(Instant.now().plus(refreshTokenTtl));
-        refreshTokenRepository.save(refreshToken);
-
-        return new AuthResponse(
-                user.getId(), user.getEmail(), user.getName(), UserRole.namesOf(user.getRoles()),
-                accessToken, refreshToken.getToken(), user.isMustChangePassword(), null);
     }
 }

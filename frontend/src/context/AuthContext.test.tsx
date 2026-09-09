@@ -17,6 +17,17 @@ function json(body: unknown, status = 200): Response {
   })
 }
 
+/**
+ * A fresh Response per call, not one shared instance.
+ *
+ * A Response body can only be read once, so handing the same object to every `fetch` makes the
+ * fixture depend on the provider making exactly one request — which it does not: it also asks
+ * whether this deployment offers single sign-on.
+ */
+function alwaysRespond(body: unknown, status = 200): void {
+  fetchMock.mockImplementation(() => Promise.resolve(json(body, status)))
+}
+
 const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>()
 
 beforeEach(() => {
@@ -40,9 +51,7 @@ function Probe() {
 
 function renderAsSignedIn(roles: string[]) {
   localStorage.setItem(TOKEN_KEY, 'header.payload.signature')
-  fetchMock.mockResolvedValue(json({
-    userId: 1, email: 'reader@example.com', roles, mustChangePassword: false,
-  }))
+  alwaysRespond({ userId: 1, email: 'reader@example.com', roles, mustChangePassword: false })
   return render(
     <AuthProvider>
       <Probe />

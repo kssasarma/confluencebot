@@ -105,6 +105,10 @@ function makeFetchMock(options: { meRoles: string[]; users?: StubUser[]; jobs?: 
           hasNext: start + size < jobs.length,
         })
       }
+      // Asked once on mount by the auth provider; this deployment has no directory configured.
+      if (url.includes('/auth/sso')) {
+        return json({ enabled: false, providerId: null, providerName: null, authorizationUrl: null, logoutUrl: null })
+      }
 
       return json({}, 404)
     },

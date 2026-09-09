@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { RouterProvider } from 'react-router-dom'
 import Providers from './app/providers'
-import { router } from './app/router'
+import { createAppRouter } from './app/router'
 import { useAuth } from './context/AuthContext'
 import LoginPage from './components/auth/LoginPage'
 import ForgotPasswordPage from './components/auth/ForgotPasswordPage'
@@ -30,6 +30,9 @@ export default function App() {
 function AuthenticatedApp() {
   const { user, isLoading } = useAuth()
   const [showForgotPassword, setShowForgotPassword] = useState(false)
+  // Built the first time it is actually needed, not on the first render of this component — see
+  // the comment on createAppRouter for why that timing is what makes an SSO landing work.
+  const routerRef = useRef<ReturnType<typeof createAppRouter> | null>(null)
 
   if (isLoading) {
     return (
@@ -47,5 +50,8 @@ function AuthenticatedApp() {
   if (user.mustChangePassword) return <ChangePasswordPage />
   if (!user.name) return <CompleteProfilePage />
 
-  return <RouterProvider router={router} />
+  if (!routerRef.current) {
+    routerRef.current = createAppRouter()
+  }
+  return <RouterProvider router={routerRef.current} />
 }
