@@ -43,7 +43,7 @@ public class SsoServiceImpl implements SsoService {
     // Reads configuration and touches no table, so it opens no transaction — it is the one call
     // here made by a browser that has not authenticated, on every load of the sign-in screen.
     @Override
-    public SsoStatusResponse describe() {
+    public SsoStatusResponse describe(String baseUrl) {
         if (!properties.enabled()) {
             return SsoStatusResponse.disabled();
         }
@@ -51,7 +51,7 @@ public class SsoServiceImpl implements SsoService {
                 true,
                 properties.providerId(),
                 properties.providerName(),
-                properties.authorizationRequestUri(),
+                baseUrl + properties.authorizationRequestUri(),
                 StringUtils.hasText(properties.logoutUri()) ? properties.logoutUri() : null,
                 properties.enforced());
     }

@@ -8,8 +8,9 @@ app:
     # How long a "forgot password" one-time code stays valid (ISO-8601 duration)
     ttl: ${OTP_TTL:PT10M}
   cors:
-    # Browser origins allowed to call the API. The bundled nginx proxies /api on the same origin,
-    # so this only matters when the UI is served from somewhere else.
+    # Browser origins allowed to call the API. The frontend always calls this service at its own
+    # absolute URL rather than through a same-origin proxy, so set this to the UI's real origin(s)
+    # in anything but a throwaway local setup.
     allowed-origins: ${CORS_ALLOWED_ORIGINS:*}
   # Where the frontend is served from. Included as a sign-in link in onboarding emails; left
   # blank, the email just omits that line.
@@ -65,9 +66,9 @@ app:
     client-secret: ${SSO_CLIENT_SECRET:}
     scopes: ${SSO_SCOPES:openid,profile,email}
 
-    # {baseUrl} expands to this service's own scheme, host and port — correct behind a proxy only
-    # if forward-headers-strategy below is on. Pin it to a literal URL if in any doubt; providers
-    # compare it exactly.
+    # {baseUrl} expands to this service's own scheme, host and port — correct behind a proxy in
+    # front of this service only if forward-headers-strategy below is on. Pin it to a literal URL
+    # if in any doubt; providers compare it exactly.
     redirect-uri: ${SSO_REDIRECT_URI:{baseUrl}/api/login/oauth2/code/{registrationId}}
     client-authentication-method: ${SSO_CLIENT_AUTHENTICATION_METHOD:client_secret_basic}
 
@@ -88,8 +89,10 @@ app:
     # not do — promote from the admin screen.
     default-roles: ${SSO_DEFAULT_ROLES:USER}
 
-    # Where the browser lands afterwards. Relative resolves against this service, which is right
-    # when nginx serves the UI and the API on one origin; give an absolute URL when it does not.
+    # Where the browser lands afterwards. Relative resolves against this service's own origin,
+    # which is only right if something makes the UI and the API share one — nothing here does, so
+    # in practice this is always an absolute URL to the UI, e.g.
+    # https://ui.example.com/sso/callback (VITE_BASE_PATH included, if set).
     login-success-uri: ${SSO_LOGIN_SUCCESS_URI:/sso/callback}
 
     # The provider's end-session endpoint. Set it and signing out ends that session too, so the

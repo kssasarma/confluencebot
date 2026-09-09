@@ -3,7 +3,9 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm i
 COPY . .
-ARG VITE_API_BASE=/api
+# Absolute URL to the backend, /api included — nginx below proxies nothing, so this must be a
+# URL the browser can reach directly.
+ARG VITE_API_BASE=http://localhost:8080/api
 ARG VITE_APP_TITLE="Satya's Confluence Agent"
 ARG VITE_BASE_PATH=/
 ENV VITE_API_BASE=$VITE_API_BASE

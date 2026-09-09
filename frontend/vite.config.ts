@@ -29,14 +29,11 @@ export default defineConfig(({ mode }) => {
     plugins: [react()],
     base,
 
+    // No dev-server proxy: VITE_API_BASE is an absolute URL to the backend (see
+    // frontend/.env.example), and the backend's CORS config is what makes that reachable from a
+    // browser tab running on this dev server's own origin.
     server: {
       port: 5173,
-      proxy: {
-        '/api': {
-          target: 'http://localhost:8080',
-          changeOrigin: true,
-        },
-      },
     },
 
     build: {

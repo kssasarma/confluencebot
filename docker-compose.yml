@@ -50,7 +50,11 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        VITE_API_BASE: ${VITE_API_BASE:-/api}
+        # Absolute URL to the backend, /api included — this container's nginx serves only static
+        # files and proxies nothing, so the browser must be able to reach this URL directly. The
+        # default matches the backend's published host port below (APP_PORT); override it for any
+        # other deployment.
+        VITE_API_BASE: ${VITE_API_BASE:-http://localhost:${APP_PORT:-8080}/api}
         VITE_APP_TITLE: ${VITE_APP_TITLE:-Satya's Confluence Agent}
         VITE_BASE_PATH: ${VITE_BASE_PATH:-/}
     container_name: confluence-chatbot-frontend

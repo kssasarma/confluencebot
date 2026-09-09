@@ -126,8 +126,10 @@ public record SsoProperties(
         @DefaultValue("USER") Set<UserRole> defaultRoles,
 
         /** Where the browser is sent once tokens are minted. Relative resolves against this
-         *  service's own base URL, which is right when nginx serves the UI and the API on one
-         *  origin; give an absolute URL when the UI is somewhere else (a Vite dev server, say). */
+         *  service's own base URL, which is only ever right if something makes the UI and the API
+         *  share an origin — nothing in this deployment does that any more. Set this to the UI's
+         *  absolute URL (its {@code VITE_BASE_PATH} included), e.g.
+         *  {@code https://ui.example.com/sso/callback}. */
         @DefaultValue("/sso/callback") String loginSuccessUri,
 
         /** The provider's end-session endpoint. Set it and signing out ends the provider's session
@@ -140,7 +142,9 @@ public record SsoProperties(
         @DefaultValue("PT1M") Duration codeTtl
 ) {
 
-    /** Where the browser starts the handshake. Under {@code /api} to reuse the existing proxy rule. */
+    /** Where the browser starts the handshake, relative to this service's own origin. The UI turns
+     *  this into an absolute URL itself — see {@link com.kssasarma.confluencebot.auth.SsoServiceImpl}
+     *  — since nothing proxies the UI and this service onto one origin. */
     public static final String AUTHORIZATION_BASE_URI = "/api/oauth2/authorization";
 
     /** Where the provider sends the browser back with an authorization code. The trailing
