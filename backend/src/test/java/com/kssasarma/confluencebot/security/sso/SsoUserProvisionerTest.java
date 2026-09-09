@@ -236,6 +236,71 @@ class SsoUserProvisionerTest {
         assertThat(user.getExternalId()).isEqualTo("cn=jane,ou=people");
     }
 
+    // ── name ─────────────────────────────────────────────────────────────────
+
+    @Test
+    void theDisplayNameIsTakenFromTheConfiguredClaimOnAFreshlyProvisionedAccount() {
+        User user = provisioner.provision(PROVIDER,
+                principal(Map.of("sub", SUBJECT, "email", "jane@corp.example", "name", "Jane Doe")));
+
+        assertThat(user.getName()).isEqualTo("Jane Doe");
+    }
+
+    @Test
+    void theDisplayNameOverwritesWhateverWasStoredBefore_evenIfTheUserSetItThemselves() {
+        User existing = localUser("jane@corp.example", UserRole.USER, "hash");
+        existing.setName("A Name The User Typed In Themselves");
+        when(userRepository.findByEmailIgnoreCase("jane@corp.example")).thenReturn(Optional.of(existing));
+
+        User user = provisioner.provision(PROVIDER,
+                principal(Map.of("sub", SUBJECT, "email", "jane@corp.example", "name", "Jane Doe")));
+
+        assertThat(user.getName()).isEqualTo("Jane Doe");
+    }
+
+    @Test
+    void theDisplayNameIsOverwrittenAgainOnEveryReturningSignIn() {
+        User linked = ssoUser("jane@corp.example", SUBJECT);
+        linked.setName("Stale Name From A Previous Sign-In");
+        when(userRepository.findBySsoProviderIdAndExternalId(PROVIDER, SUBJECT)).thenReturn(Optional.of(linked));
+
+        User user = provisioner.provision(PROVIDER,
+                principal(Map.of("sub", SUBJECT, "email", "jane@corp.example", "name", "Jane R. Doe")));
+
+        assertThat(user.getName()).isEqualTo("Jane R. Doe");
+    }
+
+    @Test
+    void theDisplayNameFallsBackToGivenAndFamilyNameWhenTheNameClaimIsAbsent() {
+        User user = provisioner.provision(PROVIDER, principal(Map.of(
+                "sub", SUBJECT, "email", "jane@corp.example",
+                "given_name", "Jane", "family_name", "Doe")));
+
+        assertThat(user.getName()).isEqualTo("Jane Doe");
+    }
+
+    @Test
+    void aMissingNameLeavesWhateverIsStoredAlone() {
+        User existing = localUser("jane@corp.example", UserRole.USER, "hash");
+        existing.setName("Kept As Is");
+        when(userRepository.findByEmailIgnoreCase("jane@corp.example")).thenReturn(Optional.of(existing));
+
+        User user = provisioner.provision(PROVIDER, principal(Map.of("sub", SUBJECT, "email", "jane@corp.example")));
+
+        assertThat(user.getName()).isEqualTo("Kept As Is");
+    }
+
+    @Test
+    void theNameClaimCanBePointedSomewhereElse() {
+        provisioner = new SsoUserProvisioner(userRepository,
+                SsoPropertiesFixture.aProvider().nameAttribute("displayName").build());
+
+        User user = provisioner.provision(PROVIDER, principal(Map.of(
+                "sub", SUBJECT, "email", "jane@corp.example", "displayName", "Jane From Ldap")));
+
+        assertThat(user.getName()).isEqualTo("Jane From Ldap");
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private static OAuth2User principal(Map<String, Object> claims) {

@@ -2,6 +2,7 @@ package com.kssasarma.confluencebot.auth;
 
 import com.kssasarma.confluencebot.email.EmailService;
 import com.kssasarma.confluencebot.exception.InvalidRefreshTokenException;
+import com.kssasarma.confluencebot.exception.SsoOnlyAccountException;
 import com.kssasarma.confluencebot.user.PasswordResetOtp;
 import com.kssasarma.confluencebot.user.PasswordResetOtpRepository;
 import com.kssasarma.confluencebot.user.RefreshToken;
@@ -69,6 +70,12 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     public AuthResponse login(LoginRequest request) {
+        User existing = userRepository.findByEmail(request.email()).orElse(null);
+        if (existing != null && existing.isSsoOnly()) {
+            throw new SsoOnlyAccountException(
+                    "This account now signs in through single sign-on. Use \"Continue with SSO\" instead of a password.");
+        }
+
         authenticationManager.authenticate(
                 new UsernamePasswordAuthenticationToken(request.email(), request.password()));
 
@@ -105,7 +112,9 @@ public class AuthServiceImpl implements AuthService {
         // A directory-provisioned account has no password here to be current, new, or wrong. So
         // is kinder than the "current password is incorrect" every attempt would otherwise get,
         // and it is the whole reason the change-password wall is not shown to those accounts.
-        if (managed.hasNoLocalPassword()) {
+        // The same applies to an account that kept its password after linking SSO: it is no
+        // longer a valid way in, so there is nothing here for this endpoint to change either.
+        if (managed.isSsoOnly() || managed.hasNoLocalPassword()) {
             throw new IllegalArgumentException(
                     "This account signs in through your identity provider and has no password to change.");
         }
@@ -146,6 +155,14 @@ public class AuthServiceImpl implements AuthService {
             return true;
         }
 
+        if (user.get().isSsoOnly()) {
+            // Same silent outcome as an unknown email, for the same reason: whether an address is
+            // SSO-only is not this endpoint's business to reveal, and there is no password here
+            // for a code to reset anyway.
+            log.debug("Password reset requested for an SSO-only account");
+            return true;
+        }
+
         // Only the most recently issued code is ever valid — a reader who asks twice should not
         // be left guessing which of two emails is current.
         otpRepository.consumeAllByUserId(user.get().getId());
@@ -168,6 +185,13 @@ public class AuthServiceImpl implements AuthService {
     public AuthResponse resetPassword(ResetPasswordRequest request) {
         User user = userRepository.findByEmail(request.email())
                 .orElseThrow(() -> new BadCredentialsException("Invalid or expired code"));
+
+        // The account may have linked SSO after the code was issued — e.g. the two happened in
+        // the same browser session — so the OTP itself can still be genuine and unexpired. It
+        // still resets nothing this account can use, so it is treated the same as an invalid one.
+        if (user.isSsoOnly()) {
+            throw new BadCredentialsException("Invalid or expired code");
+        }
 
         PasswordResetOtp otp = otpRepository
                 .findTopByUserIdAndConsumedFalseOrderByCreatedAtDesc(user.getId())

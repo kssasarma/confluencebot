@@ -31,6 +31,7 @@ public final class SsoPropertiesFixture {
     private String jwkSetUri = "";
     private String userNameAttribute = "sub";
     private List<String> emailClaims = List.of("email", "mail", "upn", "preferred_username");
+    private String nameAttribute = "name";
     private Set<UserRole> defaultRoles = Set.of(UserRole.USER);
     private String loginSuccessUri = "/sso/callback";
     private String logoutUri = "";
@@ -65,6 +66,7 @@ public final class SsoPropertiesFixture {
     public SsoPropertiesFixture jwkSetUri(String value) { this.jwkSetUri = value; return this; }
     public SsoPropertiesFixture userNameAttribute(String value) { this.userNameAttribute = value; return this; }
     public SsoPropertiesFixture emailClaims(List<String> value) { this.emailClaims = value; return this; }
+    public SsoPropertiesFixture nameAttribute(String value) { this.nameAttribute = value; return this; }
     public SsoPropertiesFixture defaultRoles(Set<UserRole> value) { this.defaultRoles = value; return this; }
     public SsoPropertiesFixture loginSuccessUri(String value) { this.loginSuccessUri = value; return this; }
     public SsoPropertiesFixture logoutUri(String value) { this.logoutUri = value; return this; }
@@ -74,7 +76,7 @@ public final class SsoPropertiesFixture {
     public SsoProperties build() {
         return new SsoProperties(enabled, enforced, providerId, providerName, issuerUri, clientId,
                 clientSecret, scopes, redirectUri, clientAuthenticationMethod, authorizationUri,
-                tokenUri, userInfoUri, jwkSetUri, userNameAttribute, emailClaims, defaultRoles,
-                loginSuccessUri, logoutUri, codeTtl, publicBaseUrl);
+                tokenUri, userInfoUri, jwkSetUri, userNameAttribute, emailClaims, nameAttribute,
+                defaultRoles, loginSuccessUri, logoutUri, codeTtl, publicBaseUrl);
     }
 }

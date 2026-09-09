@@ -84,6 +84,11 @@ app:
     user-name-attribute: ${SSO_USER_NAME_ATTRIBUTE:sub}
     email-claims: ${SSO_EMAIL_CLAIMS:email,mail,upn,preferred_username}
 
+    # Claim carrying the display name. Read on every sign-in and overwrites whatever name is
+    # stored locally, so the directory stays the source of truth even if the person edited their
+    # name here before. Falls back to given_name + family_name when this claim is absent.
+    name-attribute: ${SSO_NAME_ATTRIBUTE:name}
+
     # Roles given to an account created on first sign-in — plural, because an account here holds
     # a set of roles. Reading them out of directory groups is authorization, which this build does
     # not do — promote from the admin screen.

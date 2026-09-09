@@ -2,6 +2,7 @@ package com.kssasarma.confluencebot.auth;
 
 import com.kssasarma.confluencebot.email.EmailService;
 import com.kssasarma.confluencebot.exception.InvalidRefreshTokenException;
+import com.kssasarma.confluencebot.exception.SsoOnlyAccountException;
 import com.kssasarma.confluencebot.security.JwtService;
 import com.kssasarma.confluencebot.user.PasswordResetOtp;
 import com.kssasarma.confluencebot.user.PasswordResetOtpRepository;
@@ -97,6 +98,33 @@ class AuthServiceImplTest {
 
         assertThatThrownBy(() -> service.login(new LoginRequest("ghost@example.com", "secret")))
                 .isInstanceOf(BadCredentialsException.class);
+    }
+
+    @Test
+    void login_ssoLinkedRegularUser_isRefusedBeforeCredentialsAreEvenChecked() {
+        User user = userWithRoles(15L, "jane@example.com", Set.of(UserRole.USER));
+        user.setSsoProviderId("otds");
+        user.setExternalId("subject-1");
+        when(userRepository.findByEmail("jane@example.com")).thenReturn(Optional.of(user));
+
+        assertThatThrownBy(() -> service.login(new LoginRequest("jane@example.com", "whatever")))
+                .isInstanceOf(SsoOnlyAccountException.class)
+                .hasMessageContaining("single sign-on");
+        verify(authenticationManager, never()).authenticate(any());
+    }
+
+    @Test
+    void login_ssoLinkedAdminWhoStillHoldsAPassword_isAllowedAsABreakGlassPath() {
+        User admin = userWithRoles(16L, "admin@example.com", Set.of(UserRole.ADMIN));
+        admin.setSsoProviderId("otds");
+        admin.setExternalId("subject-admin");
+        when(userRepository.findByEmail("admin@example.com")).thenReturn(Optional.of(admin));
+        when(jwtService.generateToken(admin)).thenReturn("admin-token");
+
+        AuthResponse response = service.login(new LoginRequest("admin@example.com", "secret"));
+
+        assertThat(response.token()).isEqualTo("admin-token");
+        verify(authenticationManager).authenticate(any());
     }
 
     @Test
@@ -363,6 +391,21 @@ class AuthServiceImplTest {
         assertThatThrownBy(() -> service.resetPassword(
                 new ResetPasswordRequest("user@example.com", "123456", "newPassword1")))
                 .isInstanceOf(BadCredentialsException.class);
+    }
+
+    @Test
+    void resetPassword_ssoOnlyAccountWithAStaleValidOtp_isStillRefused() {
+        // The OTP could be genuine and unexpired if the account linked SSO after it was issued —
+        // it still resets nothing this account can use, so it is treated the same as an invalid one.
+        User migrated = userWithRoles(17L, "jane@corp.example", Set.of(UserRole.USER));
+        migrated.setSsoProviderId("otds");
+        migrated.setExternalId("subject-1");
+        when(userRepository.findByEmail("jane@corp.example")).thenReturn(Optional.of(migrated));
+
+        assertThatThrownBy(() -> service.resetPassword(
+                new ResetPasswordRequest("jane@corp.example", "123456", "newPassword1")))
+                .isInstanceOf(BadCredentialsException.class);
+        verify(otpRepository, never()).findTopByUserIdAndConsumedFalseOrderByCreatedAtDesc(any());
     }
 
     @Test

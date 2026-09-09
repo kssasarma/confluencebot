@@ -119,6 +119,12 @@ public record SsoProperties(
          *  the lookup is a list rather than a single name. */
         @DefaultValue({"email", "mail", "upn", "preferred_username"}) List<String> emailClaims,
 
+        /** Claim carrying the person's display name. Read on every sign-in and written over
+         *  whatever is stored locally — the directory is the source of truth for this field, not
+         *  a value the user set once here. Falls back to {@code given_name}/{@code family_name}
+         *  combined when this claim is absent. */
+        @DefaultValue("name") String nameAttribute,
+
         /** Roles given to an account provisioned on first sign-in. Plural because an account
          *  here holds a set of roles, not one; left at {@code USER} because granting
          *  administration from a directory group is authorization, which this does not do —

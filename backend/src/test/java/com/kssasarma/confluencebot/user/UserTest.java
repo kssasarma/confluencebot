@@ -95,4 +95,47 @@ class UserTest {
 
         assertThat(user.getName()).isEqualTo("Ada Lovelace");
     }
+
+    // ── isSsoOnly ────────────────────────────────────────────────────────────
+
+    @Test
+    void isSsoOnly_neverLinkedToADirectory_isFalse() {
+        User user = new User();
+        user.setPassword("hashed");
+
+        assertThat(user.isSsoOnly()).isFalse();
+    }
+
+    @Test
+    void isSsoOnly_regularUserLinkedToSso_isTrueEvenIfAPasswordSurvives() {
+        User user = new User();
+        user.setRoles(Set.of(UserRole.USER));
+        user.setPassword("still-here-from-before-linking");
+        user.setSsoProviderId("otds");
+        user.setExternalId("subject-1");
+
+        assertThat(user.isSsoOnly()).isTrue();
+    }
+
+    @Test
+    void isSsoOnly_adminLinkedToSsoWithAPassword_staysFalseAsABreakGlassPath() {
+        User user = new User();
+        user.setRoles(Set.of(UserRole.ADMIN));
+        user.setPassword("hashed");
+        user.setSsoProviderId("otds");
+        user.setExternalId("subject-1");
+
+        assertThat(user.isSsoOnly()).isFalse();
+    }
+
+    @Test
+    void isSsoOnly_adminLinkedToSsoWithNoPassword_isTrue() {
+        User user = new User();
+        user.setRoles(Set.of(UserRole.ADMIN));
+        user.setPassword(null);
+        user.setSsoProviderId("otds");
+        user.setExternalId("subject-1");
+
+        assertThat(user.isSsoOnly()).isTrue();
+    }
 }
