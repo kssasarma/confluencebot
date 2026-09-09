@@ -43,10 +43,16 @@ public class SsoServiceImpl implements SsoService {
     // Reads configuration and touches no table, so it opens no transaction — it is the one call
     // here made by a browser that has not authenticated, on every load of the sign-in screen.
     @Override
-    public SsoStatusResponse describe(String baseUrl) {
+    public SsoStatusResponse describe(String requestBaseUrl) {
         if (!properties.enabled()) {
             return SsoStatusResponse.disabled();
         }
+        // A pinned value wins outright: it exists precisely because a request-derived base URL is
+        // only as trustworthy as every proxy between the browser and here, and a proxy that
+        // forwards its own upstream address instead of the public one breaks that silently.
+        String baseUrl = StringUtils.hasText(properties.publicBaseUrl())
+                ? properties.publicBaseUrl()
+                : requestBaseUrl;
         return new SsoStatusResponse(
                 true,
                 properties.providerId(),

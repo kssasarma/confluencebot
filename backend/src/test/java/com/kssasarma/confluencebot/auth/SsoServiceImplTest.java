@@ -99,6 +99,19 @@ class SsoServiceImplTest {
     }
 
     @Test
+    void aPinnedPublicBaseUrlOverridesWhateverTheRequestSeemedToSay() {
+        // A proxy that forwards its own upstream address as the Host header, rather than the
+        // public one the browser used, makes the request a liar. This is the escape hatch —
+        // exactly like SSO_REDIRECT_URI already is for the callback URL.
+        SsoServiceImpl pinned = new SsoServiceImpl(
+                SsoPropertiesFixture.aProvider().publicBaseUrl("https://api.bot.example.com").build(),
+                loginCodeRepository, tokenIssuer);
+
+        assertThat(pinned.describe("http://localhost:8092/confluencebot-backend").authorizationUrl())
+                .isEqualTo("https://api.bot.example.com/api/oauth2/authorization/otds");
+    }
+
+    @Test
     void aDeploymentThatSkipsTheButtonSaysSoOverTheSameEndpoint() {
         SsoServiceImpl enforced = new SsoServiceImpl(
                 SsoPropertiesFixture.aProvider().enforced(true).build(), loginCodeRepository, tokenIssuer);

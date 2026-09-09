@@ -103,6 +103,17 @@ app:
     # lands on, immediately.
     code-ttl: ${SSO_CODE_TTL:PT1M}
 
+    # This service's own externally-reachable origin, pinned literally. Left unset, the
+    # authorization URL handed to the UI is worked out from the request that asked for it — which
+    # only comes out right if every proxy between the browser and this service adds correct
+    # X-Forwarded-Host/X-Forwarded-Proto headers. A proxy that instead forwards the request with
+    # its own upstream target as the Host header (rather than the public one the browser used)
+    # breaks that derivation silently, handing the browser a URL only reachable from inside the
+    # proxy's own network. Set this once the same way SSO_REDIRECT_URI is pinned, and the
+    # derivation is never attempted: https://api.bot.example.com, or, behind a path-prefixing
+    # proxy, https://api.bot.example.com/confluencebot-backend.
+    public-base-url: ${SSO_PUBLIC_BASE_URL:}
+
 spring:
   application:
     name: confluence-chatbot
