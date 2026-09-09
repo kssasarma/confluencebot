@@ -208,7 +208,62 @@ describe('AuthProvider — signing out of a directory session', () => {
 
     await userEvent.click(screen.getByRole('button', { name: /sign out/i }))
 
-    expect(assign).toHaveBeenCalledWith('https://otds.example.com/otdsws/logout')
+    const [target] = assign.mock.calls[0]
+    const url = new URL(target)
+    expect(`${url.origin}${url.pathname}`).toBe('https://otds.example.com/otdsws/logout')
+    expect(url.searchParams.get('post_logout_redirect_uri')).toBe(`${window.location.origin}/?password=1`)
+  })
+
+  it('asks the provider to send the browser back to this app\'s sign-in screen, password form ready', async () => {
+    // Without this, an enforced deployment lands back here signed out, sees nobody signed in, and
+    // leaves for the provider all over again — not a loop, since the provider's own session is
+    // already gone, but "sign out" would bounce through the provider a second time instead of
+    // ever showing this app's own screen.
+    mockGetSsoConfig.mockResolvedValue({
+      enabled: true, providerId: 'otds', providerName: 'OpenText',
+      authorizationUrl: '/api/oauth2/authorization/otds',
+      logoutUrl: 'https://otds.example.com/otdsws/logout', enforced: true,
+    })
+    localStorage.setItem(TOKEN_KEY, token)
+    localStorage.setItem(REFRESH_KEY, 'refresh-token')
+    localStorage.setItem(SSO_SESSION_KEY, 'otds')
+    mockGetMe.mockResolvedValue(session())
+    mockRevokeSession.mockReturnValue(new Promise(() => {}))
+    const assign = vi.fn()
+    vi.spyOn(window, 'location', 'get').mockReturnValue({ ...window.location, assign } as Location)
+
+    render(<AuthProvider><LogoutProbe /></AuthProvider>)
+    await waitFor(() => expect(screen.getByTestId('user')).toHaveTextContent('jane@corp.example'))
+
+    await userEvent.click(screen.getByRole('button', { name: /sign out/i }))
+
+    const target = new URL(assign.mock.calls[0][0])
+    const returnUrl = new URL(target.searchParams.get('post_logout_redirect_uri')!)
+    expect(returnUrl.searchParams.get('password')).toBe('1')
+  })
+
+  it('leaves an already-configured return address alone', async () => {
+    mockGetSsoConfig.mockResolvedValue({
+      enabled: true, providerId: 'otds', providerName: 'OpenText',
+      authorizationUrl: '/api/oauth2/authorization/otds',
+      logoutUrl: 'https://otds.example.com/otdsws/logout?post_logout_redirect_uri=https%3A%2F%2Fother.example.com%2Fbye',
+      enforced: true,
+    })
+    localStorage.setItem(TOKEN_KEY, token)
+    localStorage.setItem(REFRESH_KEY, 'refresh-token')
+    localStorage.setItem(SSO_SESSION_KEY, 'otds')
+    mockGetMe.mockResolvedValue(session())
+    mockRevokeSession.mockReturnValue(new Promise(() => {}))
+    const assign = vi.fn()
+    vi.spyOn(window, 'location', 'get').mockReturnValue({ ...window.location, assign } as Location)
+
+    render(<AuthProvider><LogoutProbe /></AuthProvider>)
+    await waitFor(() => expect(screen.getByTestId('user')).toHaveTextContent('jane@corp.example'))
+
+    await userEvent.click(screen.getByRole('button', { name: /sign out/i }))
+
+    const target = new URL(assign.mock.calls[0][0])
+    expect(target.searchParams.get('post_logout_redirect_uri')).toBe('https://other.example.com/bye')
   })
 
   it('does not redirect a password session, even with a directory configured', async () => {

@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { clearSsoHandoff, readSsoHandoff, requestPasswordSignIn, wantsPasswordSignIn } from './sso'
+import {
+  clearSsoHandoff, readSsoHandoff, requestPasswordSignIn, wantsPasswordSignIn, withPostLogoutRedirect,
+} from './sso'
 
 /**
  * Reading the identity provider's answer out of the URL.
@@ -116,5 +118,53 @@ describe('wantsPasswordSignIn / requestPasswordSignIn', () => {
     expect(window.location.pathname).toBe('/sso/callback')
     expect(window.location.hash).toBe('#sso_error=Sign-in%20failed.')
     expect(wantsPasswordSignIn()).toBe(true)
+  })
+})
+
+/**
+ * Telling the provider's end-session endpoint where to send the browser back.
+ *
+ * Left unset, "sign out" ends the session at the provider and leaves the browser on whatever
+ * page it shows by default — never this app's. And with SSO enforced, a return with nobody
+ * signed in bounces straight back to the provider unless the password form was already
+ * requested, which is what makes this landing show the sign-in screen instead of another trip
+ * through the provider.
+ */
+describe('withPostLogoutRedirect', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    land('/')
+  })
+
+  it('sends the provider back to this app with the password form requested', () => {
+    const url = new URL(withPostLogoutRedirect('https://otds.example.com/otdsws/logout'))
+
+    expect(`${url.origin}${url.pathname}`).toBe('https://otds.example.com/otdsws/logout')
+    const returnUrl = new URL(url.searchParams.get('post_logout_redirect_uri')!)
+    expect(returnUrl.origin).toBe(window.location.origin)
+    expect(returnUrl.searchParams.get('password')).toBe('1')
+  })
+
+  it('returns to the base path the app is served from, not the site root', () => {
+    vi.stubEnv('BASE_URL', '/ot-confluence-bot/')
+
+    const url = new URL(withPostLogoutRedirect('https://otds.example.com/otdsws/logout'))
+
+    const returnUrl = new URL(url.searchParams.get('post_logout_redirect_uri')!)
+    expect(returnUrl.pathname).toBe('/ot-confluence-bot/')
+  })
+
+  it('keeps the rest of the logout endpoint\'s own query string', () => {
+    const url = new URL(withPostLogoutRedirect('https://otds.example.com/otdsws/logout?client_id=bot'))
+
+    expect(url.searchParams.get('client_id')).toBe('bot')
+  })
+
+  it('does not override a return address the deployment already configured', () => {
+    const configured = 'https://otds.example.com/otdsws/logout?post_logout_redirect_uri=https%3A%2F%2Fother.example.com%2Fbye'
+
+    const url = new URL(withPostLogoutRedirect(configured))
+
+    expect(url.searchParams.get('post_logout_redirect_uri')).toBe('https://other.example.com/bye')
   })
 })

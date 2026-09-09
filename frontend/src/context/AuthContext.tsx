@@ -9,7 +9,7 @@ import {
   clearSession, getRefreshToken, getSsoSessionProvider, getToken, markSsoSession, onSessionChange,
   storeSession,
 } from '../lib/token'
-import { clearSsoHandoff, readSsoHandoff } from '../lib/sso'
+import { clearSsoHandoff, readSsoHandoff, withPostLogoutRedirect } from '../lib/sso'
 
 interface AuthContextValue {
   user: AuthUser | null
@@ -209,7 +209,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // ever leaves for the provider's logout endpoint.
     const logoutUrl = sso?.logoutUrl
     if (logoutUrl && sessionProvider && sessionProvider === sso?.providerId) {
-      window.location.assign(logoutUrl)
+      // Told where to send the browser back, so it lands on this app's own sign-in screen
+      // instead of whatever the provider shows by default — and with the password form already
+      // requested, so an enforced deployment does not immediately leave for the provider again.
+      window.location.assign(withPostLogoutRedirect(logoutUrl))
     }
   }, [sso])
 

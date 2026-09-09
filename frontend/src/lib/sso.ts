@@ -70,3 +70,30 @@ export function requestPasswordSignIn(): void {
   url.searchParams.set(PASSWORD_PARAM, '1')
   window.history.replaceState(null, '', url.pathname + url.search + url.hash)
 }
+
+const RETURN_PARAM = 'post_logout_redirect_uri'
+
+/**
+ * Sends the provider's end-session endpoint back to this app's own sign-in screen, with the
+ * password escape hatch already requested.
+ *
+ * Without that marker, a deployment with SSO enforced would land back here, see nobody signed in,
+ * and leave for the provider all over again — the provider's own session is gone by then, so it
+ * is not an infinite loop, but it does mean "sign out" bounces the visitor through the provider a
+ * second time instead of showing them anything of this app's. Requesting the password form up
+ * front keeps the landing on this screen.
+ *
+ * Standard OpenID Connect RP-Initiated Logout names this parameter `post_logout_redirect_uri`,
+ * and every provider this app targets (OTDS, Entra ID, Okta, Keycloak) honors it. Left alone if
+ * the configured logout URL already carries one, so a deployment that baked in its own return
+ * address is not overridden.
+ */
+export function withPostLogoutRedirect(logoutUrl: string): string {
+  const url = new URL(logoutUrl)
+  if (!url.searchParams.has(RETURN_PARAM)) {
+    const target = new URL(import.meta.env.BASE_URL, window.location.origin)
+    target.searchParams.set(PASSWORD_PARAM, '1')
+    url.searchParams.set(RETURN_PARAM, target.toString())
+  }
+  return url.toString()
+}
