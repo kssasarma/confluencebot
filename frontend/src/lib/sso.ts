@@ -72,6 +72,7 @@ export function requestPasswordSignIn(): void {
 }
 
 const RETURN_PARAM = 'post_logout_redirect_uri'
+const LOGGED_OUT_PARAM = 'logged_out'
 
 /**
  * Sends the provider's end-session endpoint back to this app's own sign-in screen, with the
@@ -83,6 +84,11 @@ const RETURN_PARAM = 'post_logout_redirect_uri'
  * second time instead of showing them anything of this app's. Requesting the password form up
  * front keeps the landing on this screen.
  *
+ * Also carries `logged_out`, so `LogoutPage` renders on the way back through here too — an
+ * enforced deployment never reaches `AuthContext.logout()`'s own `justLoggedOut` flag, since the
+ * browser has already navigated away to the provider by the time that state would matter. This
+ * marker survives the round trip in the URL instead; see `wasJustLoggedOut`.
+ *
  * Standard OpenID Connect RP-Initiated Logout names this parameter `post_logout_redirect_uri`,
  * and every provider this app targets (OTDS, Entra ID, Okta, Keycloak) honors it. Left alone if
  * the configured logout URL already carries one, so a deployment that baked in its own return
@@ -93,7 +99,26 @@ export function withPostLogoutRedirect(logoutUrl: string): string {
   if (!url.searchParams.has(RETURN_PARAM)) {
     const target = new URL(import.meta.env.BASE_URL, window.location.origin)
     target.searchParams.set(PASSWORD_PARAM, '1')
+    target.searchParams.set(LOGGED_OUT_PARAM, '1')
     url.searchParams.set(RETURN_PARAM, target.toString())
   }
   return url.toString()
+}
+
+/**
+ * Whether this page load is the browser landing back from a provider-initiated logout.
+ *
+ * Read once on mount and then stripped from the address bar (see `clearJustLoggedOutMarker`) —
+ * unlike the password escape hatch, this one is a one-time notice, not a standing preference: a
+ * later reload of the same URL should show the sign-in screen, not "you've been signed out" again.
+ */
+export function wasJustLoggedOut(): boolean {
+  return new URLSearchParams(window.location.search).has(LOGGED_OUT_PARAM)
+}
+
+/** Removes the one-time logout marker from the address bar without disturbing `password=1`. */
+export function clearJustLoggedOutMarker(): void {
+  const url = new URL(window.location.href)
+  url.searchParams.delete(LOGGED_OUT_PARAM)
+  window.history.replaceState(null, '', url.pathname + url.search + url.hash)
 }

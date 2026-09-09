@@ -9,7 +9,10 @@ import {
   clearSession, getRefreshToken, getSsoSessionProvider, getToken, markSsoSession, onSessionChange,
   storeSession,
 } from '../lib/token'
-import { clearSsoHandoff, readSsoHandoff, withPostLogoutRedirect } from '../lib/sso'
+import {
+  clearJustLoggedOutMarker, clearSsoHandoff, readSsoHandoff, wasJustLoggedOut,
+  withPostLogoutRedirect,
+} from '../lib/sso'
 
 interface AuthContextValue {
   user: AuthUser | null
@@ -28,6 +31,10 @@ interface AuthContextValue {
   /** Why the last trip through the identity provider did not end in a session. */
   ssoError: string | null
   dismissSsoError: () => void
+  /** Set by `logout()` for a signed-out visitor who just clicked "Sign out", so the app can show
+   * `LogoutPage` once instead of going straight back to `LoginPage`. */
+  justLoggedOut: boolean
+  dismissJustLoggedOut: () => void
   login: (email: string, password: string) => Promise<void>
   applySession: (data: AuthResponse) => void
   changePassword: (currentPassword: string, newPassword: string) => Promise<void>
@@ -67,6 +74,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true)
   const [sso, setSso] = useState<SsoConfig | null>(null)
   const [ssoError, setSsoError] = useState<string | null>(null)
+  const [justLoggedOut, setJustLoggedOut] = useState(false)
   const renewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const cancelRenewal = useCallback(() => {
@@ -135,6 +143,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSsoError(handoff.error)
     }
 
+    // Landing back from a provider-initiated logout (see `withPostLogoutRedirect`): the session
+    // was already cleared before the browser left for the provider, so there is nothing to load —
+    // just show LogoutPage instead of the sign-in screen, and don't let SSO-enforced auto-redirect
+    // straight back into the provider (App.tsx checks `justLoggedOut` before it ever renders
+    // LoginPage).
+    if (wasJustLoggedOut()) {
+      clearJustLoggedOutMarker()
+      setJustLoggedOut(true)
+      setIsLoading(false)
+      return
+    }
+
     const stored = getToken()
     if (!stored) {
       setIsLoading(false)
@@ -169,6 +189,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!data.token) return
     storeSession(data)
     setUser(toAuthUser(data, data.token))
+    setJustLoggedOut(false)
   }, [])
 
   const login = useCallback(async (email: string, password: string) => {
@@ -187,6 +208,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const dismissSsoError = useCallback(() => setSsoError(null), [])
+  const dismissJustLoggedOut = useCallback(() => setJustLoggedOut(false), [])
 
   const logout = useCallback(() => {
     const refreshToken = getRefreshToken()
@@ -213,7 +235,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // instead of whatever the provider shows by default — and with the password form already
       // requested, so an enforced deployment does not immediately leave for the provider again.
       window.location.assign(withPostLogoutRedirect(logoutUrl))
+      return
     }
+
+    // No provider round trip to make: stay on this page and show LogoutPage instead of jumping
+    // straight back to LoginPage, so signing out reads as something that happened.
+    setJustLoggedOut(true)
   }, [sso])
 
   const isAdmin = user?.roles.includes('ADMIN') ?? false
@@ -229,6 +256,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       canIngest,
       canAdminister: canManageUsers || canIngest,
       sso, ssoError, dismissSsoError,
+      justLoggedOut, dismissJustLoggedOut,
       login, applySession, changePassword, updateName, logout,
     }}>
       {children}
