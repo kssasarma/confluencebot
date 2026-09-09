@@ -860,5 +860,9 @@ src/main/resources/
     ├── V11__multi_role_users.sql          (role moves to its own table)
     ├── V12__add_user_name.sql
     ├── V13__admin_user_events.sql         (onboarding audit trail)
-    └── V14__sso_accounts.sql              (nullable password, provider link, hand-off codes)
+    ├── V14__add_space_filtering_support.sql
+    ├── V15__space_suggestions.sql
+    ├── V16__user_business_unit.sql
+    ├── V17__password_reset_otps.sql
+    └── V18__sso_accounts.sql              (nullable password, provider link, hand-off codes)
 ```
