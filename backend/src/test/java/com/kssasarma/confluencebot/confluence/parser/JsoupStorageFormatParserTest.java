@@ -119,6 +119,28 @@ class JsoupStorageFormatParserTest {
     }
 
     @Test
+    void parse_tableInsideLayoutSection_isCapturedAsTableSection() {
+        // Confluence page layouts wrap column content in ac:layout / ac:layout-section /
+        // ac:layout-cell directly (not via ac:structured-macro), so a table placed in a
+        // layout column must still be recursed into and captured as a TABLE section.
+        String xhtml = """
+                <ac:layout>
+                  <ac:layout-section ac:type="single">
+                    <ac:layout-cell>
+                      <table><tr><th>Name</th><th>Value</th></tr><tr><td>Foo</td><td>Bar</td></tr></table>
+                    </ac:layout-cell>
+                  </ac:layout-section>
+                </ac:layout>
+                """;
+
+        List<ParsedSection> sections = parser.parse(xhtml);
+
+        assertThat(sections).hasSize(1);
+        assertThat(sections.get(0).isTable()).isTrue();
+        assertThat(sections.get(0).content()).contains("Foo").contains("Bar");
+    }
+
+    @Test
     void parse_codeBlock_contentIsExtracted() {
         String xhtml = "<pre>System.out.println(\"hello\");</pre>";
 

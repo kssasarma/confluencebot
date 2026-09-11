@@ -97,8 +97,13 @@ public class JsoupStorageFormatParser implements StorageFormatParser {
             return;
         }
 
-        // For divs and other containers, recurse and look for nested headings/tables/code
-        if ("div".equals(tag) || "section".equals(tag) || "article".equals(tag)) {
+        // For divs, other containers, and any leftover Confluence namespaced wrapper (e.g.
+        // ac:layout / ac:layout-section / ac:layout-cell for page layouts, ac:task-list for
+        // task lists) — recurse and look for nested headings/tables/code. Page layouts wrap
+        // their columns' content, tables included, in these elements without going through
+        // ac:structured-macro, so they survive removeConfluenceMacros untouched and must be
+        // recursed into here or their content (tables especially) is silently dropped.
+        if ("div".equals(tag) || "section".equals(tag) || "article".equals(tag) || tag.indexOf(':') >= 0) {
             for (Node child : el.childNodes()) {
                 if (child instanceof Element childEl) {
                     processTopLevelElement(childEl, sections, state);
