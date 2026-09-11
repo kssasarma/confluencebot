@@ -3,11 +3,14 @@ package com.kssasarma.confluencebot.chat.context;
 import com.kssasarma.confluencebot.chat.LlmGateway;
 import com.kssasarma.confluencebot.chat.LlmPrompt;
 import com.kssasarma.confluencebot.config.ChatContextProperties;
+import com.kssasarma.confluencebot.prompt.PromptResources;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.ai.chat.prompt.PromptTemplate;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
@@ -37,23 +40,8 @@ public class LlmFollowUpQueryRewriter implements FollowUpQueryRewriter {
 
     private static final Logger log = LoggerFactory.getLogger(LlmFollowUpQueryRewriter.class);
 
-    private static final String SYSTEM_MESSAGE = """
-            You rewrite a follow-up question into a standalone search query for a documentation \
-            search engine.
-
-            You are given the recent turns of a conversation and the user's latest question. \
-            Replace every pronoun and every implicit reference in that question with what it \
-            refers to in the conversation, so the result can be understood entirely on its own.
-
-            Rules:
-            - Reply with the rewritten question alone: one line, no quotation marks, no preamble, \
-            no explanation.
-            - Never answer the question. You are rewriting it, not responding to it.
-            - Keep the user's own terminology, product names and spelling. Only substitute what is \
-            ambiguous on its own.
-            - Add nothing the conversation does not already say. If a reference is unclear, leave \
-            it as the user wrote it.
-            - If the question already stands on its own, reply with it unchanged.""";
+    private static final PromptTemplate SYSTEM_TEMPLATE = PromptResources.load("prompts/follow-up/system.st");
+    private static final PromptTemplate USER_TEMPLATE = PromptResources.load("prompts/follow-up/user.st");
 
     /**
      * Words that point at something said earlier rather than naming it.
@@ -195,14 +183,14 @@ public class LlmFollowUpQueryRewriter implements FollowUpQueryRewriter {
         ConversationContext recent =
                 context.mostRecent(REWRITE_EXCHANGES).withAnswersClippedTo(REWRITE_ANSWER_CHARS);
 
-        String user = "Conversation so far:\n" + recent.transcript()
-                + "\n\nFollow-up question: " + question
-                + "\n\nStandalone question:";
+        String user = USER_TEMPLATE.render(Map.of(
+                "transcript", recent.transcript(),
+                "question", question));
 
         // Sent without history of its own: this asks one question *about* a conversation rather
         // than continuing it, and replaying the turns as messages would invite an answer instead
         // of a rewrite.
-        return new LlmPrompt(SYSTEM_MESSAGE, user);
+        return new LlmPrompt(SYSTEM_TEMPLATE.render(), user);
     }
 
     // ── Reading the reply ─────────────────────────────────────────────────────
