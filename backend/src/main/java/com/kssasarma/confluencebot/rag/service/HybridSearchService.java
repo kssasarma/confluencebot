@@ -10,6 +10,8 @@ import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -42,6 +44,16 @@ public class HybridSearchService {
 
     @Value("${chat.retrieval.candidate-pool-size:25}")
     private int candidatePoolSize;
+
+    /** See {@link #withPinnedContent}. Comma-separated Confluence page IDs; empty disables
+     *  pinning entirely. Any number of pages may be listed. */
+    @Value("${chat.retrieval.pinned-page-ids:}")
+    private String pinnedPageIds;
+
+    /** Minimum cosine similarity (against the query embedding) a pinned page's table chunk must
+     *  have to be injected. This is the actual relevance gate — see {@link #withPinnedContent}. */
+    @Value("${chat.retrieval.pinned-similarity-floor:0.3}")
+    private double pinnedSimilarityFloor;
 
     public HybridSearchService(ChunkSearchRepository searchRepo,
                                 ReRankingService reRankingService,
@@ -82,7 +94,51 @@ public class HybridSearchService {
 
         log.info("Hybrid search: {} dense + {} lexical → {} final chunks after ranking",
             denseResults.size(), lexicalResults.size(), reranked.size());
-        return reranked;
+        return withPinnedContent(reranked, queryEmbedding);
+    }
+
+    /**
+     * Guarantees a seat for any configured page's table chunks that are at least plausibly
+     * on-topic for the query — gated by real cosine similarity against the query embedding, not
+     * by hand-curated keyword phrases.
+     *
+     * <p>Exists because ranking-based relevance alone can leave an authoritative table chunk (an
+     * inherently weaker embedding match than fluent prose on the same subject) permanently
+     * uncompetitive against several closely-related sibling pages, regardless of how dense/lexical
+     * fusion or MMR weights are tuned — a table can be genuinely relevant and still never win that
+     * contest. This checks the pinned page's actual similarity to the query using the same
+     * embedding already computed for retrieval, so it can't fire for a query that's merely
+     * coincidentally similar in wording; it only overrides the *ranking* decision, not relevance
+     * itself. Any number of pages can be configured; each is evaluated independently.
+     */
+    private List<RetrievedChunk> withPinnedContent(List<RetrievedChunk> results, float[] queryEmbedding) {
+        List<String> configuredPageIds = parsePinnedPageIds();
+        if (configuredPageIds.isEmpty()) return results;
+
+        List<RetrievedChunk> combined = null;
+        for (String pageId : configuredPageIds) {
+            if (results.stream().anyMatch(c -> pageId.equals(c.getPageId()))) continue;
+            if (combined != null && combined.stream().anyMatch(c -> pageId.equals(c.getPageId()))) continue;
+
+            for (RawCandidate raw : searchRepo.findTableChunksByPage(pageId)) {
+                RetrievedChunk chunk = searchRepo.toRetrievedChunk(raw, queryEmbedding);
+                if (chunk.getSimilarity() < pinnedSimilarityFloor) continue;
+
+                if (combined == null) combined = new ArrayList<>(results);
+                combined.add(chunk);
+                log.info("Pinned content: page {} chunk {} met the similarity floor ({} >= {})",
+                        pageId, chunk.getChunkId(), chunk.getSimilarity(), pinnedSimilarityFloor);
+            }
+        }
+        return combined != null ? combined : results;
+    }
+
+    private List<String> parsePinnedPageIds() {
+        if (pinnedPageIds == null || pinnedPageIds.isBlank()) return List.of();
+        return Arrays.stream(pinnedPageIds.split(","))
+                .map(String::strip)
+                .filter(id -> !id.isBlank())
+                .toList();
     }
 
     private List<ReRankingService.ScoredCandidate> fuseAndScore(
