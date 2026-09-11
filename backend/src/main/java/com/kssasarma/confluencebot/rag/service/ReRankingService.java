@@ -15,6 +15,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.List;
@@ -24,13 +25,21 @@ import java.util.Set;
 /**
  * Narrows a fused (dense + lexical) candidate pool to the final result set the LLM actually sees.
  *
- * Two stages:
+ * Three stages:
  * 1. MMR (Maximal Marginal Relevance) — always applied. Greedily picks candidates that balance
  *    relevance to the query against dissimilarity from what's already been picked, so the final
  *    set is not dominated by near-duplicate chunks covering the same sentence.
- * 2. LLM relevance re-rank — optional (config-gated). One extra LLM call that judges the
- *    MMR-selected set directly against the question and reorders it. Best-effort: any failure
- *    falls back to the MMR order unchanged rather than blocking the answer.
+ * 2. Table floor — always applied. A table chunk is cell text with little surrounding prose, so
+ *    it routinely loses MMR's relevance term to a more fluent paragraph that only talks about the
+ *    same subject — see {@link #ensureTableRepresented}. Losing the one chunk that actually holds
+ *    the tabular answer is the costlier mistake, so any table chunk in the fused pool is
+ *    guaranteed a seat in the final set.
+ * 3. LLM relevance re-rank — optional (config-gated). One extra LLM call that judges the
+ *    resulting set directly against the question and reorders it. It only reorders what stages 1
+ *    and 2 already selected — it cannot pull anything back from the discarded candidate pool — so
+ *    a chunk dropped before this stage is gone regardless of how relevant the LLM would have
+ *    judged it. Best-effort: any failure falls back to the prior order unchanged rather than
+ *    blocking the answer.
  *
  * The model this pass calls is configured separately from the one that writes answers — see
  * {@link ChatRerankProperties}. It is handed in already built so this class never has to know
@@ -40,6 +49,8 @@ import java.util.Set;
 public class ReRankingService {
 
     private static final Logger log = LoggerFactory.getLogger(ReRankingService.class);
+
+    private static final String TABLE_CHUNK_TYPE = "TABLE";
 
     private final RerankClient rerankClient;
     private final CircuitBreaker circuitBreaker;
@@ -51,6 +62,11 @@ public class ReRankingService {
 
     @Value("${chat.retrieval.rerank-fusion-weight:0.5}")
     private double fusionWeight;
+
+    /** See {@link #ensureTableRepresented}. Defaults on: dropping tabular data silently is worse
+     *  than dropping one more prose chunk MMR would otherwise have kept. */
+    @Value("${chat.retrieval.guarantee-table-chunk:true}")
+    private boolean guaranteeTableChunk;
 
     public ReRankingService(RerankClient rerankClient,
                              ChatRerankProperties rerankProperties,
@@ -69,12 +85,49 @@ public class ReRankingService {
     public List<RetrievedChunk> rerank(String query, float[] queryEmbedding,
                                         List<ScoredCandidate> candidates, int finalTopK) {
         List<ScoredCandidate> mmrOrdered = mmr(queryEmbedding, candidates, finalTopK);
+        mmrOrdered = ensureTableRepresented(candidates, mmrOrdered);
         List<RetrievedChunk> mmrChunks = mmrOrdered.stream().map(ScoredCandidate::chunk).toList();
 
         if (!llmRerankEnabled || mmrChunks.size() <= 1) {
             return mmrChunks;
         }
         return llmRerank(query, mmrChunks);
+    }
+
+    /**
+     * Guarantees that a table chunk present in the fused candidate pool survives MMR's cut.
+     *
+     * <p>MMR scores relevance from cosine similarity and RRF agreement, both of which reward text
+     * that reads like the query. A table section is stored as near-bare cell text (see
+     * {@code SemanticChunkingStrategy#chunkTable}) — it carries the page title and heading but none
+     * of the narrative phrasing a prose chunk about the same topic has, so it routinely loses that
+     * relevance contest to a paragraph that only *talks about* the table's subject. The result is
+     * an answer that cites the paragraph pointing at the data instead of the data.
+     *
+     * <p>This does not second-guess MMR's choice of which prose chunks to keep: it only ensures at
+     * least one table chunk — the fused pool's best-scoring one — is never the casualty. If the
+     * selection already contains a table chunk, or the pool has none, nothing changes.
+     */
+    private List<ScoredCandidate> ensureTableRepresented(List<ScoredCandidate> candidates,
+                                                          List<ScoredCandidate> selected) {
+        if (!guaranteeTableChunk || selected.isEmpty()) return selected;
+
+        boolean alreadyHasTable = selected.stream()
+            .anyMatch(c -> TABLE_CHUNK_TYPE.equals(c.chunk().getChunkType()));
+        if (alreadyHasTable) return selected;
+
+        ScoredCandidate bestTable = candidates.stream()
+            .filter(c -> TABLE_CHUNK_TYPE.equals(c.chunk().getChunkType()))
+            .max(Comparator.comparingDouble(ScoredCandidate::fusionScore))
+            .orElse(null);
+        if (bestTable == null) return selected;
+
+        log.info("Table floor: swapping in table chunk {} (page '{}') MMR would otherwise have dropped",
+                bestTable.chunk().getChunkId(), bestTable.chunk().getTitle());
+
+        List<ScoredCandidate> withTable = new ArrayList<>(selected);
+        withTable.set(withTable.size() - 1, bestTable);
+        return withTable;
     }
 
     // ── MMR ──────────────────────────────────────────────────────────────────
