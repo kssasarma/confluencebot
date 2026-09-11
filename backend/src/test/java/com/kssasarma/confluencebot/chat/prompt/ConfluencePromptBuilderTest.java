@@ -48,6 +48,15 @@ class ConfluencePromptBuilderTest {
     }
 
     @Test
+    void theModelIsToldNotToDeferToAPointerWhenATableAlreadyHasTheAnswer() {
+        String system = build(ConversationContext.EMPTY).system();
+
+        assertThat(system)
+                .contains("Table excerpt that directly contains data answering the question is the answer")
+                .contains("not a reason to withhold an answer the excerpts already contain");
+    }
+
+    @Test
     void theExcerptsAndTheQuestionStillReachTheUserMessage() {
         LlmPrompt prompt = build(CONTEXT);
 
