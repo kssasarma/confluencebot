@@ -223,10 +223,17 @@ chat:
     # Cosine similarity below this value triggers a low-confidence caveat in the prompt
     min-similarity-threshold: ${CHAT_MIN_SIMILARITY_THRESHOLD:0.4}
 
-    # Guarantee a table chunk from the fused candidate pool survives MMR's diversity cut. Table
-    # cell text is a weaker relevance match than prose covering the same subject, so without this
-    # MMR can drop the one chunk that actually answers the question. See ReRankingService.
+    # Guarantee the fused candidate pool's best-scoring table chunks survive MMR's diversity cut.
+    # Table cell text is a weaker relevance match than prose covering the same subject, so without
+    # this MMR can drop the chunk that actually answers the question. See ReRankingService.
     guarantee-table-chunk: ${CHAT_GUARANTEE_TABLE_CHUNK:true}
+
+    # How many distinct table chunks the floor above protects. More than one exists because a real
+    # corpus can hold several unrelated tables that are all plausible candidates for a similar
+    # question (e.g. a production model catalog and a separate sandbox's own model list) —
+    # guaranteeing only the single best-scoring table lets a weaker one satisfy the check first and
+    # silently blocks a second, equally real table from ever being considered.
+    guarantee-table-chunk-count: ${CHAT_GUARANTEE_TABLE_CHUNK_COUNT:2}
 
   # The optional LLM pass that orders the excerpts MMR selected. Its own endpoint, key and model:
   # this call emits a permutation rather than prose, runs before a single token of the answer is
