@@ -247,10 +247,13 @@ public class IngestionServiceImpl implements IngestionService {
         List<Document> docs = new ArrayList<>();
         int index = 0;
 
-        for (ParsedSection section : sections) {
+        for (int i = 0; i < sections.size(); i++) {
+            ParsedSection section = sections.get(i);
             if (!section.hasContent()) continue;
 
-            List<ChunkedContent> chunks = chunkingStrategy.chunk(section, page.title());
+            List<ChunkedContent> chunks = section.isTable()
+                    ? chunkingStrategy.chunk(section, page.title(), tableCaption(sections, i))
+                    : chunkingStrategy.chunk(section, page.title());
 
             for (ChunkedContent chunk : chunks) {
                 if (chunk.text() == null || chunk.text().isBlank()) continue;
@@ -272,6 +275,44 @@ public class IngestionServiceImpl implements IngestionService {
         }
 
         return docs;
+    }
+
+    /** Longest tail of the preceding paragraph folded into a table chunk's prefix — a full
+     *  intro paragraph repeated on every split of a large table would eat into the row budget
+     *  for little extra retrieval benefit over its last sentence or two. */
+    private static final int TABLE_CAPTION_MAX_CHARS = 240;
+
+    /**
+     * The sentence immediately introducing a table ("The currently supported models are:") is
+     * exactly the kind of narrative phrasing a natural-language question matches against — but
+     * {@code JsoupStorageFormatParser} flushes it as its own TEXT section right before the table,
+     * so a bare table chunk never sees it. Stitches that context back in at ingestion time so the
+     * table doesn't have to rely on being rescued at retrieval time (see
+     * {@code ReRankingService#ensureTableRepresented}) to be found at all.
+     *
+     * <p>Only the immediately preceding section counts, and only when it shares the table's
+     * heading — text from a different subsection is as likely to mislead as to help. A table
+     * that opens a page or a section has no caption, exactly as before this method existed.
+     */
+    private String tableCaption(List<ParsedSection> sections, int tableIndex) {
+        if (tableIndex == 0) return "";
+
+        ParsedSection previous = sections.get(tableIndex - 1);
+        if (!previous.isText() || !previous.hasContent()) return "";
+
+        String tableHeading = sections.get(tableIndex).heading();
+        String previousHeading = previous.heading();
+        boolean sameHeading = Objects.equals(
+                tableHeading == null ? "" : tableHeading.strip(),
+                previousHeading == null ? "" : previousHeading.strip());
+        if (!sameHeading) return "";
+
+        String text = previous.content().strip();
+        if (text.length() <= TABLE_CAPTION_MAX_CHARS) return text;
+
+        String tail = text.substring(text.length() - TABLE_CAPTION_MAX_CHARS);
+        int firstSpace = tail.indexOf(' ');
+        return firstSpace > 0 ? tail.substring(firstSpace + 1) : tail;
     }
 
     private void upsertPageTracking(ConfluencePageDetail page, String spaceKey, String spaceName,

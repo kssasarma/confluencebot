@@ -203,6 +203,69 @@ class IngestionServiceImplTest {
     }
 
     @Test
+    void ingestPage_tableFollowingSameHeadingParagraph_capturesCaptionFromPrecedingText() {
+        ConfluencePageDetail page = page("sp1", "Spec Page", 2);
+        when(confluenceClient.fetchSpaceMetadata("ENG")).thenReturn(SPACE_WITH_DESC);
+        when(confluenceClient.fetchPage("sp1")).thenReturn(page);
+        when(parser.parse(anyString())).thenReturn(List.of(
+                new ParsedSection("Models", "The currently supported models are listed below.",
+                        ParsedSection.SectionType.TEXT),
+                new ParsedSection("Models", "Name | Status\nA | Active",
+                        ParsedSection.SectionType.TABLE)));
+        when(chunkingStrategy.chunk(any(), eq("Spec Page")))
+                .thenReturn(List.of(new ChunkedContent("intro chunk", "TEXT")));
+        when(chunkingStrategy.chunk(any(), eq("Spec Page"), anyString()))
+                .thenReturn(List.of(new ChunkedContent("table chunk", "TABLE")));
+        when(pageRepository.findById("sp1")).thenReturn(Optional.empty());
+        when(pageRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        service.ingestPage("sp1");
+
+        ArgumentCaptor<String> caption = ArgumentCaptor.forClass(String.class);
+        verify(chunkingStrategy).chunk(any(), eq("Spec Page"), caption.capture());
+        assertThat(caption.getValue()).isEqualTo("The currently supported models are listed below.");
+    }
+
+    @Test
+    void ingestPage_tableFollowingParagraphUnderADifferentHeading_getsNoCaption() {
+        ConfluencePageDetail page = page("sp1", "Spec Page", 2);
+        when(confluenceClient.fetchSpaceMetadata("ENG")).thenReturn(SPACE_WITH_DESC);
+        when(confluenceClient.fetchPage("sp1")).thenReturn(page);
+        when(parser.parse(anyString())).thenReturn(List.of(
+                new ParsedSection("Intro", "Unrelated paragraph from an earlier section.",
+                        ParsedSection.SectionType.TEXT),
+                new ParsedSection("Models", "Name | Status\nA | Active",
+                        ParsedSection.SectionType.TABLE)));
+        when(chunkingStrategy.chunk(any(), eq("Spec Page")))
+                .thenReturn(List.of(new ChunkedContent("intro chunk", "TEXT")));
+        when(chunkingStrategy.chunk(any(), eq("Spec Page"), anyString()))
+                .thenReturn(List.of(new ChunkedContent("table chunk", "TABLE")));
+        when(pageRepository.findById("sp1")).thenReturn(Optional.empty());
+        when(pageRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        service.ingestPage("sp1");
+
+        verify(chunkingStrategy).chunk(any(), eq("Spec Page"), eq(""));
+    }
+
+    @Test
+    void ingestPage_tableIsFirstSectionOnThePage_getsNoCaption() {
+        ConfluencePageDetail page = page("sp1", "Spec Page", 2);
+        when(confluenceClient.fetchSpaceMetadata("ENG")).thenReturn(SPACE_WITH_DESC);
+        when(confluenceClient.fetchPage("sp1")).thenReturn(page);
+        when(parser.parse(anyString())).thenReturn(List.of(
+                new ParsedSection("Models", "Name | Status\nA | Active", ParsedSection.SectionType.TABLE)));
+        when(chunkingStrategy.chunk(any(), eq("Spec Page"), anyString()))
+                .thenReturn(List.of(new ChunkedContent("table chunk", "TABLE")));
+        when(pageRepository.findById("sp1")).thenReturn(Optional.empty());
+        when(pageRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        service.ingestPage("sp1");
+
+        verify(chunkingStrategy).chunk(any(), eq("Spec Page"), eq(""));
+    }
+
+    @Test
     void ingestPage_processesPageAndReturnsSinglePageResult() {
         ConfluencePageDetail page = page("sp1", "Spec Page", 2);
         when(confluenceClient.fetchSpaceMetadata("ENG")).thenReturn(SPACE_WITH_DESC);

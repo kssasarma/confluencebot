@@ -51,9 +51,26 @@ public class SemanticChunkingStrategy {
      * @param pageTitle the page title, prepended to each chunk for retrieval context
      */
     public List<ChunkedContent> chunk(ParsedSection section, String pageTitle) {
+        return chunk(section, pageTitle, "");
+    }
+
+    /**
+     * Same as {@link #chunk(ParsedSection, String)}, with an extra line of narrative context
+     * folded into every resulting chunk's prefix.
+     *
+     * <p>Built for {@code TABLE} sections: a table is stored as near-bare cell text (see
+     * {@link #chunkTable}), which embeds and lexically matches far more weakly than prose on the
+     * same subject — the caller (see {@code IngestionServiceImpl}) passes the immediately
+     * preceding paragraph under the same heading, when one exists, so the table competes in
+     * retrieval on closer to equal footing instead of relying on being rescued after the fact.
+     * A blank caption is a no-op — the output is identical to the two-argument overload.
+     *
+     * @param caption one short line of prose context, or blank/{@code null} if none is available
+     */
+    public List<ChunkedContent> chunk(ParsedSection section, String pageTitle, String caption) {
         if (!section.hasContent()) return List.of();
 
-        String headingPrefix = buildHeadingPrefix(pageTitle, section.heading());
+        String headingPrefix = buildHeadingPrefix(pageTitle, section.heading(), caption);
 
         String chunkType = section.type().name();
         return switch (section.type()) {
@@ -104,10 +121,11 @@ public class SemanticChunkingStrategy {
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    private String buildHeadingPrefix(String pageTitle, String heading) {
+    private String buildHeadingPrefix(String pageTitle, String heading, String caption) {
         StringBuilder sb = new StringBuilder();
         if (pageTitle != null && !pageTitle.isBlank()) sb.append("Page: ").append(pageTitle).append("\n");
         if (heading   != null && !heading.isBlank())  sb.append('[').append(heading).append("]\n");
+        if (caption   != null && !caption.isBlank())  sb.append(caption.strip()).append("\n");
         return sb.toString();
     }
 
