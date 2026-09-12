@@ -227,7 +227,7 @@ class IngestionServiceImplTest {
     }
 
     @Test
-    void ingestPage_tableFollowingParagraphUnderADifferentHeading_getsNoCaption() {
+    void ingestPage_tableFollowingParagraphUnderADifferentHeading_fallsBackToASyntheticCaption() {
         ConfluencePageDetail page = page("sp1", "Spec Page", 2);
         when(confluenceClient.fetchSpaceMetadata("ENG")).thenReturn(SPACE_WITH_DESC);
         when(confluenceClient.fetchPage("sp1")).thenReturn(page);
@@ -245,16 +245,38 @@ class IngestionServiceImplTest {
 
         service.ingestPage("sp1");
 
-        verify(chunkingStrategy).chunk(any(), eq("Spec Page"), eq(""));
+        // The preceding paragraph doesn't share the table's heading, so it's not used as the
+        // caption -- but the table still gets a synthetic one derived from its own header row,
+        // rather than no natural-language framing at all.
+        verify(chunkingStrategy).chunk(any(), eq("Spec Page"), eq("The Models table lists Name, Status."));
     }
 
     @Test
-    void ingestPage_tableIsFirstSectionOnThePage_getsNoCaption() {
+    void ingestPage_tableIsFirstSectionOnThePage_fallsBackToASyntheticCaption() {
         ConfluencePageDetail page = page("sp1", "Spec Page", 2);
         when(confluenceClient.fetchSpaceMetadata("ENG")).thenReturn(SPACE_WITH_DESC);
         when(confluenceClient.fetchPage("sp1")).thenReturn(page);
         when(parser.parse(anyString())).thenReturn(List.of(
                 new ParsedSection("Models", "Name | Status\nA | Active", ParsedSection.SectionType.TABLE)));
+        when(chunkingStrategy.chunk(any(), eq("Spec Page"), anyString()))
+                .thenReturn(List.of(new ChunkedContent("table chunk", "TABLE")));
+        when(pageRepository.findById("sp1")).thenReturn(Optional.empty());
+        when(pageRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        service.ingestPage("sp1");
+
+        verify(chunkingStrategy).chunk(any(), eq("Spec Page"), eq("The Models table lists Name, Status."));
+    }
+
+    @Test
+    void ingestPage_tableWithNoExtractableColumns_getsNoCaptionAtAll() {
+        ConfluencePageDetail page = page("sp1", "Spec Page", 2);
+        when(confluenceClient.fetchSpaceMetadata("ENG")).thenReturn(SPACE_WITH_DESC);
+        when(confluenceClient.fetchPage("sp1")).thenReturn(page);
+        // Non-blank content (so it isn't filtered out before tableCaption runs) but its header
+        // row has no actual column names to extract -- synthesis has nothing to work with.
+        when(parser.parse(anyString())).thenReturn(List.of(
+                new ParsedSection("", "|||", ParsedSection.SectionType.TABLE)));
         when(chunkingStrategy.chunk(any(), eq("Spec Page"), anyString()))
                 .thenReturn(List.of(new ChunkedContent("table chunk", "TABLE")));
         when(pageRepository.findById("sp1")).thenReturn(Optional.empty());

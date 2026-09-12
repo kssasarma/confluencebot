@@ -214,6 +214,14 @@ chat:
     chunk-size: ${CHAT_CHUNK_SIZE:800}
     chunk-overlap: ${CHAT_CHUNK_OVERLAP:100}
 
+    # Deliberately smaller than chunk-size: a table chunk's embedding is one vector for its whole
+    # stored text (heading + caption + rows) -- a caption of one or two sentences next to dozens
+    # of rows of bare cell text gets diluted into near-nothing, however good the caption is. This
+    # caps every table row-batch to a small budget so the caption-to-data ratio stays healthy in
+    # every chunk, not only in tables that happen to be small enough to stay one chunk under the
+    # general chunk-size. See SemanticChunkingStrategy#chunkTable.
+    table-chunk-size: ${CHAT_TABLE_CHUNK_SIZE:200}
+
     # MMR re-ranking: lambda controls relevance vs diversity trade-off (1.0 = pure relevance)
     rerank-mmr-lambda: ${CHAT_RERANK_MMR_LAMBDA:0.7}
 
