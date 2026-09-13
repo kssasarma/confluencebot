@@ -243,6 +243,20 @@ chat:
     # silently blocks a second, equally real table from ever being considered.
     guarantee-table-chunk-count: ${CHAT_GUARANTEE_TABLE_CHUNK_COUNT:2}
 
+    # Deterministic override, not a relevance mechanism: for a small, curated list of Confluence
+    # page IDs known to be authoritative reference pages, guarantees a seat for their TABLE-typed
+    # chunks whenever they're at least plausibly on-topic for the query — gated by real cosine
+    # similarity against the query embedding (pinned-similarity-floor), not by hand-curated
+    # keyword phrases, so it doesn't depend on anticipating every way a question might be phrased
+    # and can't fire for a query that's merely coincidentally similar in wording. Exists because
+    # ranking-based relevance alone can leave an authoritative table chunk (an inherently weaker
+    # embedding match than fluent prose on the same subject) permanently uncompetitive against
+    # several closely-related sibling pages, however the ranking weights are tuned. Any number of
+    # page IDs may be listed; each is evaluated independently. Off by default (empty list).
+    # See HybridSearchService#withPinnedContent.
+    pinned-page-ids: ${CHAT_PINNED_PAGE_IDS:}
+    pinned-similarity-floor: ${CHAT_PINNED_SIMILARITY_FLOOR:0.3}
+
   # The optional LLM pass that orders the excerpts MMR selected. Its own endpoint, key and model:
   # this call emits a permutation rather than prose, runs before a single token of the answer is
   # streamed, and is rarely worth the model that writes the answer. Anything left unset is

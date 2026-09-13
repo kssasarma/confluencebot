@@ -76,6 +76,17 @@ public class ChunkSearchRepository {
             LIMIT  ?
             """;
 
+    private static final String TABLE_CHUNKS_BY_PAGE_QUERY = """
+            SELECT id::text            AS chunk_id,
+                   content,
+                   metadata::text      AS metadata_json,
+                   embedding::text     AS embedding_text
+            FROM   confluence_chunks
+            WHERE  metadata->>'page_id' = ?
+            AND    metadata->>'chunk_type' = 'TABLE'
+            ORDER  BY (metadata->>'chunk_index')::int
+            """;
+
     private final JdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
 
@@ -116,6 +127,21 @@ public class ChunkSearchRepository {
                     : jdbc.query(LEXICAL_QUERY_BY_SPACE, RAW_CANDIDATE_MAPPER, query, spaceKey, query, limit);
         } catch (Exception e) {
             log.warn("Lexical search failed (index may not exist yet): {}", e.getMessage());
+            return Collections.emptyList();
+        }
+    }
+
+    /**
+     * A page's table chunks, unconditionally — no similarity or rank involved. Backs the pinned-
+     * content override in {@link com.kssasarma.confluencebot.rag.service.HybridSearchService}: for
+     * a page known to be the authoritative answer to a recurring question, this is how it gets
+     * included regardless of how it happens to score against whatever else is in the corpus.
+     */
+    public List<RawCandidate> findTableChunksByPage(String pageId) {
+        try {
+            return jdbc.query(TABLE_CHUNKS_BY_PAGE_QUERY, RAW_CANDIDATE_MAPPER, pageId);
+        } catch (Exception e) {
+            log.error("Pinned-content lookup failed for page {}: {}", pageId, e.getMessage(), e);
             return Collections.emptyList();
         }
     }
