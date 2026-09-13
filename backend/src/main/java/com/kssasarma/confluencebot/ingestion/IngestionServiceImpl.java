@@ -268,6 +268,17 @@ public class IngestionServiceImpl implements IngestionService {
                     .map(ConfluencePageDetail.Body::storage)
                     .map(ConfluencePageDetail.Storage::value)
                     .orElse("");
+            // A target section carries its own heading whenever the target page has real heading
+            // structure of its own (a multi-section page transcluded in part) -- that's kept as-is.
+            // But the common case this whole feature exists for is a target that's "just a table"
+            // with no heading of its own; left as "" it would produce a #-anchor and a table caption
+            // (see authoredCaption below) that can never match anything on the referencing page,
+            // since section_heading always builds a deep link against the REFERENCING page's own
+            // URL. Falling back to the heading the excerpt-include itself sat under gives it one
+            // that actually exists there, and lets an intro paragraph right before the
+            // excerpt-include serve as the spliced table's caption, exactly as it would for a table
+            // that was authored directly on this page under that heading.
+            String fallbackHeading = section.heading();
             int splicedCount = 0;
             for (ParsedSection targetSection : parser.parse(targetXhtml)) {
                 if (targetSection.isExcerptReference()) {
@@ -276,7 +287,8 @@ public class IngestionServiceImpl implements IngestionService {
                             referencingPageTitle, targetTitle);
                     continue;
                 }
-                resolved.add(targetSection);
+                String heading = targetSection.hasHeading() ? targetSection.heading() : fallbackHeading;
+                resolved.add(new ParsedSection(heading, targetSection.content(), targetSection.type()));
                 splicedCount++;
             }
             log.info("Resolved excerpt-include on page '{}': spliced in {} section(s) from '{}'",

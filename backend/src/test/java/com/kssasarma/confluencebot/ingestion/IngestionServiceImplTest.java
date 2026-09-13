@@ -381,6 +381,44 @@ class IngestionServiceImplTest {
     }
 
     @Test
+    void ingestPage_excerptIncludeTargetHasNoHeadingOfItsOwn_splicedSectionInheritsTheReferencingPagesHeading() {
+        ConfluencePageDetail page = page("sp1", "Spec Page", 2);
+        when(confluenceClient.fetchSpaceMetadata("ENG")).thenReturn(SPACE_WITH_DESC);
+        when(confluenceClient.fetchPage("sp1")).thenReturn(page);
+
+        ParsedSection excerptRef = new ParsedSection("Models", "Target Page",
+                ParsedSection.SectionType.EXCERPT_REFERENCE);
+        when(parser.parse("<p>Spec Page content</p>")).thenReturn(List.of(excerptRef));
+
+        ConfluencePageDetail targetPage = page("target1", "Target Page", 1);
+        when(confluenceClient.fetchPageByTitle("ENG", "Target Page")).thenReturn(Optional.of(targetPage));
+        // The target page really is "just a table" -- no heading of its own.
+        ParsedSection targetTable = new ParsedSection("", "Name | Status\nA | Active",
+                ParsedSection.SectionType.TABLE);
+        when(parser.parse("<p>Target Page content</p>")).thenReturn(List.of(targetTable));
+
+        when(chunkingStrategy.chunk(any(), eq("Spec Page"), anyString()))
+                .thenReturn(List.of(new ChunkedContent("table chunk", "TABLE")));
+        when(pageRepository.findById("sp1")).thenReturn(Optional.empty());
+        when(pageRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        service.ingestPage("sp1");
+
+        // The spliced table takes on the heading the excerpt-include itself sat under on the
+        // referencing page -- not the blank heading it had on the target page -- so its section
+        // anchor and metadata point somewhere that actually exists on the page a reader is on.
+        ArgumentCaptor<ParsedSection> sectionCaptor = ArgumentCaptor.forClass(ParsedSection.class);
+        verify(chunkingStrategy).chunk(sectionCaptor.capture(), eq("Spec Page"), anyString());
+        assertThat(sectionCaptor.getValue().heading()).isEqualTo("Models");
+
+        ArgumentCaptor<List<org.springframework.ai.document.Document>> docsCaptor =
+                ArgumentCaptor.forClass(List.class);
+        verify(vectorStore).add(docsCaptor.capture());
+        assertThat(docsCaptor.getValue()).allSatisfy(d ->
+                assertThat(d.getMetadata().get("section_heading")).isEqualTo("Models"));
+    }
+
+    @Test
     void ingestPage_processesPageAndReturnsSinglePageResult() {
         ConfluencePageDetail page = page("sp1", "Spec Page", 2);
         when(confluenceClient.fetchSpaceMetadata("ENG")).thenReturn(SPACE_WITH_DESC);
