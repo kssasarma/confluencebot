@@ -204,6 +204,7 @@ public class IngestionServiceImpl implements IngestionService {
                 .orElse("");
 
         List<ParsedSection> sections = parser.parse(rawXhtml);
+        sections = resolveExcerptReferences(sections, spaceKey, page.title());
 
         if (sections.isEmpty()) {
             log.warn("Page {} ({}) produced no parseable content — recorded with 0 chunks",
@@ -228,6 +229,60 @@ public class IngestionServiceImpl implements IngestionService {
         log.info("Ingested: {} [{}] → {} chunks ({} sections)",
                 page.title(), page.id(), documents.size(), sections.size());
         return documents.size();
+    }
+
+    /**
+     * An {@code ac:excerpt-include} macro means "this page's own storage format doesn't carry
+     * the content, only a reference to a page that does" — {@code JsoupStorageFormatParser}
+     * surfaces that as an {@link ParsedSection.SectionType#EXCERPT_REFERENCE} section holding
+     * the target page's title. Splicing the target's real sections in here, at ingestion time,
+     * means the referencing page's own chunks carry that content directly — a data table the
+     * excerpt-include renders inline (exactly as a person reading the page in Confluence would
+     * see it) doesn't have to separately win its own relevance contest at retrieval time to
+     * reach an answer about the page that transcludes it.
+     *
+     * <p>Only one level deep: a nested excerpt-include found inside the resolved target's own
+     * content is dropped rather than followed, so a reference cycle (however unlikely) can't
+     * cause unbounded recursion or fetch storms. A reference that can't be resolved (renamed or
+     * deleted target page, cross-space title collision, a transient lookup failure) is dropped
+     * with a warning — a dangling link degrades this one section, not the whole page.
+     */
+    private List<ParsedSection> resolveExcerptReferences(List<ParsedSection> sections, String spaceKey,
+                                                          String referencingPageTitle) {
+        List<ParsedSection> resolved = new ArrayList<>();
+        for (ParsedSection section : sections) {
+            if (!section.isExcerptReference()) {
+                resolved.add(section);
+                continue;
+            }
+
+            String targetTitle = section.content();
+            Optional<ConfluencePageDetail> target = confluenceClient.fetchPageByTitle(spaceKey, targetTitle);
+            if (target.isEmpty()) {
+                log.warn("Page '{}' has an excerpt-include referencing '{}' in space {} — "
+                        + "not found, skipping", referencingPageTitle, targetTitle, spaceKey);
+                continue;
+            }
+
+            String targetXhtml = Optional.ofNullable(target.get().body())
+                    .map(ConfluencePageDetail.Body::storage)
+                    .map(ConfluencePageDetail.Storage::value)
+                    .orElse("");
+            int splicedCount = 0;
+            for (ParsedSection targetSection : parser.parse(targetXhtml)) {
+                if (targetSection.isExcerptReference()) {
+                    log.warn("Page '{}' has an excerpt-include referencing '{}', which itself has "
+                            + "an unresolved excerpt-include — nested transclusion isn't followed",
+                            referencingPageTitle, targetTitle);
+                    continue;
+                }
+                resolved.add(targetSection);
+                splicedCount++;
+            }
+            log.info("Resolved excerpt-include on page '{}': spliced in {} section(s) from '{}'",
+                    referencingPageTitle, splicedCount, targetTitle);
+        }
+        return resolved;
     }
 
     private void deleteChunksForPage(String pageId) {
