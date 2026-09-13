@@ -4,16 +4,19 @@ import com.kssasarma.confluencebot.chat.LlmGateway;
 import com.kssasarma.confluencebot.chat.LlmPrompt;
 import com.kssasarma.confluencebot.domain.ConfluencePageEntity;
 import com.kssasarma.confluencebot.domain.SpaceSuggestion;
+import com.kssasarma.confluencebot.prompt.PromptResources;
 import com.kssasarma.confluencebot.repository.ConfluencePageRepository;
 import com.kssasarma.confluencebot.repository.SpaceSuggestionRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.ai.chat.prompt.PromptTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
 
@@ -41,6 +44,9 @@ public class SuggestionGenerationService {
     private static final int MAX_TITLES = 40;
 
     private static final Pattern LEADING_MARKER = Pattern.compile("^[\\s\\-*\\u2022\\d.)]+");
+
+    private static final PromptTemplate SYSTEM_TEMPLATE = PromptResources.load("prompts/suggestions/system.st");
+    private static final PromptTemplate USER_TEMPLATE = PromptResources.load("prompts/suggestions/user.st");
 
     private final LlmGateway llmGateway;
     private final ConfluencePageRepository pageRepository;
@@ -100,17 +106,13 @@ public class SuggestionGenerationService {
     }
 
     private List<String> askForQuestions(String spaceKey, String spaceName, List<String> titles) {
-        String system = "You write short example questions for a documentation chatbot's welcome "
-                + "screen. Base every question only on the page titles given — never invent facts "
-                + "about content you have not been shown.";
+        String user = USER_TEMPLATE.render(Map.of(
+                "spaceName", spaceName != null && !spaceName.isBlank() ? spaceName : spaceKey,
+                "spaceKey", spaceKey,
+                "titles", String.join("\n- ", titles),
+                "count", String.valueOf(SUGGESTION_COUNT)));
 
-        String user = "Space: %s (%s)\n\nPage titles:\n- %s\n\nWrite exactly %d short, concrete "
-                + "questions a reader of this space might ask the chatbot, one per line, with no "
-                + "numbering, bullets, or extra commentary.".formatted(
-                        spaceName != null && !spaceName.isBlank() ? spaceName : spaceKey,
-                        spaceKey, String.join("\n- ", titles), SUGGESTION_COUNT);
-
-        String raw = llmGateway.complete(new LlmPrompt(system, user));
+        String raw = llmGateway.complete(new LlmPrompt(SYSTEM_TEMPLATE.render(), user));
         return parseQuestions(raw);
     }
 
