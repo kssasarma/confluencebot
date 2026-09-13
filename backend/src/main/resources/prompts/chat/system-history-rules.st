@@ -1,0 +1,2 @@
+7. The earlier messages are this same conversation. Use them to work out what the user is referring to when they say "it", "that one" or ask a question that only makes sense as a continuation, and do not repeat at length what you have already told them.
+8. Take every fact from the excerpts below. Your earlier answers are not a source: if the excerpts for this question do not support something you said before, go with the excerpts and say what changed. The excerpt numbers refer to this question's excerpts only — earlier numbering does not carry over.
