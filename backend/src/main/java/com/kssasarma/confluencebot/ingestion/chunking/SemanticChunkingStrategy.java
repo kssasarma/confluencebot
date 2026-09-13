@@ -23,8 +23,9 @@ import java.util.regex.Pattern;
  * - CODE sections: kept as a single chunk when within budget; split by line otherwise. Each
  *   chunk is prefixed with its heading so the raw code is never shown without context.
  *
- * - TABLE sections: kept as a single chunk when within budget; split by row otherwise, with the
- *   header row repeated on each split so every fragment stays a self-describing table.
+ * - TABLE sections: always split by row into batches of at most {@code table-chunk-size} tokens
+ *   (deliberately smaller than the general chunk budget — see the field below), with the header
+ *   row repeated on each split so every fragment stays a self-describing table.
  *
  * Why typed sections matter for retrieval: a bare JSON response sample or endpoint table diluted
  * into a generic paragraph chunk is unreadable to both the retriever (its embedding gets averaged
@@ -43,6 +44,20 @@ public class SemanticChunkingStrategy {
 
     @Value("${chat.retrieval.chunk-overlap:100}")
     private int overlapTokens;
+
+    /**
+     * Deliberately smaller than {@link #maxTokens}. A table's embedding is one vector for its
+     * whole stored text (heading + caption + rows) — there's no separate "this part matters more"
+     * signal to the embedding model. A caption of one or two sentences next to 40+ rows of bare
+     * {@code Name | Provider | Status}-style cell text gets diluted into near-nothing, so the
+     * resulting vector reads as "a table of categorical values" rather than anything resembling
+     * the natural-language question it answers — regardless of how good the caption is. Capping
+     * every table batch to a small budget keeps the caption-to-data ratio healthy in every chunk,
+     * not only in tables that happen to be small enough to stay a single chunk under the general
+     * budget.
+     */
+    @Value("${chat.retrieval.table-chunk-size:200}")
+    private int tableRowBudgetTokens;
 
     /**
      * Chunks a single {@link ParsedSection} into one or more {@link ChunkedContent} records.
@@ -109,12 +124,22 @@ public class SemanticChunkingStrategy {
 
     // ── Table chunking ────────────────────────────────────────────────────────
 
+    /**
+     * Always splits by row (never keeps a large table as one chunk, even if it would technically
+     * fit under {@link #maxTokens}) — see {@link #tableRowBudgetTokens}. The row budget reserves
+     * space for {@code headingPrefix} up front, so the prefix can never push a split over
+     * {@link #maxTokens} after the fact and force a silent tail truncation of the last rows.
+     */
     private List<ChunkedContent> chunkTable(String table, String headingPrefix, String chunkType) {
         if (table.isBlank()) return List.of();
+        int prefixTokens = estimateTokens(headingPrefix);
+        // No floor above 1: a floor like 30 could exceed (maxTokens - prefixTokens) whenever the
+        // prefix eats most of maxTokens, silently reintroducing the truncation this guards against.
+        int rowBudget = Math.max(1, Math.min(tableRowBudgetTokens, maxTokens - prefixTokens));
+
         List<ChunkedContent> result = new ArrayList<>();
-        for (String part : splitTableToBudget(table)) {
-            String content = headingPrefix + part;
-            result.add(new ChunkedContent(trimToTokens(content, maxTokens), chunkType));
+        for (String part : splitTableToBudget(table, rowBudget)) {
+            result.add(new ChunkedContent(headingPrefix + part, chunkType));
         }
         return result;
     }
@@ -199,16 +224,19 @@ public class SemanticChunkingStrategy {
     }
 
     /**
-     * Splits a table by row when it exceeds the token budget.  Each split repeats the first row
-     * (the header) so every fragment stays self-describing — orphaned data rows with no column
-     * names are useless to both the retriever and the LLM.
+     * Splits a table by row into batches of at most {@code rowBudget} tokens. Each split repeats
+     * the first row (the header) so every fragment stays self-describing — orphaned data rows
+     * with no column names are useless to both the retriever and the LLM. {@code rowBudget}
+     * already has the caller's heading-prefix cost reserved out of it (see {@link #chunkTable}),
+     * so no further trim is needed after the prefix is added back on — trimming a fully-assembled
+     * split here as a defensive clamp only, in case token estimation is ever slightly off.
      */
-    private List<String> splitTableToBudget(String table) {
+    private List<String> splitTableToBudget(String table, int rowBudget) {
         if (table.isBlank()) return List.of();
-        if (estimateTokens(table) <= maxTokens) return List.of(table);
+        if (estimateTokens(table) <= rowBudget) return List.of(table);
 
         String[] rows = table.split("\n", -1);
-        if (rows.length < 2) return List.of(trimToTokens(table, maxTokens));
+        if (rows.length < 2) return List.of(trimToTokens(table, rowBudget));
 
         String header = rows[0];
         List<String> parts = new ArrayList<>();
@@ -218,16 +246,16 @@ public class SemanticChunkingStrategy {
         for (int i = 1; i < rows.length; i++) {
             String row = rows[i].strip();
             if (row.isBlank()) continue;
-            if (hasRows && estimateTokens(current.toString()) + estimateTokens(row) > maxTokens) {
-                parts.add(trimToTokens(current.toString(), maxTokens));
+            if (hasRows && estimateTokens(current.toString()) + estimateTokens(row) > rowBudget) {
+                parts.add(trimToTokens(current.toString(), rowBudget));
                 current = new StringBuilder(header);
                 hasRows = false;
             }
             current.append("\n").append(row);
             hasRows = true;
         }
-        if (hasRows) parts.add(trimToTokens(current.toString(), maxTokens));
-        return parts.isEmpty() ? List.of(trimToTokens(table, maxTokens)) : parts;
+        if (hasRows) parts.add(trimToTokens(current.toString(), rowBudget));
+        return parts.isEmpty() ? List.of(trimToTokens(table, rowBudget)) : parts;
     }
 
     private static String trimToTokens(String text, int limit) {
