@@ -14,6 +14,7 @@ import org.springframework.web.client.RestClientException;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 @Component
 public class ConfluenceClientImpl implements ConfluenceClient {
@@ -102,6 +103,30 @@ public class ConfluenceClientImpl implements ConfluenceClient {
                     .body(ConfluencePageDetail.class);
         } catch (RestClientException ex) {
             throw new ConfluenceException("Failed to fetch page [" + pageId + "]", ex);
+        }
+    }
+
+    @Override
+    public Optional<ConfluencePageDetail> fetchPageByTitle(String spaceKey, String title) {
+        try {
+            PageSearchResult result = restClient.get()
+                    .uri(uriBuilder -> uriBuilder
+                            .path(CONTENT_API)
+                            .queryParam("spaceKey", spaceKey)
+                            .queryParam("title", title)
+                            .queryParam("type", "page")
+                            .queryParam("status", "current")
+                            .queryParam("expand", EXPAND_FIELDS)
+                            .build())
+                    .retrieve()
+                    .body(PageSearchResult.class);
+            if (result == null || result.results() == null || result.results().isEmpty()) {
+                return Optional.empty();
+            }
+            return Optional.of(result.results().get(0));
+        } catch (RestClientException ex) {
+            log.warn("Failed to look up page by title '{}' in space [{}]: {}", title, spaceKey, ex.getMessage());
+            return Optional.empty();
         }
     }
 

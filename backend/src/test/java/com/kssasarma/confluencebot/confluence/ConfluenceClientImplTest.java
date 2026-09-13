@@ -15,6 +15,7 @@ import org.springframework.web.client.RestClientException;
 
 import java.net.URI;
 import java.util.List;
+import java.util.Optional;
 import java.util.function.Function;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -144,5 +145,53 @@ class ConfluenceClientImplTest {
         assertThatThrownBy(() -> client.fetchAllPages("ENG"))
                 .isInstanceOf(ConfluenceException.class)
                 .hasMessageContaining("ENG");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // fetchPageByTitle
+    // ─────────────────────────────────────────────────────────────────────────
+    @Test
+    void fetchPageByTitle_singleMatch_returnsIt() {
+        ConfluencePageDetail match = page("42");
+        when(responseSpec.body(PageSearchResult.class)).thenReturn(resultNoNext(List.of(match)));
+
+        ConfluenceClientImpl client = new ConfluenceClientImpl(restClient, props100);
+        Optional<ConfluencePageDetail> result = client.fetchPageByTitle("ENG", "Page 42");
+
+        assertThat(result).contains(match);
+    }
+
+    @Test
+    void fetchPageByTitle_noMatch_returnsEmpty() {
+        when(responseSpec.body(PageSearchResult.class)).thenReturn(resultNoNext(List.of()));
+
+        ConfluenceClientImpl client = new ConfluenceClientImpl(restClient, props100);
+        Optional<ConfluencePageDetail> result = client.fetchPageByTitle("ENG", "Nonexistent Page");
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    void fetchPageByTitle_nullResult_returnsEmpty() {
+        when(responseSpec.body(PageSearchResult.class)).thenReturn(null);
+
+        ConfluenceClientImpl client = new ConfluenceClientImpl(restClient, props100);
+        Optional<ConfluencePageDetail> result = client.fetchPageByTitle("ENG", "Any Title");
+
+        assertThat(result).isEmpty();
+    }
+
+    // A dangling excerpt-include reference must degrade the one section that named it, not
+    // fail the whole page's ingestion — so unlike fetchAllPages, a lookup failure here is a
+    // logged, empty result rather than a thrown ConfluenceException.
+    @Test
+    void fetchPageByTitle_restClientException_returnsEmptyRatherThanThrowing() {
+        when(responseSpec.body(PageSearchResult.class))
+                .thenThrow(new RestClientException("connection refused"));
+
+        ConfluenceClientImpl client = new ConfluenceClientImpl(restClient, props100);
+        Optional<ConfluencePageDetail> result = client.fetchPageByTitle("ENG", "Any Title");
+
+        assertThat(result).isEmpty();
     }
 }
