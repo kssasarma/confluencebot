@@ -18,6 +18,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -31,9 +32,9 @@ import java.util.Set;
  *    set is not dominated by near-duplicate chunks covering the same sentence.
  * 2. Table floor — always applied. A table chunk is cell text with little surrounding prose, so
  *    it routinely loses MMR's relevance term to a more fluent paragraph that only talks about the
- *    same subject — see {@link #ensureTableRepresented}. Losing the one chunk that actually holds
- *    the tabular answer is the costlier mistake, so any table chunk in the fused pool is
- *    guaranteed a seat in the final set.
+ *    same subject — see {@link #ensureTableRepresented}. Losing the chunk that actually holds the
+ *    tabular answer is the costlier mistake, so the fused pool's best-scoring table chunks — not
+ *    just the first one MMR happens to keep — are guaranteed seats in the final set.
  * 3. LLM relevance re-rank — optional (config-gated). One extra LLM call that judges the
  *    resulting set directly against the question and reorders it. It only reorders what stages 1
  *    and 2 already selected — it cannot pull anything back from the discarded candidate pool — so
@@ -68,6 +69,15 @@ public class ReRankingService {
     @Value("${chat.retrieval.guarantee-table-chunk:true}")
     private boolean guaranteeTableChunk;
 
+    /** How many distinct table chunks the floor protects — see {@link #ensureTableRepresented}.
+     *  More than one exists because a real corpus can hold several unrelated tables that are all
+     *  plausible candidates for a similarly-worded question (e.g. a production model catalog and
+     *  a separate sandbox environment's own model list) — guaranteeing only the single
+     *  best-scoring table means a second, equally real one is still silently dropped whenever a
+     *  weaker table happens to win MMR's natural selection first. */
+    @Value("${chat.retrieval.guarantee-table-chunk-count:2}")
+    private int guaranteeTableChunkCount;
+
     public ReRankingService(RerankClient rerankClient,
                              ChatRerankProperties rerankProperties,
                              @Qualifier("rerankCircuitBreaker") CircuitBreaker circuitBreaker,
@@ -95,7 +105,7 @@ public class ReRankingService {
     }
 
     /**
-     * Guarantees that a table chunk present in the fused candidate pool survives MMR's cut.
+     * Guarantees that the fused pool's best-scoring table chunks survive MMR's cut.
      *
      * <p>MMR scores relevance from cosine similarity and RRF agreement, both of which reward text
      * that reads like the query. A table section is stored as near-bare cell text (see
@@ -104,30 +114,53 @@ public class ReRankingService {
      * relevance contest to a paragraph that only *talks about* the table's subject. The result is
      * an answer that cites the paragraph pointing at the data instead of the data.
      *
-     * <p>This does not second-guess MMR's choice of which prose chunks to keep: it only ensures at
-     * least one table chunk — the fused pool's best-scoring one — is never the casualty. If the
-     * selection already contains a table chunk, or the pool has none, nothing changes.
+     * <p>Checking only "does the selection contain *a* table" is not enough on a real corpus: when
+     * several unrelated tables are all plausible candidates for the same question, whichever one
+     * MMR happens to keep — not necessarily the most relevant one — satisfies that check and blocks
+     * every other table from ever being considered, even a much better match sitting right there in
+     * the candidate pool. So this ranks every table candidate by fusion score and guarantees the top
+     * {@link #guaranteeTableChunkCount} of them a seat, regardless of what MMR already kept.
+     *
+     * <p>This does not second-guess MMR's choice among prose chunks: a guaranteed table only ever
+     * displaces a slot that isn't already holding one of the tables this pass is protecting.
      */
     private List<ScoredCandidate> ensureTableRepresented(List<ScoredCandidate> candidates,
                                                           List<ScoredCandidate> selected) {
-        if (!guaranteeTableChunk || selected.isEmpty()) return selected;
+        if (!guaranteeTableChunk || selected.isEmpty() || guaranteeTableChunkCount <= 0) return selected;
 
-        boolean alreadyHasTable = selected.stream()
-            .anyMatch(c -> TABLE_CHUNK_TYPE.equals(c.chunk().getChunkType()));
-        if (alreadyHasTable) return selected;
-
-        ScoredCandidate bestTable = candidates.stream()
+        List<ScoredCandidate> topTables = candidates.stream()
             .filter(c -> TABLE_CHUNK_TYPE.equals(c.chunk().getChunkType()))
-            .max(Comparator.comparingDouble(ScoredCandidate::fusionScore))
-            .orElse(null);
-        if (bestTable == null) return selected;
+            .sorted(Comparator.comparingDouble(ScoredCandidate::fusionScore).reversed())
+            .limit(guaranteeTableChunkCount)
+            .toList();
+        if (topTables.isEmpty()) return selected;
 
-        log.info("Table floor: swapping in table chunk {} (page '{}') MMR would otherwise have dropped",
-                bestTable.chunk().getChunkId(), bestTable.chunk().getTitle());
+        Set<String> guaranteedIds = new LinkedHashSet<>();
+        for (ScoredCandidate table : topTables) guaranteedIds.add(table.chunk().getChunkId());
 
-        List<ScoredCandidate> withTable = new ArrayList<>(selected);
-        withTable.set(withTable.size() - 1, bestTable);
-        return withTable;
+        List<ScoredCandidate> result = new ArrayList<>(selected);
+        for (ScoredCandidate table : topTables) {
+            boolean alreadyPresent = result.stream()
+                .anyMatch(c -> c.chunk().getChunkId().equals(table.chunk().getChunkId()));
+            if (alreadyPresent) continue;
+
+            int replaceAt = lastReplaceableIndex(result, guaranteedIds);
+            if (replaceAt < 0) break; // every slot already holds a table this pass is protecting
+
+            log.info("Table floor: swapping in table chunk {} (page '{}') MMR would otherwise have dropped",
+                    table.chunk().getChunkId(), table.chunk().getTitle());
+            result.set(replaceAt, table);
+        }
+        return result;
+    }
+
+    /** The last slot not already holding one of the tables this pass is protecting — never
+     *  sacrifice a table just guaranteed a seat to make room for another one. */
+    private static int lastReplaceableIndex(List<ScoredCandidate> result, Set<String> guaranteedIds) {
+        for (int i = result.size() - 1; i >= 0; i--) {
+            if (!guaranteedIds.contains(result.get(i).chunk().getChunkId())) return i;
+        }
+        return -1;
     }
 
     // ── MMR ──────────────────────────────────────────────────────────────────

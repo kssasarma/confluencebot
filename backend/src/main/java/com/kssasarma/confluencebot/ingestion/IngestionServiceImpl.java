@@ -290,11 +290,20 @@ public class IngestionServiceImpl implements IngestionService {
      * table doesn't have to rely on being rescued at retrieval time (see
      * {@code ReRankingService#ensureTableRepresented}) to be found at all.
      *
-     * <p>Only the immediately preceding section counts, and only when it shares the table's
-     * heading — text from a different subsection is as likely to mislead as to help. A table
-     * that opens a page or a section has no caption, exactly as before this method existed.
+     * <p>Falls back to {@link #syntheticCaption} when no authored intro paragraph is available —
+     * a table that opens a page or a section previously got no caption at all, which meant no
+     * natural-language framing of any kind was embedded alongside its bare cell text.
      */
     private String tableCaption(List<ParsedSection> sections, int tableIndex) {
+        String authored = authoredCaption(sections, tableIndex);
+        return authored.isBlank() ? syntheticCaption(sections.get(tableIndex)) : authored;
+    }
+
+    /**
+     * Only the immediately preceding section counts, and only when it shares the table's
+     * heading — text from a different subsection is as likely to mislead as to help.
+     */
+    private String authoredCaption(List<ParsedSection> sections, int tableIndex) {
         if (tableIndex == 0) return "";
 
         ParsedSection previous = sections.get(tableIndex - 1);
@@ -313,6 +322,29 @@ public class IngestionServiceImpl implements IngestionService {
         String tail = text.substring(text.length() - TABLE_CAPTION_MAX_CHARS);
         int firstSpace = tail.indexOf(' ');
         return firstSpace > 0 ? tail.substring(firstSpace + 1) : tail;
+    }
+
+    /**
+     * Turns a table's own header row into a plain sentence naming its columns, so every table
+     * chunk carries at least some natural-language framing in its embedded text — not only the
+     * tables lucky enough to sit right after a matching intro paragraph. A bare pipe-delimited
+     * header row shares almost no lexical or semantic overlap with a natural-language question;
+     * spelling its columns out in a sentence gives the embedding something to anchor on.
+     */
+    private String syntheticCaption(ParsedSection table) {
+        String content = table.content();
+        if (content == null || content.isBlank()) return "";
+
+        String headerRow = content.strip().split("\n", 2)[0];
+        List<String> columns = Arrays.stream(headerRow.split("\\|"))
+                .map(String::strip)
+                .filter(c -> !c.isBlank())
+                .toList();
+        if (columns.isEmpty()) return "";
+
+        String heading = table.hasHeading() ? table.heading().strip() : "";
+        String subject = heading.isBlank() ? "This table" : "The " + heading + " table";
+        return subject + " lists " + String.join(", ", columns) + ".";
     }
 
     private void upsertPageTracking(ConfluencePageDetail page, String spaceKey, String spaceName,
