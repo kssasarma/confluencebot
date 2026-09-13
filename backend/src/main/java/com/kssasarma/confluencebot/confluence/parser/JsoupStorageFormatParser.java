@@ -31,6 +31,10 @@ public class JsoupStorageFormatParser implements StorageFormatParser {
     private static final Set<String> HEADING_TAGS = Set.of("h1", "h2", "h3", "h4");
     private static final Set<String> PROSE_TAGS   = Set.of("p", "li", "blockquote", "div");
 
+    /** Marker attribute used to smuggle an excerpt-include's target title through the DOM
+     *  walk below, past the generic macro cleanup that would otherwise destroy it. */
+    private static final String EXCERPT_INCLUDE_TITLE_ATTR = "data-excerpt-include-title";
+
     @Override
     public List<ParsedSection> parse(String storageFormatXhtml) {
         if (storageFormatXhtml == null || storageFormatXhtml.isBlank()) {
@@ -39,6 +43,7 @@ public class JsoupStorageFormatParser implements StorageFormatParser {
 
         Document doc = Jsoup.parse(storageFormatXhtml);
         preserveLinkText(doc);
+        preserveExcerptIncludeReferences(doc);
         removeConfluenceMacros(doc);
 
         List<ParsedSection> sections = new ArrayList<>();
@@ -60,6 +65,13 @@ public class JsoupStorageFormatParser implements StorageFormatParser {
     }
 
     private void processTopLevelElement(Element el, List<ParsedSection> sections, State state) {
+        if (el.hasAttr(EXCERPT_INCLUDE_TITLE_ATTR)) {
+            state.flush(state.currentHeading, sections);
+            String title = el.attr(EXCERPT_INCLUDE_TITLE_ATTR);
+            sections.add(new ParsedSection(state.currentHeading, title, ParsedSection.SectionType.EXCERPT_REFERENCE));
+            return;
+        }
+
         String tag = el.tagName().toLowerCase();
 
         if (HEADING_TAGS.contains(tag)) {
@@ -178,6 +190,39 @@ public class JsoupStorageFormatParser implements StorageFormatParser {
             String title = riPage.attr("ri:content-title");
             if (title.isBlank()) title = riPage.attr("content-title");
             return title.strip();
+        }
+        return "";
+    }
+
+    /**
+     * An {@code ac:excerpt-include} macro's storage format never carries the transcluded
+     * page's actual content — only a reference to it (an {@code ac:link}/{@code ri:page} naming
+     * the target page's title, in the macro's one unnamed parameter). {@code preserveLinkText}
+     * (run just before this) already turned that link into plain text; the generic cleanup in
+     * {@link #removeConfluenceMacros} would otherwise delete the parameter — and that text with
+     * it — before anything downstream ever saw it. This runs first and replaces the whole macro
+     * with a plain marker element carrying the title, so the target page can be resolved and its
+     * real content spliced in later (see {@code IngestionServiceImpl#resolveExcerptReferences}).
+     */
+    private void preserveExcerptIncludeReferences(Document doc) {
+        for (Element macro : doc.select("ac|structured-macro[ac:name=excerpt-include]")) {
+            String title = extractExcerptIncludeTitle(macro);
+            if (!title.isBlank()) {
+                macro.replaceWith(new Element("p").attr(EXCERPT_INCLUDE_TITLE_ATTR, title));
+            } else {
+                macro.remove();
+            }
+        }
+    }
+
+    /** The macro's one unnamed parameter holds the target page reference; named parameters
+     *  (e.g. {@code nopanel}) are configuration, not the reference, and must be ignored. */
+    private String extractExcerptIncludeTitle(Element macro) {
+        for (Element param : macro.select("ac|parameter")) {
+            if (param.attr("ac:name").isBlank()) {
+                String text = param.text().strip();
+                if (!text.isBlank()) return text;
+            }
         }
         return "";
     }
