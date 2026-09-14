@@ -6,3 +6,6 @@ dist-ssr
 *.local
 .DS_Store
 coverage
+# TypeScript compiler output emitted alongside source files
+src/**/*.js
+vite.config.js
