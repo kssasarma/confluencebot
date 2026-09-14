@@ -65,7 +65,7 @@ public class AutoIngestionScheduler {
 
     private void submitJob(ScheduledRunSpec spec) {
         try {
-            jobService.submitSpaceJob(spec.spaceKey(), spec.force());
+            jobService.submitSpaceJob(spec.spaceKey(), spec.force(), "System (Scheduled)");
             log.info("Auto-ingestion job submitted for space '{}' (force={})",
                     spec.spaceKey(), spec.force());
         } catch (DuplicateIngestionJobException ex) {

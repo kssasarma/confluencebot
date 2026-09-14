@@ -25,6 +25,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -119,14 +120,15 @@ public class IngestionController {
     @PreAuthorize("hasAnyRole('ADMIN', 'INGESTOR')")
     @PostMapping("/space")
     public ResponseEntity<IngestionJobResponse> ingestSpace(
-            @RequestBody(required = false) IngestRequest request) {
+            @RequestBody(required = false) IngestRequest request,
+            Authentication auth) {
 
         String spaceKey = (request != null && request.spaceKey() != null && !request.spaceKey().isBlank())
                 ? request.spaceKey()
                 : props.spaceKey();
         boolean force = request != null && request.isForce();
 
-        IngestionJobEntity job = jobService.submitSpaceJob(spaceKey, force);
+        IngestionJobEntity job = jobService.submitSpaceJob(spaceKey, force, auth.getName());
         return ResponseEntity.accepted().body(IngestionJobResponse.from(job));
     }
 
@@ -174,9 +176,10 @@ public class IngestionController {
     @PostMapping("/page/{pageId}")
     public ResponseEntity<IngestionJobResponse> ingestPage(
             @Parameter(description = "Confluence numeric page ID", example = "131073")
-            @PathVariable String pageId) {
+            @PathVariable String pageId,
+            Authentication auth) {
 
-        IngestionJobEntity job = jobService.submitPageJob(pageId);
+        IngestionJobEntity job = jobService.submitPageJob(pageId, auth.getName());
         return ResponseEntity.accepted().body(IngestionJobResponse.from(job));
     }
 
@@ -241,9 +244,10 @@ public class IngestionController {
     @PostMapping("/jobs/{jobId}/retrigger")
     public ResponseEntity<?> retriggerJob(
             @Parameter(description = "UUID of the failed job to resubmit")
-            @PathVariable UUID jobId) {
+            @PathVariable UUID jobId,
+            Authentication auth) {
 
-        return jobService.retriggerJob(jobId)
+        return jobService.retriggerJob(jobId, auth.getName())
                 .map(retry -> ResponseEntity.accepted().body((Object) IngestionJobResponse.from(retry)))
                 // Empty covers both "no such job" and "not failed", so the original decides which.
                 .orElseGet(() -> jobService.findById(jobId)

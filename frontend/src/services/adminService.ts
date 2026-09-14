@@ -83,6 +83,7 @@ export interface IngestionJob {
   chunksStored: number | null
   pagesSkipped: number | null
   errorMessage: string | null
+  triggeredBy: string | null
 }
 
 export interface IngestionJobPage {

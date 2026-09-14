@@ -180,9 +180,10 @@ public class IngestionScheduleController {
     @PostMapping("/{spaceKey}/trigger")
     public ResponseEntity<IngestionJobResponse> triggerNow(
             @Parameter(description = "Confluence space key", example = "IT")
-            @PathVariable String spaceKey) {
+            @PathVariable String spaceKey,
+            Authentication auth) {
 
-        IngestionJobEntity job = scheduleService.triggerNow(spaceKey);
+        IngestionJobEntity job = scheduleService.triggerNow(spaceKey, auth.getName());
         return ResponseEntity.status(HttpStatus.ACCEPTED)
                 .body(IngestionJobResponse.from(job));
     }

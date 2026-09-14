@@ -42,7 +42,7 @@ public interface IngestionScheduleService {
      * @throws com.kssasarma.confluencebot.exception.ResourceNotFoundException if no schedule exists
      * @throws com.kssasarma.confluencebot.exception.DuplicateIngestionJobException if already running
      */
-    IngestionJobEntity triggerNow(String spaceKey);
+    IngestionJobEntity triggerNow(String spaceKey, String triggeredBy);
 
     /**
      * Atomically claims all enabled schedules that are due at {@code now}: advances each
