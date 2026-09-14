@@ -25,6 +25,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -125,8 +126,9 @@ public class IngestionController {
                 ? request.spaceKey()
                 : props.spaceKey();
         boolean force = request != null && request.isForce();
+        String triggeredBy = SecurityContextHolder.getContext().getAuthentication().getName();
 
-        IngestionJobEntity job = jobService.submitSpaceJob(spaceKey, force);
+        IngestionJobEntity job = jobService.submitSpaceJob(spaceKey, force, triggeredBy);
         return ResponseEntity.accepted().body(IngestionJobResponse.from(job));
     }
 
@@ -176,7 +178,8 @@ public class IngestionController {
             @Parameter(description = "Confluence numeric page ID", example = "131073")
             @PathVariable String pageId) {
 
-        IngestionJobEntity job = jobService.submitPageJob(pageId);
+        String triggeredBy = SecurityContextHolder.getContext().getAuthentication().getName();
+        IngestionJobEntity job = jobService.submitPageJob(pageId, triggeredBy);
         return ResponseEntity.accepted().body(IngestionJobResponse.from(job));
     }
 
@@ -243,7 +246,8 @@ public class IngestionController {
             @Parameter(description = "UUID of the failed job to resubmit")
             @PathVariable UUID jobId) {
 
-        return jobService.retriggerJob(jobId)
+        String triggeredBy = SecurityContextHolder.getContext().getAuthentication().getName();
+        return jobService.retriggerJob(jobId, triggeredBy)
                 .map(retry -> ResponseEntity.accepted().body((Object) IngestionJobResponse.from(retry)))
                 // Empty covers both "no such job" and "not failed", so the original decides which.
                 .orElseGet(() -> jobService.findById(jobId)

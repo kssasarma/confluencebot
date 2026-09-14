@@ -51,25 +51,30 @@ public class IngestionJobEntity {
     @Column(name = "error_message")
     private String errorMessage;
 
+    @Column(name = "triggered_by", length = 255)
+    private String triggeredBy;
+
     protected IngestionJobEntity() {}
 
-    public static IngestionJobEntity forSpace(String spaceKey, boolean force) {
+    public static IngestionJobEntity forSpace(String spaceKey, boolean force, String triggeredBy) {
         IngestionJobEntity e = new IngestionJobEntity();
         e.jobType = IngestionJobType.SPACE;
         e.spaceKey = spaceKey;
         e.force = force;
         e.status = IngestionJobStatus.PENDING;
         e.createdAt = OffsetDateTime.now();
+        e.triggeredBy = triggeredBy;
         return e;
     }
 
-    public static IngestionJobEntity forPage(String pageId) {
+    public static IngestionJobEntity forPage(String pageId, String triggeredBy) {
         IngestionJobEntity e = new IngestionJobEntity();
         e.jobType = IngestionJobType.PAGE;
         e.pageId = pageId;
         e.force = false;
         e.status = IngestionJobStatus.PENDING;
         e.createdAt = OffsetDateTime.now();
+        e.triggeredBy = triggeredBy;
         return e;
     }
 
@@ -86,6 +91,7 @@ public class IngestionJobEntity {
     public Integer getChunksStored() { return chunksStored; }
     public Integer getPagesSkipped() { return pagesSkipped; }
     public String getErrorMessage() { return errorMessage; }
+    public String getTriggeredBy() { return triggeredBy; }
 
     public void markRunning() {
         this.status = IngestionJobStatus.RUNNING;

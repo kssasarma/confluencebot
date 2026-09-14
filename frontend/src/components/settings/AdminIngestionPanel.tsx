@@ -164,6 +164,7 @@ export default function AdminIngestionPanel() {
                         <th scope="col" className="pb-2 font-medium text-muted-foreground">Pages</th>
                         <th scope="col" className="pb-2 font-medium text-muted-foreground">Chunks</th>
                         <th scope="col" className="pb-2 font-medium text-muted-foreground">Started</th>
+                        <th scope="col" className="pb-2 font-medium text-muted-foreground">Triggered by</th>
                         <th scope="col" className="pb-2"><span className="sr-only">Actions</span></th>
                       </tr>
                     </thead>
@@ -182,6 +183,9 @@ export default function AdminIngestionPanel() {
                           <td className="py-2 pr-3 text-2xs text-muted-foreground">{job.chunksStored ?? '—'}</td>
                           <td className="py-2 pr-3 text-2xs text-muted-foreground">
                             {job.startedAt ? absoluteTime(job.startedAt) : '—'}
+                          </td>
+                          <td className="py-2 pr-3 text-2xs text-muted-foreground">
+                            {job.triggeredBy ?? '—'}
                           </td>
                           <td className="py-2 text-right">
                             {job.status === 'FAILED' && (

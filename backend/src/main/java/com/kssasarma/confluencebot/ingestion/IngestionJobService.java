@@ -28,7 +28,7 @@ public class IngestionJobService {
     }
 
     @Transactional
-    public IngestionJobEntity submitSpaceJob(String spaceKey, boolean force) {
+    public IngestionJobEntity submitSpaceJob(String spaceKey, boolean force, String triggeredBy) {
         // Reject the request rather than allowing two concurrent runs on the same space.
         // Two simultaneous jobs cause a primary-key collision in confluence_pages and double-insert
         // chunks into the vector store — see upsertPageTracking / deleteChunksForPage race notes.
@@ -42,7 +42,7 @@ public class IngestionJobService {
                     "A space ingestion job for '" + spaceKey + "' is already PENDING or RUNNING — " +
                     "wait for it to finish before submitting another.");
         }
-        IngestionJobEntity job = IngestionJobEntity.forSpace(spaceKey, force);
+        IngestionJobEntity job = IngestionJobEntity.forSpace(spaceKey, force, triggeredBy);
         jobRepo.save(job);
         UUID jobId = job.getId();
         dispatchAfterCommit(() -> runner.runSpaceJob(jobId, spaceKey, force));
@@ -50,8 +50,8 @@ public class IngestionJobService {
     }
 
     @Transactional
-    public IngestionJobEntity submitPageJob(String pageId) {
-        IngestionJobEntity job = IngestionJobEntity.forPage(pageId);
+    public IngestionJobEntity submitPageJob(String pageId, String triggeredBy) {
+        IngestionJobEntity job = IngestionJobEntity.forPage(pageId, triggeredBy);
         jobRepo.save(job);
         UUID jobId = job.getId();
         dispatchAfterCommit(() -> runner.runPageJob(jobId, pageId));
@@ -109,7 +109,7 @@ public class IngestionJobService {
      * a completed one has nothing to retry. The caller distinguishes the two cases.
      */
     @Transactional
-    public Optional<IngestionJobEntity> retriggerJob(UUID jobId) {
+    public Optional<IngestionJobEntity> retriggerJob(UUID jobId, String triggeredBy) {
         return jobRepo.findById(jobId)
                 .filter(failed -> failed.getStatus() == IngestionJobStatus.FAILED)
                 .map(failed -> {
@@ -121,8 +121,8 @@ public class IngestionJobService {
                     boolean force = failed.isForce();
 
                     IngestionJobEntity retry = type == IngestionJobType.SPACE
-                            ? IngestionJobEntity.forSpace(spaceKey, force)
-                            : IngestionJobEntity.forPage(pageId);
+                            ? IngestionJobEntity.forSpace(spaceKey, force, triggeredBy)
+                            : IngestionJobEntity.forPage(pageId, triggeredBy);
                     jobRepo.save(retry);
 
                     UUID retryId = retry.getId();

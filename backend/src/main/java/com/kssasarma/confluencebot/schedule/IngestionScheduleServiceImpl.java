@@ -95,10 +95,10 @@ class IngestionScheduleServiceImpl implements IngestionScheduleService {
 
     @Override
     @Transactional
-    public IngestionJobEntity triggerNow(String spaceKey) {
+    public IngestionJobEntity triggerNow(String spaceKey, String triggeredBy) {
         IngestionScheduleEntity schedule = requireSchedule(spaceKey);
         log.info("Manual trigger of scheduled ingestion for space '{}'", spaceKey);
-        return jobService.submitSpaceJob(spaceKey, schedule.isForce());
+        return jobService.submitSpaceJob(spaceKey, schedule.isForce(), triggeredBy);
     }
 
     /**

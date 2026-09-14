@@ -46,7 +46,10 @@ public record IngestionJobResponse(
         Integer pagesSkipped,
 
         @Schema(description = "Error detail (populated on FAILED)")
-        String errorMessage
+        String errorMessage,
+
+        @Schema(description = "Who or what triggered this job (admin email, or 'System (Scheduled)')")
+        String triggeredBy
 ) {
     public static IngestionJobResponse from(IngestionJobEntity e) {
         return new IngestionJobResponse(
@@ -62,7 +65,8 @@ public record IngestionJobResponse(
                 e.getPagesProcessed(),
                 e.getChunksStored(),
                 e.getPagesSkipped(),
-                e.getErrorMessage()
+                e.getErrorMessage(),
+                e.getTriggeredBy()
         );
     }
 }
