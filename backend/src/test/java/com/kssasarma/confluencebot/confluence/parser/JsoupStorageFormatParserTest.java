@@ -149,4 +149,58 @@ class JsoupStorageFormatParserTest {
         assertThat(sections).hasSize(1);
         assertThat(sections.get(0).content()).contains("System.out.println");
     }
+
+    @Test
+    void parse_excerptInclude_producesAnExcerptReferenceSectionNamingTheTargetPage() {
+        // excerpt-include's storage format never carries the transcluded content, only a
+        // reference to the page that has it -- the one unnamed parameter holds an ac:link
+        // wrapping a ri:page naming that page's title.
+        String xhtml = """
+                <p>Intro text</p>
+                <ac:structured-macro ac:name="excerpt-include" ac:schema-version="1">
+                  <ac:parameter ac:name="">
+                    <ac:link><ri:page ri:content-title="Target Page Title" /></ac:link>
+                  </ac:parameter>
+                  <ac:parameter ac:name="nopanel">true</ac:parameter>
+                </ac:structured-macro>
+                """;
+
+        List<ParsedSection> sections = parser.parse(xhtml);
+
+        assertThat(sections).hasSize(2);
+        assertThat(sections.get(0).content()).contains("Intro text");
+        assertThat(sections.get(1).isExcerptReference()).isTrue();
+        // Exactly the title -- the "nopanel" named parameter must not leak into it.
+        assertThat(sections.get(1).content()).isEqualTo("Target Page Title");
+    }
+
+    @Test
+    void parse_excerptIncludeUnderAHeading_carriesThatHeading() {
+        String xhtml = """
+                <h2>Models</h2>
+                <ac:structured-macro ac:name="excerpt-include">
+                  <ac:parameter ac:name=""><ac:link><ri:page ri:content-title="Model Table Source" /></ac:link></ac:parameter>
+                </ac:structured-macro>
+                """;
+
+        List<ParsedSection> sections = parser.parse(xhtml);
+
+        assertThat(sections).hasSize(1);
+        assertThat(sections.get(0).isExcerptReference()).isTrue();
+        assertThat(sections.get(0).heading()).isEqualTo("Models");
+        assertThat(sections.get(0).content()).isEqualTo("Model Table Source");
+    }
+
+    @Test
+    void parse_excerptIncludeWithNoResolvableTargetReference_producesNoSection() {
+        String xhtml = """
+                <ac:structured-macro ac:name="excerpt-include">
+                  <ac:parameter ac:name="nopanel">true</ac:parameter>
+                </ac:structured-macro>
+                """;
+
+        List<ParsedSection> sections = parser.parse(xhtml);
+
+        assertThat(sections).isEmpty();
+    }
 }

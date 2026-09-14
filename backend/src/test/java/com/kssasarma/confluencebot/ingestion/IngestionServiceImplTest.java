@@ -6,7 +6,6 @@ import com.kssasarma.confluencebot.confluence.dto.SpaceMetadata;
 import com.kssasarma.confluencebot.confluence.parser.ParsedSection;
 import com.kssasarma.confluencebot.confluence.parser.StorageFormatParser;
 import com.kssasarma.confluencebot.config.ConfluenceProperties;
-import com.kssasarma.confluencebot.domain.ConfluencePageEntity;
 import com.kssasarma.confluencebot.ingestion.chunking.SemanticChunkingStrategy;
 import com.kssasarma.confluencebot.ingestion.chunking.SemanticChunkingStrategy.ChunkedContent;
 import com.kssasarma.confluencebot.repository.ConfluencePageRepository;
@@ -20,6 +19,8 @@ import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.PreparedStatementSetter;
 import org.springframework.jdbc.core.RowMapper;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionStatus;
 
 import java.util.List;
 import java.util.Optional;
@@ -37,6 +38,8 @@ class IngestionServiceImplTest {
     @Mock private VectorStore vectorStore;
     @Mock private ConfluencePageRepository pageRepository;
     @Mock private JdbcTemplate jdbcTemplate;
+    @Mock private PlatformTransactionManager txManager;
+    @Mock private TransactionStatus transactionStatus;
 
     // Direct instantiation avoids mocking a record
     private final ConfluenceProperties props = new ConfluenceProperties(
@@ -55,9 +58,12 @@ class IngestionServiceImplTest {
 
     @BeforeEach
     void setUp() {
+        // TransactionTemplate calls getTransaction() then commit(); lenient so ingestPage tests
+        // (which never reach deleteRemovedPages) don't trigger UnnecessaryStubbingException.
+        lenient().when(txManager.getTransaction(any())).thenReturn(transactionStatus);
         service = new IngestionServiceImpl(
                 confluenceClient, parser, chunkingStrategy,
-                vectorStore, pageRepository, props, jdbcTemplate);
+                vectorStore, pageRepository, props, jdbcTemplate, txManager);
     }
 
     @Test
@@ -83,8 +89,6 @@ class IngestionServiceImplTest {
                 .thenReturn(List.of(new ParsedSection("Intro", "Some text")));
         when(chunkingStrategy.chunk(any(), eq("Guide")))
                 .thenReturn(List.of(new ChunkedContent("chunk one", "TEXT")));
-        when(pageRepository.findById("p2")).thenReturn(Optional.empty());
-        when(pageRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         IngestionResult result = service.ingestSpace("ENG");
 
@@ -102,15 +106,21 @@ class IngestionServiceImplTest {
                 .thenReturn(List.of(new ParsedSection("Intro", "Some text")));
         when(chunkingStrategy.chunk(any(), eq("Guide")))
                 .thenReturn(List.of(new ChunkedContent("chunk one", "TEXT")));
-        when(pageRepository.findById("p2")).thenReturn(Optional.empty());
-        when(pageRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         service.ingestSpace("ENG");
 
-        ArgumentCaptor<ConfluencePageEntity> saved = ArgumentCaptor.forClass(ConfluencePageEntity.class);
-        verify(pageRepository).save(saved.capture());
-        assertThat(saved.getValue().getSpaceKey()).isEqualTo("ENG");
-        assertThat(saved.getValue().getSpaceName()).isEqualTo("Engineering");
+        // upsertPageTracking now uses a SQL INSERT ... ON CONFLICT upsert instead of JPA save().
+        // Verify that the space_key and space_name from the fetched metadata reach the statement.
+        verify(jdbcTemplate).update(
+                argThat(sql -> sql.contains("ON CONFLICT")),
+                eq("p2"),
+                eq("ENG"),
+                eq("Engineering"),
+                eq("Guide"),
+                any(),
+                eq(5),
+                eq(1),
+                any());
     }
 
     @Test
@@ -125,8 +135,6 @@ class IngestionServiceImplTest {
                 .thenReturn(List.of(new ParsedSection("", "Good content")));
         when(chunkingStrategy.chunk(any(), eq("Good Page")))
                 .thenReturn(List.of(new ChunkedContent("chunk", "TEXT")));
-        when(pageRepository.findById("good")).thenReturn(Optional.empty());
-        when(pageRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         IngestionResult result = service.ingestSpace("ENG");
 
@@ -216,8 +224,6 @@ class IngestionServiceImplTest {
                 .thenReturn(List.of(new ChunkedContent("intro chunk", "TEXT")));
         when(chunkingStrategy.chunk(any(), eq("Spec Page"), anyString()))
                 .thenReturn(List.of(new ChunkedContent("table chunk", "TABLE")));
-        when(pageRepository.findById("sp1")).thenReturn(Optional.empty());
-        when(pageRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         service.ingestPage("sp1");
 
@@ -240,8 +246,6 @@ class IngestionServiceImplTest {
                 .thenReturn(List.of(new ChunkedContent("intro chunk", "TEXT")));
         when(chunkingStrategy.chunk(any(), eq("Spec Page"), anyString()))
                 .thenReturn(List.of(new ChunkedContent("table chunk", "TABLE")));
-        when(pageRepository.findById("sp1")).thenReturn(Optional.empty());
-        when(pageRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         service.ingestPage("sp1");
 
@@ -260,8 +264,6 @@ class IngestionServiceImplTest {
                 new ParsedSection("Models", "Name | Status\nA | Active", ParsedSection.SectionType.TABLE)));
         when(chunkingStrategy.chunk(any(), eq("Spec Page"), anyString()))
                 .thenReturn(List.of(new ChunkedContent("table chunk", "TABLE")));
-        when(pageRepository.findById("sp1")).thenReturn(Optional.empty());
-        when(pageRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         service.ingestPage("sp1");
 
@@ -279,12 +281,133 @@ class IngestionServiceImplTest {
                 new ParsedSection("", "|||", ParsedSection.SectionType.TABLE)));
         when(chunkingStrategy.chunk(any(), eq("Spec Page"), anyString()))
                 .thenReturn(List.of(new ChunkedContent("table chunk", "TABLE")));
-        when(pageRepository.findById("sp1")).thenReturn(Optional.empty());
-        when(pageRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         service.ingestPage("sp1");
 
         verify(chunkingStrategy).chunk(any(), eq("Spec Page"), eq(""));
+    }
+
+    @Test
+    void ingestPage_withExcerptInclude_splicesInTargetPagesSectionsAsThisPagesOwnChunks() {
+        ConfluencePageDetail page = page("sp1", "Spec Page", 2);
+        when(confluenceClient.fetchSpaceMetadata("ENG")).thenReturn(SPACE_WITH_DESC);
+        when(confluenceClient.fetchPage("sp1")).thenReturn(page);
+
+        ParsedSection intro = new ParsedSection("", "Intro paragraph", ParsedSection.SectionType.TEXT);
+        ParsedSection excerptRef = new ParsedSection("Models", "Target Page",
+                ParsedSection.SectionType.EXCERPT_REFERENCE);
+        when(parser.parse("<p>Spec Page content</p>")).thenReturn(List.of(intro, excerptRef));
+
+        ConfluencePageDetail targetPage = page("target1", "Target Page", 1);
+        when(confluenceClient.fetchPageByTitle("ENG", "Target Page")).thenReturn(Optional.of(targetPage));
+        ParsedSection targetTable = new ParsedSection("Models", "Name | Status\nA | Active",
+                ParsedSection.SectionType.TABLE);
+        when(parser.parse("<p>Target Page content</p>")).thenReturn(List.of(targetTable));
+
+        when(chunkingStrategy.chunk(any(), eq("Spec Page")))
+                .thenReturn(List.of(new ChunkedContent("intro chunk", "TEXT")));
+        when(chunkingStrategy.chunk(any(), eq("Spec Page"), anyString()))
+                .thenReturn(List.of(new ChunkedContent("table chunk", "TABLE")));
+
+        IngestionResult result = service.ingestPage("sp1");
+
+        // The target's table reached the chunker as part of THIS page's own sections.
+        assertThat(result.chunksStored()).isEqualTo(2);
+        verify(chunkingStrategy).chunk(eq(targetTable), eq("Spec Page"), anyString());
+
+        // Stored under the referencing page's own identity -- exactly what a person reading
+        // "Spec Page" in Confluence sees, since excerpt-include renders the content inline.
+        ArgumentCaptor<List<org.springframework.ai.document.Document>> docsCaptor =
+                ArgumentCaptor.forClass(List.class);
+        verify(vectorStore).add(docsCaptor.capture());
+        assertThat(docsCaptor.getValue()).allSatisfy(d -> {
+            assertThat(d.getMetadata().get("page_id")).isEqualTo("sp1");
+            assertThat(d.getMetadata().get("title")).isEqualTo("Spec Page");
+        });
+    }
+
+    @Test
+    void ingestPage_excerptIncludeTargetNotFound_isDroppedGracefully() {
+        ConfluencePageDetail page = page("sp1", "Spec Page", 2);
+        when(confluenceClient.fetchSpaceMetadata("ENG")).thenReturn(SPACE_WITH_DESC);
+        when(confluenceClient.fetchPage("sp1")).thenReturn(page);
+
+        ParsedSection intro = new ParsedSection("", "Intro paragraph", ParsedSection.SectionType.TEXT);
+        ParsedSection excerptRef = new ParsedSection("Models", "Missing Page",
+                ParsedSection.SectionType.EXCERPT_REFERENCE);
+        when(parser.parse(anyString())).thenReturn(List.of(intro, excerptRef));
+        when(confluenceClient.fetchPageByTitle("ENG", "Missing Page")).thenReturn(Optional.empty());
+
+        when(chunkingStrategy.chunk(any(), eq("Spec Page")))
+                .thenReturn(List.of(new ChunkedContent("intro chunk", "TEXT")));
+
+        IngestionResult result = service.ingestPage("sp1");
+
+        // A dangling reference degrades this one section, not the whole page's ingestion.
+        assertThat(result.chunksStored()).isEqualTo(1);
+        verify(chunkingStrategy, never()).chunk(any(), eq("Spec Page"), anyString());
+    }
+
+    @Test
+    void ingestPage_excerptIncludeTargetHasItsOwnUnresolvedExcerptInclude_nestedReferenceIsDropped() {
+        ConfluencePageDetail page = page("sp1", "Spec Page", 2);
+        when(confluenceClient.fetchSpaceMetadata("ENG")).thenReturn(SPACE_WITH_DESC);
+        when(confluenceClient.fetchPage("sp1")).thenReturn(page);
+
+        ParsedSection excerptRef = new ParsedSection("", "Target Page", ParsedSection.SectionType.EXCERPT_REFERENCE);
+        when(parser.parse("<p>Spec Page content</p>")).thenReturn(List.of(excerptRef));
+
+        ConfluencePageDetail targetPage = page("target1", "Target Page", 1);
+        when(confluenceClient.fetchPageByTitle("ENG", "Target Page")).thenReturn(Optional.of(targetPage));
+        ParsedSection nestedRef = new ParsedSection("", "Another Page", ParsedSection.SectionType.EXCERPT_REFERENCE);
+        ParsedSection targetText = new ParsedSection("", "Real content", ParsedSection.SectionType.TEXT);
+        when(parser.parse("<p>Target Page content</p>")).thenReturn(List.of(targetText, nestedRef));
+
+        when(chunkingStrategy.chunk(any(), eq("Spec Page")))
+                .thenReturn(List.of(new ChunkedContent("chunk", "TEXT")));
+
+        IngestionResult result = service.ingestPage("sp1");
+
+        // Only the real text section survives; the nested reference inside the target is
+        // dropped rather than followed -- one level of resolution only, by design.
+        assertThat(result.chunksStored()).isEqualTo(1);
+        verify(confluenceClient, never()).fetchPageByTitle("ENG", "Another Page");
+    }
+
+    @Test
+    void ingestPage_excerptIncludeTargetHasNoHeadingOfItsOwn_splicedSectionInheritsTheReferencingPagesHeading() {
+        ConfluencePageDetail page = page("sp1", "Spec Page", 2);
+        when(confluenceClient.fetchSpaceMetadata("ENG")).thenReturn(SPACE_WITH_DESC);
+        when(confluenceClient.fetchPage("sp1")).thenReturn(page);
+
+        ParsedSection excerptRef = new ParsedSection("Models", "Target Page",
+                ParsedSection.SectionType.EXCERPT_REFERENCE);
+        when(parser.parse("<p>Spec Page content</p>")).thenReturn(List.of(excerptRef));
+
+        ConfluencePageDetail targetPage = page("target1", "Target Page", 1);
+        when(confluenceClient.fetchPageByTitle("ENG", "Target Page")).thenReturn(Optional.of(targetPage));
+        // The target page really is "just a table" -- no heading of its own.
+        ParsedSection targetTable = new ParsedSection("", "Name | Status\nA | Active",
+                ParsedSection.SectionType.TABLE);
+        when(parser.parse("<p>Target Page content</p>")).thenReturn(List.of(targetTable));
+
+        when(chunkingStrategy.chunk(any(), eq("Spec Page"), anyString()))
+                .thenReturn(List.of(new ChunkedContent("table chunk", "TABLE")));
+
+        service.ingestPage("sp1");
+
+        // The spliced table takes on the heading the excerpt-include itself sat under on the
+        // referencing page -- not the blank heading it had on the target page -- so its section
+        // anchor and metadata point somewhere that actually exists on the page a reader is on.
+        ArgumentCaptor<ParsedSection> sectionCaptor = ArgumentCaptor.forClass(ParsedSection.class);
+        verify(chunkingStrategy).chunk(sectionCaptor.capture(), eq("Spec Page"), anyString());
+        assertThat(sectionCaptor.getValue().heading()).isEqualTo("Models");
+
+        ArgumentCaptor<List<org.springframework.ai.document.Document>> docsCaptor =
+                ArgumentCaptor.forClass(List.class);
+        verify(vectorStore).add(docsCaptor.capture());
+        assertThat(docsCaptor.getValue()).allSatisfy(d ->
+                assertThat(d.getMetadata().get("section_heading")).isEqualTo("Models"));
     }
 
     @Test
@@ -296,8 +419,6 @@ class IngestionServiceImplTest {
                 .thenReturn(List.of(new ParsedSection("Sec", "Text")));
         when(chunkingStrategy.chunk(any(), eq("Spec Page")))
                 .thenReturn(List.of(new ChunkedContent("chunk", "TEXT")));
-        when(pageRepository.findById("sp1")).thenReturn(Optional.empty());
-        when(pageRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         IngestionResult result = service.ingestPage("sp1");
 

@@ -92,6 +92,9 @@ public class SemanticChunkingStrategy {
             case CODE  -> chunkCode(section.content(), headingPrefix, chunkType);
             case TABLE -> chunkTable(section.content(), headingPrefix, chunkType);
             case TEXT  -> chunkText(section.content(), headingPrefix, chunkType);
+            // Always resolved (replaced with the transcluded page's real sections) or dropped
+            // by IngestionServiceImpl before chunking runs — never reaches here in practice.
+            case EXCERPT_REFERENCE -> List.of();
         };
     }
 

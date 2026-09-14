@@ -147,3 +147,42 @@ export const getJob = (jobId: string): Promise<IngestionJob> =>
 /** Resubmits a failed job. The failure stays in the history; this returns the new job. */
 export const retriggerJob = (jobId: string): Promise<IngestionJob> =>
   apiJson<IngestionJob>(`/ingest/jobs/${jobId}/retrigger`, { method: 'POST' })
+
+// ── Ingestion schedules ──────────────────────────────────────────────────────
+
+export interface IngestionSchedule {
+  id: string
+  spaceKey: string
+  enabled: boolean
+  intervalHours: number
+  force: boolean
+  lastRunAt: string | null
+  nextRunAt: string
+  createdAt: string
+  updatedAt: string
+  createdBy: string
+  updatedBy: string
+}
+
+export interface ScheduleUpsertRequest {
+  intervalHours: number
+  enabled: boolean
+  force: boolean
+}
+
+export const listSchedules = (): Promise<IngestionSchedule[]> =>
+  apiJson<IngestionSchedule[]>('/admin/ingestion-schedules')
+
+export const upsertSchedule = (spaceKey: string, req: ScheduleUpsertRequest): Promise<IngestionSchedule> =>
+  apiJson<IngestionSchedule>(`/admin/ingestion-schedules/${encodeURIComponent(spaceKey)}`, {
+    method: 'PUT',
+    ...jsonBody(req),
+  })
+
+/** Permanently removes the schedule — any in-flight job completes normally. */
+export const deleteSchedule = (spaceKey: string): Promise<void> =>
+  apiJson<void>(`/admin/ingestion-schedules/${encodeURIComponent(spaceKey)}`, { method: 'DELETE' })
+
+/** Submits an immediate job using the force flag stored on the schedule. */
+export const triggerScheduleNow = (spaceKey: string): Promise<IngestionJob> =>
+  apiJson<IngestionJob>(`/admin/ingestion-schedules/${encodeURIComponent(spaceKey)}/trigger`, { method: 'POST' })
