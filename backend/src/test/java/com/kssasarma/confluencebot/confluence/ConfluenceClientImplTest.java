@@ -48,7 +48,7 @@ class ConfluenceClientImplTest {
     private static ConfluencePageDetail page(String id) {
         return new ConfluencePageDetail(id, "Page " + id,
                 new ConfluencePageDetail.Version(1), null,
-                new ConfluencePageDetail.Links("/page/" + id));
+                new ConfluencePageDetail.Links("/page/" + id), null);
     }
 
     private static PageSearchResult resultWithNext(List<ConfluencePageDetail> pages) {

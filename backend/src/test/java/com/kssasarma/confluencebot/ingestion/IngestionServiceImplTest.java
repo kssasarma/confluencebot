@@ -435,6 +435,7 @@ class IngestionServiceImplTest {
                 new ConfluencePageDetail.Version(version),
                 new ConfluencePageDetail.Body(
                         new ConfluencePageDetail.Storage("<p>" + title + " content</p>")),
-                new ConfluencePageDetail.Links("/pages/viewpage.action?pageId=" + id));
+                new ConfluencePageDetail.Links("/pages/viewpage.action?pageId=" + id),
+                new ConfluencePageDetail.Space("ENG", "Engineering"));
     }
 }
