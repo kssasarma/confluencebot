@@ -58,8 +58,9 @@ class IngestionServiceImplTest {
 
     @BeforeEach
     void setUp() {
-        // TransactionTemplate calls getTransaction() then commit(); both must succeed.
-        when(txManager.getTransaction(any())).thenReturn(transactionStatus);
+        // TransactionTemplate calls getTransaction() then commit(); lenient so ingestPage tests
+        // (which never reach deleteRemovedPages) don't trigger UnnecessaryStubbingException.
+        lenient().when(txManager.getTransaction(any())).thenReturn(transactionStatus);
         service = new IngestionServiceImpl(
                 confluenceClient, parser, chunkingStrategy,
                 vectorStore, pageRepository, props, jdbcTemplate, txManager);
