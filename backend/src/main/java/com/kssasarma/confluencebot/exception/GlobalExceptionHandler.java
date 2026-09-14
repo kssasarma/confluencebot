@@ -124,6 +124,13 @@ public class GlobalExceptionHandler {
         return problem(HttpStatus.INTERNAL_SERVER_ERROR, "Ingestion Failed", "ingestion", ex.getMessage());
     }
 
+    @ExceptionHandler(DuplicateIngestionJobException.class)
+    public ProblemDetail handleDuplicateIngestionJob(DuplicateIngestionJobException ex) {
+        log.debug("Duplicate ingestion job rejected: {}", ex.getMessage());
+        return problem(HttpStatus.CONFLICT, "Ingestion Already In Progress", "duplicate-ingestion-job",
+                ex.getMessage());
+    }
+
     @ExceptionHandler(NoResourceFoundException.class)
     public ProblemDetail handleNoResource(NoResourceFoundException ex) {
         log.debug("Static resource not found: {}", ex.getMessage());
