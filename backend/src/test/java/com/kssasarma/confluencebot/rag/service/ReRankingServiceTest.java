@@ -36,10 +36,18 @@ class ReRankingServiceTest {
 
     private static ReRankingService.ScoredCandidate candidate(String id, String chunkType,
                                                                 float[] embedding, double fusionScore) {
+        return candidate(id, chunkType, id, "", embedding, fusionScore);
+    }
+
+    private static ReRankingService.ScoredCandidate candidate(String id, String chunkType,
+                                                                String pageId, String sectionHeading,
+                                                                float[] embedding, double fusionScore) {
         RetrievedChunk chunk = RetrievedChunk.builder()
                 .chunkId(id)
                 .content(id)
                 .title("Widget Catalog")
+                .pageId(pageId)
+                .sectionHeading(sectionHeading)
                 .chunkType(chunkType)
                 .embedding(embedding)
                 .build();
@@ -157,6 +165,37 @@ class ReRankingServiceTest {
 
         assertThat(result).extracting(RetrievedChunk::getChunkId)
                 .contains("table-a", "table-b");
+    }
+
+    /**
+     * A large table split into three row-batch chunks shares one (pageId, sectionHeading) group.
+     * The guarantee must protect all three — not just the highest-scoring one — so the LLM sees
+     * every row of the table, not only the batch that happened to win the fusion-score race.
+     *
+     * This is the real-world scenario: an 11-row model catalog produces three chunks under the
+     * default table-chunk-size budget; only the two middle batches scored highly, while the first
+     * batch (oldest models) was silently dropped and never reached the LLM.
+     */
+    @Test
+    void allRowBatchesOfTheSplitTableAreGuaranteedWhenAnyBatchQualifies() {
+        ReRankingService service = newService(false, true, 1);
+        float[] query = {1f, 0f};
+
+        // Three row-batch chunks from the same logical table (same pageId + sectionHeading).
+        // batch-2 scores highest so it wins the per-group top-N slot; the group expansion must
+        // then pull batch-1 and batch-3 in alongside it rather than dropping them.
+        List<ReRankingService.ScoredCandidate> candidates = List.of(
+                candidate("prose-1", "TEXT",  new float[]{0.99f, 0.1f},  0.90),
+                candidate("prose-2", "TEXT",  new float[]{0.95f, 0.2f},  0.80),
+                candidate("prose-3", "TEXT",  new float[]{0.90f, 0.3f},  0.70),
+                candidate("batch-1", "TABLE", "page-models", "Supported Models", new float[]{0.3f, 0.9f}, 0.45),
+                candidate("batch-2", "TABLE", "page-models", "Supported Models", new float[]{0.5f, 0.8f}, 0.75),
+                candidate("batch-3", "TABLE", "page-models", "Supported Models", new float[]{0.4f, 0.85f}, 0.55));
+
+        List<RetrievedChunk> result = service.rerank("what models are supported", query, candidates, 5);
+
+        assertThat(result).extracting(RetrievedChunk::getChunkId)
+                .contains("batch-1", "batch-2", "batch-3");
     }
 
     @Test
