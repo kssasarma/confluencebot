@@ -1,6 +1,7 @@
 package com.kssasarma.confluencebot.schedule;
 
 import com.kssasarma.confluencebot.schedule.strategy.FixedIntervalScheduleStrategy;
+import com.kssasarma.confluencebot.schedule.strategy.ScheduleConfig;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -22,7 +23,7 @@ class FixedIntervalScheduleStrategyTest {
     void calculateNextRun_24hInterval_advancesByExactly24Hours() {
         OffsetDateTime from = OffsetDateTime.parse("2026-09-14T10:00:00+05:30");
 
-        OffsetDateTime next = strategy.calculateNextRun(from, 24);
+        OffsetDateTime next = strategy.calculateNextRun(from, new ScheduleConfig(24, null));
 
         assertThat(next).isEqualTo(OffsetDateTime.parse("2026-09-15T10:00:00+05:30"));
     }
@@ -32,7 +33,7 @@ class FixedIntervalScheduleStrategyTest {
     void calculateNextRun_isAlwaysAfterFrom(int intervalHours) {
         OffsetDateTime from = OffsetDateTime.now();
 
-        OffsetDateTime next = strategy.calculateNextRun(from, intervalHours);
+        OffsetDateTime next = strategy.calculateNextRun(from, new ScheduleConfig(intervalHours, null));
 
         assertThat(next).isAfter(from);
         assertThat(next).isEqualTo(from.plusHours(intervalHours));
