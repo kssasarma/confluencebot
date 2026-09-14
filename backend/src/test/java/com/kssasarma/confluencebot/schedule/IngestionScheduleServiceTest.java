@@ -45,7 +45,7 @@ class IngestionScheduleServiceTest {
         when(scheduleRepo.findBySpaceKey("IT")).thenReturn(Optional.empty());
         when(scheduleRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        CreateScheduleCommand cmd = new CreateScheduleCommand(24, true, false, "admin@example.com");
+        CreateScheduleCommand cmd = new CreateScheduleCommand(24, true, "admin@example.com");
         IngestionScheduleEntity result = service.createOrReplace("IT", cmd);
 
         assertThat(result.getSpaceKey()).isEqualTo("IT");
@@ -64,12 +64,12 @@ class IngestionScheduleServiceTest {
         when(scheduleRepo.findBySpaceKey("IT")).thenReturn(Optional.of(existing));
         when(scheduleRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        CreateScheduleCommand cmd = new CreateScheduleCommand(12, false, true, "admin2@example.com");
+        CreateScheduleCommand cmd = new CreateScheduleCommand(12, false, "admin2@example.com");
         IngestionScheduleEntity result = service.createOrReplace("IT", cmd);
 
         assertThat(result.getIntervalHours()).isEqualTo(12);
         assertThat(result.isEnabled()).isFalse();
-        assertThat(result.isForce()).isTrue();
+        assertThat(result.isForce()).isFalse();
         assertThat(result.getUpdatedBy()).isEqualTo("admin2@example.com");
         verify(scheduleRepo).save(existing);
     }
@@ -83,7 +83,7 @@ class IngestionScheduleServiceTest {
         when(scheduleRepo.findBySpaceKey("IT")).thenReturn(Optional.of(existing));
         when(scheduleRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        UpdateScheduleCommand cmd = new UpdateScheduleCommand(null, false, null, "admin@example.com");
+        UpdateScheduleCommand cmd = new UpdateScheduleCommand(null, false, "admin@example.com");
         IngestionScheduleEntity result = service.update("IT", cmd);
 
         assertThat(result.isEnabled()).isFalse();
@@ -95,7 +95,7 @@ class IngestionScheduleServiceTest {
     void update_unknownSpace_throwsResourceNotFound() {
         when(scheduleRepo.findBySpaceKey("MISSING")).thenReturn(Optional.empty());
 
-        UpdateScheduleCommand cmd = new UpdateScheduleCommand(null, false, null, "admin@example.com");
+        UpdateScheduleCommand cmd = new UpdateScheduleCommand(null, false, "admin@example.com");
         assertThatThrownBy(() -> service.update("MISSING", cmd))
                 .isInstanceOf(ResourceNotFoundException.class)
                 .hasMessageContaining("MISSING");

@@ -168,7 +168,6 @@ export interface IngestionSchedule {
 export interface ScheduleUpsertRequest {
   intervalHours: number
   enabled: boolean
-  force: boolean
 }
 
 export const listSchedules = (): Promise<IngestionSchedule[]> =>
