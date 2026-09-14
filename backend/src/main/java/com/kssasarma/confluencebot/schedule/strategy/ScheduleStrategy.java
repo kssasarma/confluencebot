@@ -12,15 +12,14 @@ import java.time.OffsetDateTime;
 public interface ScheduleStrategy {
 
     /**
-     * Calculates the next fire time given the point in time of the most recent run and the
-     * per-schedule interval setting.
+     * Calculates the next fire time given the reference timestamp and the full schedule config.
      *
-     * @param from          the reference timestamp (typically the current time at run)
-     * @param intervalHours the interval stored on the schedule
+     * @param from   the reference timestamp (typically the current time at run)
+     * @param config all schedule-definition data for this schedule
      * @return the next time the schedule should fire; never null, never before {@code from}
      */
-    OffsetDateTime calculateNextRun(OffsetDateTime from, int intervalHours);
+    OffsetDateTime calculateNextRun(OffsetDateTime from, ScheduleConfig config);
 
-    /** Stable identifier surfaced in logs and (future) admin API responses. */
+    /** Stable identifier surfaced in logs and admin API responses. */
     String strategyType();
 }

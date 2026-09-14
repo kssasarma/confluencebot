@@ -25,6 +25,12 @@ public class IngestionScheduleEntity {
     @Column(name = "force", nullable = false)
     private boolean force;
 
+    @Column(name = "schedule_type", length = 50, nullable = false)
+    private String scheduleType;
+
+    @Column(name = "cron_expression", length = 255)
+    private String cronExpression;
+
     @Column(name = "last_run_at")
     private OffsetDateTime lastRunAt;
 
@@ -47,12 +53,15 @@ public class IngestionScheduleEntity {
 
     public static IngestionScheduleEntity create(String spaceKey, int intervalHours,
                                                   boolean enabled, boolean force,
+                                                  String scheduleType, String cronExpression,
                                                   String createdBy, OffsetDateTime nextRunAt) {
         IngestionScheduleEntity e = new IngestionScheduleEntity();
         e.spaceKey = spaceKey;
         e.intervalHours = intervalHours;
         e.enabled = enabled;
         e.force = force;
+        e.scheduleType = scheduleType;
+        e.cronExpression = cronExpression;
         e.createdBy = createdBy;
         e.updatedBy = createdBy;
         e.createdAt = OffsetDateTime.now();
@@ -61,10 +70,13 @@ public class IngestionScheduleEntity {
         return e;
     }
 
-    public void applyUpdate(Integer intervalHours, Boolean enabled, Boolean force, String updatedBy) {
+    public void applyUpdate(Integer intervalHours, Boolean enabled, Boolean force,
+                            String scheduleType, String cronExpression, String updatedBy) {
         if (intervalHours != null) this.intervalHours = intervalHours;
         if (enabled != null)       this.enabled = enabled;
         if (force != null)         this.force = force;
+        if (scheduleType != null)  this.scheduleType = scheduleType;
+        if (cronExpression != null) this.cronExpression = cronExpression;
         this.updatedBy = updatedBy;
         this.updatedAt = OffsetDateTime.now();
     }
@@ -84,6 +96,8 @@ public class IngestionScheduleEntity {
     public boolean isEnabled()           { return enabled; }
     public int getIntervalHours()        { return intervalHours; }
     public boolean isForce()             { return force; }
+    public String getScheduleType()      { return scheduleType; }
+    public String getCronExpression()    { return cronExpression; }
     public OffsetDateTime getLastRunAt() { return lastRunAt; }
     public OffsetDateTime getNextRunAt() { return nextRunAt; }
     public OffsetDateTime getCreatedAt() { return createdAt; }

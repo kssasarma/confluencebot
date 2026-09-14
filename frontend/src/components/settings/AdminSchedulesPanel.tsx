@@ -7,6 +7,7 @@ import {
   triggerScheduleNow,
   upsertSchedule,
   type IngestionSchedule,
+  type ScheduleType,
 } from '../../services/adminService'
 import { fetchSpaces } from '../../services/spaceService'
 import { queryKeys } from '../../services/queryKeys'
@@ -31,7 +32,6 @@ function fromIntervalHours(h: number): { days: number; hours: number } {
   return { days: Math.floor(h / 24), hours: h % 24 }
 }
 
-/** Human label for an interval — shown both in the table and next to the form inputs. */
 function intervalLabel(h: number): string {
   if (h < 24) return `every ${h} h`
   const d = Math.floor(h / 24)
@@ -49,6 +49,11 @@ function nextRunLabel(nextRunAt: string, enabled: boolean): string {
   return h > 0 ? `in ${h}h ${m}m` : `in ${m}m`
 }
 
+function runsLabel(s: IngestionSchedule): string {
+  if (s.scheduleType === 'CRON') return s.cronExpression ?? '—'
+  return intervalLabel(s.intervalHours)
+}
+
 // ── form state ────────────────────────────────────────────────────────────────
 
 type FormMode = 'create' | 'edit'
@@ -56,22 +61,34 @@ type FormMode = 'create' | 'edit'
 interface ScheduleForm {
   mode: FormMode
   spaceKey: string
+  scheduleType: ScheduleType
   days: number
   hours: number
+  cronExpression: string
   enabled: boolean
 }
 
 const BLANK_FORM: ScheduleForm = {
   mode: 'create',
   spaceKey: '',
+  scheduleType: 'FIXED_INTERVAL',
   days: 1,
   hours: 0,
+  cronExpression: '',
   enabled: true,
 }
 
 function formFromSchedule(s: IngestionSchedule): ScheduleForm {
   const { days, hours } = fromIntervalHours(s.intervalHours)
-  return { mode: 'edit', spaceKey: s.spaceKey, days, hours, enabled: s.enabled }
+  return {
+    mode: 'edit',
+    spaceKey: s.spaceKey,
+    scheduleType: s.scheduleType ?? 'FIXED_INTERVAL',
+    days,
+    hours,
+    cronExpression: s.cronExpression ?? '',
+    enabled: s.enabled,
+  }
 }
 
 // ── component ─────────────────────────────────────────────────────────────────
@@ -80,8 +97,6 @@ function formFromSchedule(s: IngestionSchedule): ScheduleForm {
  * Admin-only panel for managing auto-ingestion schedules.
  *
  * Gated upstream by `canManageSchedules` in SettingsDialog — today that means full admins only.
- * When a space-level admin role is introduced, only `AuthContext.canManageSchedules` and the
- * backend controller's `@PreAuthorize` need updating; this component is role-agnostic.
  */
 export default function AdminSchedulesPanel() {
   const queryClient = useQueryClient()
@@ -106,11 +121,15 @@ export default function AdminSchedulesPanel() {
   const availableSpaces = (spaces.data ?? []).filter(s => !scheduledKeys.has(s.key))
 
   const upsert = useMutation({
-    mutationFn: (f: ScheduleForm) =>
-      upsertSchedule(f.spaceKey.trim(), {
-        intervalHours: totalHours(f.days, f.hours),
+    mutationFn: (f: ScheduleForm) => {
+      const isCron = f.scheduleType === 'CRON'
+      return upsertSchedule(f.spaceKey.trim(), {
+        scheduleType: f.scheduleType,
+        intervalHours: isCron ? 0 : totalHours(f.days, f.hours),
         enabled: f.enabled,
-      }),
+        cronExpression: isCron ? f.cronExpression.trim() : null,
+      })
+    },
     onSuccess: (_data, f) => {
       toast.success(
         f.mode === 'create' ? 'Schedule created' : 'Schedule updated',
@@ -143,11 +162,20 @@ export default function AdminSchedulesPanel() {
   function handleSubmit(event: React.FormEvent) {
     event.preventDefault()
     if (!form) return
-    const h = totalHours(form.days, form.hours)
-    if (h < 1 || h > 8760) {
-      toast.error('Invalid interval', 'Total must be between 1 hour and 8760 hours (365 days).')
-      return
+
+    if (form.scheduleType === 'FIXED_INTERVAL') {
+      const h = totalHours(form.days, form.hours)
+      if (h < 1 || h > 8760) {
+        toast.error('Invalid interval', 'Total must be between 1 hour and 8760 hours (365 days).')
+        return
+      }
+    } else {
+      if (!form.cronExpression.trim()) {
+        toast.error('Missing cron expression', 'Enter a cron expression for CRON schedules.')
+        return
+      }
     }
+
     upsert.mutate(form)
   }
 
@@ -162,7 +190,11 @@ export default function AdminSchedulesPanel() {
   }
 
   const formTotal = form ? totalHours(form.days, form.hours) : 0
-  const isFormValid = form !== null && form.spaceKey.trim().length > 0 && formTotal >= 1 && formTotal <= 8760
+  const isFormValid = form !== null && form.spaceKey.trim().length > 0 && (
+    form.scheduleType === 'CRON'
+      ? form.cronExpression.trim().length > 0
+      : formTotal >= 1 && formTotal <= 8760
+  )
 
   return (
     <div className="space-y-5">
@@ -213,7 +245,9 @@ export default function AdminSchedulesPanel() {
                 {schedules.data.map(s => (
                   <tr key={s.id}>
                     <td className="px-3 py-2.5 font-mono text-xs font-semibold">{s.spaceKey}</td>
-                    <td className="px-3 py-2.5 text-2xs text-muted-foreground">{intervalLabel(s.intervalHours)}</td>
+                    <td className="px-3 py-2.5 text-2xs text-muted-foreground font-mono">
+                      {runsLabel(s)}
+                    </td>
                     <td className="px-3 py-2.5">
                       <Badge tone={s.enabled ? 'success' : 'neutral'}>
                         {s.enabled ? 'Active' : 'Disabled'}
@@ -314,45 +348,87 @@ export default function AdminSchedulesPanel() {
             </div>
           )}
 
-          {/* Compound days + hours picker — any combination from 1 h up to 365 days */}
+          {/* Schedule type selector */}
           <div className="space-y-1.5">
-            <label className="block text-xs font-medium text-muted-foreground">Repeat every</label>
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-1.5">
-                <input
-                  type="number"
-                  min={0}
-                  max={365}
-                  value={form.days}
-                  onChange={e => setForm(f => f && { ...f, days: Math.max(0, parseInt(e.target.value, 10) || 0) })}
-                  className="w-16 rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-                />
-                <span className="text-sm text-muted-foreground">days</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <input
-                  type="number"
-                  min={0}
-                  max={23}
-                  value={form.hours}
-                  onChange={e => setForm(f => f && { ...f, hours: Math.max(0, parseInt(e.target.value, 10) || 0) })}
-                  className="w-16 rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-                />
-                <span className="text-sm text-muted-foreground">hours</span>
-              </div>
-              {formTotal >= 1 && formTotal <= 8760 && (
-                <span className="text-2xs text-muted-foreground">
-                  = {intervalLabel(formTotal)} ({formTotal} h total)
-                </span>
-              )}
-              {formTotal > 8760 && (
-                <span className="text-2xs text-danger-emphasis">Maximum is 365 days (8760 h)</span>
-              )}
-              {formTotal < 1 && form.days === 0 && form.hours === 0 && (
-                <span className="text-2xs text-danger-emphasis">Minimum is 1 hour</span>
-              )}
+            <label className="block text-xs font-medium text-muted-foreground">
+              Schedule type
+            </label>
+            <div className="flex gap-3">
+              {(['FIXED_INTERVAL', 'CRON'] as ScheduleType[]).map(type => (
+                <label key={type} className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
+                  <input
+                    type="radio"
+                    name="scheduleType"
+                    value={type}
+                    checked={form.scheduleType === type}
+                    onChange={() => setForm(f => f && { ...f, scheduleType: type })}
+                    className="accent-primary"
+                  />
+                  {type === 'FIXED_INTERVAL' ? 'Fixed interval' : 'Cron expression'}
+                </label>
+              ))}
             </div>
           </div>
+
+          {form.scheduleType === 'FIXED_INTERVAL' && (
+            <div className="space-y-1.5">
+              <label className="block text-xs font-medium text-muted-foreground">Repeat every</label>
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="number"
+                    min={0}
+                    max={365}
+                    value={form.days}
+                    onChange={e => setForm(f => f && { ...f, days: Math.max(0, parseInt(e.target.value, 10) || 0) })}
+                    className="w-16 rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                  />
+                  <span className="text-sm text-muted-foreground">days</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="number"
+                    min={0}
+                    max={23}
+                    value={form.hours}
+                    onChange={e => setForm(f => f && { ...f, hours: Math.max(0, parseInt(e.target.value, 10) || 0) })}
+                    className="w-16 rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                  />
+                  <span className="text-sm text-muted-foreground">hours</span>
+                </div>
+                {formTotal >= 1 && formTotal <= 8760 && (
+                  <span className="text-2xs text-muted-foreground">
+                    = {intervalLabel(formTotal)} ({formTotal} h total)
+                  </span>
+                )}
+                {formTotal > 8760 && (
+                  <span className="text-2xs text-danger-emphasis">Maximum is 365 days (8760 h)</span>
+                )}
+                {formTotal < 1 && form.days === 0 && form.hours === 0 && (
+                  <span className="text-2xs text-danger-emphasis">Minimum is 1 hour</span>
+                )}
+              </div>
+            </div>
+          )}
+
+          {form.scheduleType === 'CRON' && (
+            <div className="space-y-1.5">
+              <label
+                className="block text-xs font-medium text-muted-foreground"
+                htmlFor="schedule-cron-expression"
+              >
+                Cron expression
+              </label>
+              <Input
+                id="schedule-cron-expression"
+                value={form.cronExpression}
+                onChange={e => setForm(f => f && { ...f, cronExpression: e.target.value })}
+                placeholder="0 2 * * 1"
+                required
+                hint="5-field format: minute hour day-of-month month day-of-week. Example: '0 2 * * 1' = every Monday at 02:00."
+              />
+            </div>
+          )}
 
           <div className="space-y-2">
             <label className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
@@ -376,14 +452,6 @@ export default function AdminSchedulesPanel() {
           </div>
         </form>
       )}
-
-      <p className="text-2xs text-muted-foreground">
-        Need cron-style scheduling (e.g. "every Monday at 2 am")? The backend's{' '}
-        <code className="rounded bg-surface px-1 py-0.5 font-mono">ScheduleStrategy</code>{' '}
-        interface is the extension point — add a{' '}
-        <code className="rounded bg-surface px-1 py-0.5 font-mono">CronScheduleStrategy</code>{' '}
-        and a migration to store the expression.
-      </p>
     </div>
   )
 }

@@ -18,8 +18,16 @@ public record IngestionScheduleResponse(
         @Schema(description = "Whether the schedule is active", example = "true")
         boolean enabled,
 
-        @Schema(description = "Re-ingestion interval in hours", example = "24")
+        @Schema(description = "Schedule type: FIXED_INTERVAL or CRON", example = "FIXED_INTERVAL")
+        String scheduleType,
+
+        @Schema(description = "Re-ingestion interval in hours (FIXED_INTERVAL schedules only)",
+                example = "24")
         int intervalHours,
+
+        @Schema(description = "Cron expression (CRON schedules only)", example = "0 2 * * 1",
+                nullable = true)
+        String cronExpression,
 
         @Schema(description = "Whether each run forces re-embedding of unchanged pages",
                 example = "false")
@@ -49,7 +57,9 @@ public record IngestionScheduleResponse(
                 e.getId(),
                 e.getSpaceKey(),
                 e.isEnabled(),
+                e.getScheduleType(),
                 e.getIntervalHours(),
+                e.getCronExpression(),
                 e.isForce(),
                 e.getLastRunAt(),
                 e.getNextRunAt(),
