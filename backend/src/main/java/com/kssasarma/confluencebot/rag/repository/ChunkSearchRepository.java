@@ -216,9 +216,14 @@ public class ChunkSearchRepository {
         Map<String, Object> meta = parseMetadata(raw.metadataJson());
         float[] embedding = parseEmbedding(raw.embeddingText());
         double similarity = cosineSimilarity(queryEmbedding, embedding);
+        // TABLE chunks store the focused retrieval text as the content column (for embedding and
+        // lexical search) and the full pipe-delimited table in full_table_content metadata (for
+        // LLM display). Fall back to raw content for non-TABLE chunks and pre-fix TABLE chunks.
+        String fullContent = string(meta, "full_table_content");
+        String content = fullContent.isBlank() ? raw.content() : fullContent;
         return RetrievedChunk.builder()
             .chunkId(raw.chunkId())
-            .content(raw.content())
+            .content(content)
             .pageId(string(meta, "page_id"))
             .title(string(meta, "title"))
             .pageUrl(string(meta, "page_url"))

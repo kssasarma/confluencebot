@@ -429,6 +429,42 @@ class IngestionServiceImplTest {
         assertThat(result.pagesSkipped()).isEqualTo(0);
     }
 
+    @Test
+    void ingestPage_tableChunk_embedsFocusedRetrievalTextAndStoresFullContentInMetadata() {
+        ConfluencePageDetail page = page("sp1", "AMS Model Hosting", 2);
+        when(confluenceClient.fetchSpaceMetadata("ENG")).thenReturn(SPACE_WITH_DESC);
+        when(confluenceClient.fetchPage("sp1")).thenReturn(page);
+        when(parser.parse(anyString())).thenReturn(List.of(
+                new ParsedSection("", "Name | Status\nLlama 3.3 | Available\nMistral | Available",
+                        ParsedSection.SectionType.TABLE)));
+
+        // Simulate the full chunk text the strategy would produce (heading prefix + table rows).
+        String fullChunkText = "Page: AMS Model Hosting\nThis table lists supported models.\n"
+                + "Name | Status\nLlama 3.3 | Available\nMistral | Available";
+        when(chunkingStrategy.chunk(any(), eq("AMS Model Hosting"), anyString()))
+                .thenReturn(List.of(new ChunkedContent(fullChunkText, "TABLE")));
+
+        service.ingestPage("sp1");
+
+        ArgumentCaptor<List<org.springframework.ai.document.Document>> docsCaptor =
+                ArgumentCaptor.forClass(List.class);
+        verify(vectorStore).add(docsCaptor.capture());
+
+        org.springframework.ai.document.Document doc = docsCaptor.getValue().stream()
+                .filter(d -> "TABLE".equals(d.getMetadata().get("chunk_type")))
+                .findFirst().orElseThrow();
+
+        // Full table content is preserved in metadata so the LLM receives every column and row.
+        assertThat(doc.getMetadata().get("full_table_content")).isEqualTo(fullChunkText);
+
+        // The embedded text has the heading and item names but not raw pipe-delimited rows —
+        // URL and column-type noise is excluded so the vector stays topically focused.
+        assertThat(doc.getText()).contains("Page: AMS Model Hosting");
+        assertThat(doc.getText()).contains("Llama 3.3");
+        assertThat(doc.getText()).contains("Mistral");
+        assertThat(doc.getText()).doesNotContain("Name | Status");
+    }
+
     // ---- helpers ----
 
     private static ConfluencePageDetail page(String id, String title, int version) {
