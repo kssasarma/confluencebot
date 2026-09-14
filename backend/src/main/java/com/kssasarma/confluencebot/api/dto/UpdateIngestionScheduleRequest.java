@@ -15,9 +15,5 @@ public record UpdateIngestionScheduleRequest(
 
         @Schema(description = "Enable or disable the schedule. Omit to leave unchanged.",
                 example = "false", nullable = true)
-        Boolean enabled,
-
-        @Schema(description = "Force re-embedding of unchanged pages. Omit to leave unchanged.",
-                example = "true", nullable = true)
-        Boolean force
+        Boolean enabled
 ) {}

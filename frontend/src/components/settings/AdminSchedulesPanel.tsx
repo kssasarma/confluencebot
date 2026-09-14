@@ -8,6 +8,7 @@ import {
   upsertSchedule,
   type IngestionSchedule,
 } from '../../services/adminService'
+import { fetchSpaces } from '../../services/spaceService'
 import { queryKeys } from '../../services/queryKeys'
 import { toMessage } from '../../lib/errors'
 import { useToast } from '../ui/Toast'
@@ -58,7 +59,6 @@ interface ScheduleForm {
   days: number
   hours: number
   enabled: boolean
-  force: boolean
 }
 
 const BLANK_FORM: ScheduleForm = {
@@ -67,12 +67,11 @@ const BLANK_FORM: ScheduleForm = {
   days: 1,
   hours: 0,
   enabled: true,
-  force: false,
 }
 
 function formFromSchedule(s: IngestionSchedule): ScheduleForm {
   const { days, hours } = fromIntervalHours(s.intervalHours)
-  return { mode: 'edit', spaceKey: s.spaceKey, days, hours, enabled: s.enabled, force: s.force }
+  return { mode: 'edit', spaceKey: s.spaceKey, days, hours, enabled: s.enabled }
 }
 
 // ── component ─────────────────────────────────────────────────────────────────
@@ -96,14 +95,21 @@ export default function AdminSchedulesPanel() {
     queryFn: listSchedules,
   })
 
+  const spaces = useQuery({
+    queryKey: queryKeys.spaces,
+    queryFn: fetchSpaces,
+  })
+
   const refresh = () => queryClient.invalidateQueries({ queryKey: queryKeys.ingestionSchedules })
+
+  const scheduledKeys = new Set((schedules.data ?? []).map(s => s.spaceKey))
+  const availableSpaces = (spaces.data ?? []).filter(s => !scheduledKeys.has(s.key))
 
   const upsert = useMutation({
     mutationFn: (f: ScheduleForm) =>
       upsertSchedule(f.spaceKey.trim(), {
         intervalHours: totalHours(f.days, f.hours),
         enabled: f.enabled,
-        force: f.force,
       }),
     onSuccess: (_data, f) => {
       toast.success(
@@ -198,7 +204,6 @@ export default function AdminSchedulesPanel() {
                   <th scope="col" className="px-3 pb-2 pt-3 font-medium text-muted-foreground">Space</th>
                   <th scope="col" className="px-3 pb-2 pt-3 font-medium text-muted-foreground">Runs</th>
                   <th scope="col" className="px-3 pb-2 pt-3 font-medium text-muted-foreground">Status</th>
-                  <th scope="col" className="px-3 pb-2 pt-3 font-medium text-muted-foreground">Force</th>
                   <th scope="col" className="px-3 pb-2 pt-3 font-medium text-muted-foreground">Last run</th>
                   <th scope="col" className="px-3 pb-2 pt-3 font-medium text-muted-foreground">Next run</th>
                   <th scope="col" className="px-3 pb-2 pt-3"><span className="sr-only">Actions</span></th>
@@ -214,7 +219,6 @@ export default function AdminSchedulesPanel() {
                         {s.enabled ? 'Active' : 'Disabled'}
                       </Badge>
                     </td>
-                    <td className="px-3 py-2.5 text-2xs text-muted-foreground">{s.force ? 'Yes' : 'No'}</td>
                     <td
                       className="px-3 py-2.5 text-2xs text-muted-foreground"
                       title={absoluteTime(s.lastRunAt) || undefined}
@@ -276,14 +280,38 @@ export default function AdminSchedulesPanel() {
           </div>
 
           {form.mode === 'create' && (
-            <Input
-              label="Space key"
-              value={form.spaceKey}
-              onChange={e => setForm(f => f && { ...f, spaceKey: e.target.value })}
-              placeholder="ENG"
-              hint="The Confluence space key to auto-ingest."
-              required
-            />
+            <div className="space-y-1.5">
+              <label className="block text-xs font-medium text-muted-foreground" htmlFor="schedule-space-key">
+                Space
+              </label>
+              {availableSpaces.length > 0 ? (
+                <select
+                  id="schedule-space-key"
+                  value={form.spaceKey}
+                  onChange={e => setForm(f => f && { ...f, spaceKey: e.target.value })}
+                  required
+                  className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                >
+                  <option value="" disabled>Select a space…</option>
+                  {availableSpaces.map(s => (
+                    <option key={s.key} value={s.key}>{s.name} ({s.key})</option>
+                  ))}
+                </select>
+              ) : (
+                <Input
+                  id="schedule-space-key"
+                  value={form.spaceKey}
+                  onChange={e => setForm(f => f && { ...f, spaceKey: e.target.value })}
+                  placeholder="ENG"
+                  hint={
+                    spaces.isLoading
+                      ? 'Loading spaces…'
+                      : 'No additional spaces available — enter a key manually.'
+                  }
+                  required
+                />
+              )}
+            </div>
           )}
 
           {/* Compound days + hours picker — any combination from 1 h up to 365 days */}
@@ -335,15 +363,6 @@ export default function AdminSchedulesPanel() {
                 className="rounded accent-primary"
               />
               Enabled
-            </label>
-            <label className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
-              <input
-                type="checkbox"
-                checked={form.force}
-                onChange={e => setForm(f => f && { ...f, force: e.target.checked })}
-                className="rounded accent-primary"
-              />
-              Force re-embed unchanged pages
             </label>
           </div>
 

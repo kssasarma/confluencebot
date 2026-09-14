@@ -9,6 +9,7 @@ import com.kssasarma.confluencebot.config.ConfluenceProperties;
 import com.kssasarma.confluencebot.ingestion.chunking.SemanticChunkingStrategy;
 import com.kssasarma.confluencebot.ingestion.chunking.SemanticChunkingStrategy.ChunkedContent;
 import com.kssasarma.confluencebot.repository.ConfluencePageRepository;
+import com.kssasarma.confluencebot.repository.SpaceSuggestionRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -37,6 +38,7 @@ class IngestionServiceImplTest {
     @Mock private SemanticChunkingStrategy chunkingStrategy;
     @Mock private VectorStore vectorStore;
     @Mock private ConfluencePageRepository pageRepository;
+    @Mock private SpaceSuggestionRepository suggestionRepository;
     @Mock private JdbcTemplate jdbcTemplate;
     @Mock private PlatformTransactionManager txManager;
     @Mock private TransactionStatus transactionStatus;
@@ -63,7 +65,7 @@ class IngestionServiceImplTest {
         lenient().when(txManager.getTransaction(any())).thenReturn(transactionStatus);
         service = new IngestionServiceImpl(
                 confluenceClient, parser, chunkingStrategy,
-                vectorStore, pageRepository, props, jdbcTemplate, txManager);
+                vectorStore, pageRepository, suggestionRepository, props, jdbcTemplate, txManager);
     }
 
     @Test

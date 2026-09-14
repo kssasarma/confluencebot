@@ -2,6 +2,7 @@ package com.kssasarma.confluencebot.api;
 
 import com.kssasarma.confluencebot.api.dto.SpaceSummaryResponse;
 import com.kssasarma.confluencebot.domain.SpaceSuggestion;
+import com.kssasarma.confluencebot.ingestion.IngestionService;
 import com.kssasarma.confluencebot.repository.ConfluencePageRepository;
 import com.kssasarma.confluencebot.repository.SpaceSuggestionRepository;
 import io.swagger.v3.oas.annotations.Operation;
@@ -14,13 +15,17 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Lists the Confluence spaces available to scope chat search to.
@@ -41,10 +46,14 @@ public class SpaceController {
 
     private final ConfluencePageRepository pageRepository;
     private final SpaceSuggestionRepository suggestionRepository;
+    private final IngestionService ingestionService;
 
-    public SpaceController(ConfluencePageRepository pageRepository, SpaceSuggestionRepository suggestionRepository) {
+    public SpaceController(ConfluencePageRepository pageRepository,
+                           SpaceSuggestionRepository suggestionRepository,
+                           IngestionService ingestionService) {
         this.pageRepository = pageRepository;
         this.suggestionRepository = suggestionRepository;
+        this.ingestionService = ingestionService;
     }
 
     @Operation(
@@ -71,6 +80,26 @@ public class SpaceController {
                 .toList();
 
         return ResponseEntity.ok(spaces);
+    }
+
+    @Operation(
+            summary = "Delete all ingested content for a space",
+            description = """
+                    Permanently removes every page, vector chunk, and generated suggestion \
+                    that was ingested from the given space. Irreversible — re-ingest the space \
+                    to restore it. Admin-only.
+                    """)
+    @ApiResponse(responseCode = "200", description = "Content removed",
+            content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                    schema = @Schema(implementation = Map.class),
+                    examples = @ExampleObject(value = "{\"pagesRemoved\": 42}")))
+    @DeleteMapping("/{spaceKey}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<Map<String, Integer>> deleteSpaceContent(
+            @Parameter(description = "Confluence space key", example = "IT")
+            @PathVariable String spaceKey) {
+        int removed = ingestionService.deleteSpaceContent(spaceKey);
+        return ResponseEntity.ok(Map.of("pagesRemoved", removed));
     }
 
     @Operation(

@@ -14,9 +14,5 @@ public record IngestionScheduleRequest(
 
         @Schema(description = "Whether the schedule is active. Set to false to pause without deleting.",
                 example = "true")
-        boolean enabled,
-
-        @Schema(description = "Pass true to re-embed every page regardless of version, even if unchanged.",
-                example = "false")
-        boolean force
+        boolean enabled
 ) {}

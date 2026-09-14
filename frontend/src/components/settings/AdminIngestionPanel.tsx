@@ -1,12 +1,15 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronDown, ChevronRight, Play, RefreshCw, RotateCcw } from 'lucide-react'
+import { ChevronDown, ChevronRight, Play, RefreshCw, RotateCcw, Trash2 } from 'lucide-react'
 import {
+  deleteSpaceContent,
   ingestPage, ingestSpace, listJobs, retriggerJob, type IngestionJob,
 } from '../../services/adminService'
+import { fetchSpaces } from '../../services/spaceService'
 import { queryKeys } from '../../services/queryKeys'
 import { toMessage } from '../../lib/errors'
 import { useToast } from '../ui/Toast'
+import { useConfirm } from '../ui/ConfirmDialog'
 import { absoluteTime } from '../../lib/time'
 import Badge from '../ui/Badge'
 import Button from '../ui/Button'
@@ -26,10 +29,38 @@ const JOB_TONE: Record<string, 'warning' | 'info' | 'success' | 'danger' | 'neut
 export default function AdminIngestionPanel() {
   const queryClient = useQueryClient()
   const toast = useToast()
+  const confirm = useConfirm()
 
   const [spaceKey, setSpaceKey] = useState('')
   const [force, setForce] = useState(false)
   const [pageId, setPageId] = useState('')
+
+  const spaces = useQuery({
+    queryKey: queryKeys.spaces,
+    queryFn: fetchSpaces,
+  })
+
+  const purge = useMutation({
+    mutationFn: deleteSpaceContent,
+    onSuccess: (data, spaceKey) => {
+      toast.success(
+        'Space content removed',
+        `${data.pagesRemoved} page(s) and all their chunks have been purged from ${spaceKey}.`,
+      )
+      queryClient.invalidateQueries({ queryKey: queryKeys.spaces })
+    },
+    onError: error => toast.error('Could not purge space', toMessage(error, 'Please try again.')),
+  })
+
+  async function handlePurge(key: string) {
+    const ok = await confirm({
+      title: `Delete all content for "${key}"?`,
+      description: 'Every page, chunk, and suggestion ingested from this space will be permanently removed. This cannot be undone — re-ingest the space to restore it.',
+      confirmLabel: 'Delete content',
+      tone: 'danger',
+    })
+    if (ok) purge.mutate(key)
+  }
 
   // Job history isn't the primary reason anyone opens this tab, so it stays collapsed — and
   // unfetched — until someone actually wants to see it.
@@ -120,6 +151,50 @@ export default function AdminIngestionPanel() {
             Ingest page
           </Button>
         </form>
+      </div>
+
+      <div className="space-y-2">
+        <div>
+          <h2 className="text-sm font-semibold text-foreground">Manage ingested spaces</h2>
+          <p className="mt-0.5 text-2xs text-muted-foreground">
+            Permanently delete all pages, chunks, and suggestions for a space. Re-ingest to restore.
+          </p>
+        </div>
+        {spaces.isLoading ? (
+          <SkeletonText lines={2} />
+        ) : !spaces.data?.length ? (
+          <EmptyState title="No ingested spaces" description="No spaces have been indexed yet — start an ingestion above to see them here." />
+        ) : (
+          <div className="overflow-x-auto rounded-lg border border-border">
+            <table className="w-full text-sm">
+              <caption className="sr-only">Ingested spaces</caption>
+              <thead>
+                <tr className="border-b border-border text-left">
+                  <th scope="col" className="px-3 pb-2 pt-3 font-medium text-muted-foreground">Key</th>
+                  <th scope="col" className="px-3 pb-2 pt-3 font-medium text-muted-foreground">Name</th>
+                  <th scope="col" className="px-3 pb-2 pt-3"><span className="sr-only">Actions</span></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {spaces.data.map(s => (
+                  <tr key={s.key}>
+                    <td className="px-3 py-2.5 font-mono text-xs font-semibold">{s.key}</td>
+                    <td className="px-3 py-2.5 text-sm text-muted-foreground">{s.name}</td>
+                    <td className="px-3 py-2.5 text-right">
+                      <IconButton
+                        size="sm"
+                        label={`Delete all content for ${s.key}`}
+                        icon={<Trash2 size={13} />}
+                        onClick={() => handlePurge(s.key)}
+                        disabled={purge.isPending}
+                      />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       <div className="rounded-lg border border-border">

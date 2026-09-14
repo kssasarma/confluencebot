@@ -43,7 +43,7 @@ class IngestionScheduleServiceImpl implements IngestionScheduleService {
         IngestionScheduleEntity entity = scheduleRepo.findBySpaceKey(spaceKey)
                 .map(existing -> {
                     existing.applyUpdate(command.intervalHours(), command.enabled(),
-                            command.force(), command.requestedBy());
+                            false, command.requestedBy());
                     existing.recordRun(existing.getLastRunAt(), firstRun);
                     log.info("Ingestion schedule replaced for space '{}' by {} — interval={}h, enabled={}, nextRunAt={}",
                             spaceKey, command.requestedBy(), command.intervalHours(),
@@ -53,7 +53,7 @@ class IngestionScheduleServiceImpl implements IngestionScheduleService {
                 .orElseGet(() -> {
                     IngestionScheduleEntity created = IngestionScheduleEntity.create(
                             spaceKey, command.intervalHours(), command.enabled(),
-                            command.force(), command.requestedBy(), firstRun);
+                            false, command.requestedBy(), firstRun);
                     log.info("Ingestion schedule created for space '{}' by {} — interval={}h, enabled={}, nextRunAt={}",
                             spaceKey, command.requestedBy(), command.intervalHours(),
                             command.enabled(), firstRun);
@@ -67,7 +67,7 @@ class IngestionScheduleServiceImpl implements IngestionScheduleService {
     @Transactional
     public IngestionScheduleEntity update(String spaceKey, UpdateScheduleCommand command) {
         IngestionScheduleEntity entity = requireSchedule(spaceKey);
-        entity.applyUpdate(command.intervalHours(), command.enabled(), command.force(),
+        entity.applyUpdate(command.intervalHours(), command.enabled(), null,
                 command.requestedBy());
         log.info("Ingestion schedule updated for space '{}' by {}", spaceKey, command.requestedBy());
         return scheduleRepo.save(entity);

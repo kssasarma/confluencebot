@@ -7,6 +7,5 @@ package com.kssasarma.confluencebot.schedule.command;
 public record UpdateScheduleCommand(
         Integer intervalHours,
         Boolean enabled,
-        Boolean force,
         String requestedBy
 ) {}
