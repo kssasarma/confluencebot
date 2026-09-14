@@ -1,6 +1,7 @@
 package com.kssasarma.confluencebot.api;
 
 import com.kssasarma.confluencebot.domain.SpaceSuggestion;
+import com.kssasarma.confluencebot.ingestion.IngestionService;
 import com.kssasarma.confluencebot.repository.ConfluencePageRepository;
 import com.kssasarma.confluencebot.repository.ConfluencePageRepository.SpaceKeyName;
 import com.kssasarma.confluencebot.repository.SpaceSuggestionRepository;
@@ -25,12 +26,14 @@ class SpaceControllerTest {
 
     @Mock private ConfluencePageRepository pageRepository;
     @Mock private SpaceSuggestionRepository suggestionRepository;
+    @Mock private IngestionService ingestionService;
 
     private MockMvc mockMvc;
 
     @BeforeEach
     void setUp() {
-        mockMvc = MockMvcBuilders.standaloneSetup(new SpaceController(pageRepository, suggestionRepository)).build();
+        mockMvc = MockMvcBuilders.standaloneSetup(
+                new SpaceController(pageRepository, suggestionRepository, ingestionService)).build();
     }
 
     @Test

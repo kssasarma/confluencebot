@@ -186,3 +186,9 @@ export const deleteSchedule = (spaceKey: string): Promise<void> =>
 /** Submits an immediate job using the force flag stored on the schedule. */
 export const triggerScheduleNow = (spaceKey: string): Promise<IngestionJob> =>
   apiJson<IngestionJob>(`/admin/ingestion-schedules/${encodeURIComponent(spaceKey)}/trigger`, { method: 'POST' })
+
+// ── Space content management ─────────────────────────────────────────────────
+
+/** Permanently removes all ingested content for a space (pages, chunks, suggestions). Admin-only. */
+export const deleteSpaceContent = (spaceKey: string): Promise<{ pagesRemoved: number }> =>
+  apiJson<{ pagesRemoved: number }>(`/spaces/${encodeURIComponent(spaceKey)}`, { method: 'DELETE' })

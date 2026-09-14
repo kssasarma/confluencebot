@@ -9,6 +9,7 @@ import com.kssasarma.confluencebot.config.ConfluenceProperties;
 import com.kssasarma.confluencebot.ingestion.chunking.SemanticChunkingStrategy;
 import com.kssasarma.confluencebot.ingestion.chunking.SemanticChunkingStrategy.ChunkedContent;
 import com.kssasarma.confluencebot.repository.ConfluencePageRepository;
+import com.kssasarma.confluencebot.repository.SpaceSuggestionRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.document.Document;
@@ -33,6 +34,7 @@ public class IngestionServiceImpl implements IngestionService {
     private final SemanticChunkingStrategy chunkingStrategy;
     private final VectorStore vectorStore;
     private final ConfluencePageRepository pageRepository;
+    private final SpaceSuggestionRepository suggestionRepository;
     private final ConfluenceProperties props;
     private final JdbcTemplate jdbcTemplate;
     private final TransactionTemplate transactionTemplate;
@@ -43,6 +45,7 @@ public class IngestionServiceImpl implements IngestionService {
             SemanticChunkingStrategy chunkingStrategy,
             VectorStore vectorStore,
             ConfluencePageRepository pageRepository,
+            SpaceSuggestionRepository suggestionRepository,
             ConfluenceProperties props,
             JdbcTemplate jdbcTemplate,
             PlatformTransactionManager txManager) {
@@ -51,6 +54,7 @@ public class IngestionServiceImpl implements IngestionService {
         this.chunkingStrategy = chunkingStrategy;
         this.vectorStore = vectorStore;
         this.pageRepository = pageRepository;
+        this.suggestionRepository = suggestionRepository;
         this.props = props;
         this.jdbcTemplate = jdbcTemplate;
         this.transactionTemplate = new TransactionTemplate(txManager);
@@ -448,5 +452,31 @@ public class IngestionServiceImpl implements IngestionService {
             return props.baseUrl() + page._links().webui();
         }
         return props.baseUrl() + "/pages/viewpage.action?pageId=" + page.id();
+    }
+
+    @Override
+    public int deleteSpaceContent(String spaceKey) {
+        Integer removed = transactionTemplate.execute(status -> {
+            List<String> pageIds = pageRepository.findBySpaceKey(spaceKey)
+                    .stream()
+                    .map(p -> p.getPageId())
+                    .toList();
+
+            if (!pageIds.isEmpty()) {
+                String[] ids = pageIds.toArray(new String[0]);
+                PreparedStatementSetter pss = ps ->
+                        ps.setArray(1, ps.getConnection().createArrayOf("varchar", ids));
+                jdbcTemplate.update(
+                        "DELETE FROM confluence_chunks WHERE metadata->>'page_id' = ANY (?)", pss);
+                jdbcTemplate.update(
+                        "DELETE FROM confluence_pages WHERE space_key = ?", spaceKey);
+            }
+
+            suggestionRepository.deleteBySpaceKey(spaceKey);
+            log.info("Purged space '{}': {} page(s) and their chunks removed", spaceKey, pageIds.size());
+            return pageIds.size();
+        });
+
+        return removed != null ? removed : 0;
     }
 }
