@@ -23,6 +23,14 @@ interface AuthContextValue {
   canIngest: boolean
   /** Any role with a reason to open the admin screen at all. */
   canAdminister: boolean
+  /**
+   * Allowed to manage auto-ingestion schedules.
+   *
+   * Today this is full admins only. When a space-level admin role is introduced, extend this check
+   * to include that role — the SettingsDialog and AdminSchedulesPanel both gate on this flag so
+   * no other UI changes are needed.
+   */
+  canManageSchedules: boolean
   /** Null until the deployment has answered whether it has a directory to sign in through. */
   sso: SsoConfig | null
   /** Why the last trip through the identity provider did not end in a session. */
@@ -222,6 +230,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const isAdmin = user?.roles.includes('ADMIN') ?? false
   const canManageUsers = isAdmin || (user?.roles.includes('ADMIN_READ_ONLY') ?? false)
   const canIngest = isAdmin || (user?.roles.includes('INGESTOR') ?? false)
+  // Extend this when a SPACE_ADMIN role is introduced: `isAdmin || hasSpaceAdminRole`
+  const canManageSchedules = isAdmin
 
   return (
     <AuthContext.Provider value={{
@@ -231,6 +241,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       canManageUsers,
       canIngest,
       canAdminister: canManageUsers || canIngest,
+      canManageSchedules,
       sso, ssoError, dismissSsoError,
       justLoggedOut, dismissJustLoggedOut,
       login, applySession, changePassword, updateName, logout,

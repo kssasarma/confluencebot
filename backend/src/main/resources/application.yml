@@ -351,12 +351,19 @@ chat:
     # Untitled conversations with no messages are cleaned up once they are older than this
     abandoned-ttl: ${CHAT_ABANDONED_SESSION_TTL:PT1H}
 
-# Background ingestion thread pool
+# Background ingestion thread pool and automatic re-ingestion schedule
 ingestion:
   async:
     core-pool-size: ${INGESTION_CORE_POOL_SIZE:2}
     max-pool-size: ${INGESTION_MAX_POOL_SIZE:4}
     queue-capacity: ${INGESTION_QUEUE_CAPACITY:10}
+  schedule:
+    # How often the auto-ingestion scheduler checks for due runs (milliseconds)
+    check-interval-ms: ${INGESTION_SCHEDULE_CHECK_INTERVAL_MS:60000}
+    # Initial delay before the first scheduler check, giving the app time to fully start (milliseconds)
+    initial-delay-ms: ${INGESTION_SCHEDULE_INITIAL_DELAY_MS:30000}
+    # Thread-pool size for @Scheduled tasks (raise when adding more scheduled tasks)
+    pool-size: ${INGESTION_SCHEDULE_POOL_SIZE:1}
 
 server:
   # Trust X-Forwarded-* from the reverse proxy, so URLs this service builds for itself carry the
