@@ -6,14 +6,16 @@ import GeneralSettingsPanel from './GeneralSettingsPanel'
 import AdminUsersPanel from './AdminUsersPanel'
 import AdminIngestionPanel from './AdminIngestionPanel'
 import AdminAnalyticsPanel from './AdminAnalyticsPanel'
+import AdminSchedulesPanel from './AdminSchedulesPanel'
 
-type Section = 'general' | 'admin' | 'analytics' | 'ingestion'
+type Section = 'general' | 'admin' | 'analytics' | 'ingestion' | 'schedules'
 
 const SECTION_LABEL: Record<Section, string> = {
   general: 'General',
   admin: 'User Management',
   analytics: 'Analytics',
   ingestion: 'Ingestion',
+  schedules: 'Schedules',
 }
 
 /**
@@ -31,7 +33,7 @@ const SECTION_LABEL: Record<Section, string> = {
  * that reaches them is organised.
  */
 export default function SettingsDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { canManageUsers, canIngest, isAdmin } = useAuth()
+  const { canManageUsers, canIngest, isAdmin, canManageSchedules } = useAuth()
 
   const sections: Section[] = [
     'general',
@@ -40,6 +42,8 @@ export default function SettingsDialog({ open, onClose }: { open: boolean; onClo
     // not see how much the deployment is being used or by whom.
     ...(isAdmin ? (['analytics'] as const) : []),
     ...(canIngest ? (['ingestion'] as const) : []),
+    // Schedules: full admins today; will extend to space-level admins via canManageSchedules.
+    ...(canManageSchedules ? (['schedules'] as const) : []),
   ]
 
   const [section, setSection] = useState<Section>('general')
@@ -89,6 +93,8 @@ export default function SettingsDialog({ open, onClose }: { open: boolean; onClo
             <AdminAnalyticsPanel />
           ) : activeSection === 'ingestion' ? (
             <AdminIngestionPanel />
+          ) : activeSection === 'schedules' ? (
+            <AdminSchedulesPanel />
           ) : (
             <GeneralSettingsPanel />
           )}

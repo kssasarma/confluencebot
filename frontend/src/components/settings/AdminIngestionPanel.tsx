@@ -14,7 +14,6 @@ import EmptyState from '../ui/EmptyState'
 import IconButton from '../ui/IconButton'
 import Input from '../ui/Input'
 import { SkeletonText } from '../ui/Skeleton'
-import AdminSchedulesPanel from './AdminSchedulesPanel'
 
 const JOB_TONE: Record<string, 'warning' | 'info' | 'success' | 'danger' | 'neutral'> = {
   PENDING: 'warning',
@@ -75,8 +74,6 @@ export default function AdminIngestionPanel() {
 
   return (
     <div className="space-y-6">
-      <AdminSchedulesPanel />
-
       <div className="grid gap-4 sm:grid-cols-2">
         <form
           onSubmit={event => { event.preventDefault(); startSpace.mutate() }}
