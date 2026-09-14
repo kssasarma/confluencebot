@@ -8,10 +8,10 @@ import com.kssasarma.confluencebot.repository.IngestionScheduleRepository;
 import com.kssasarma.confluencebot.schedule.command.CreateScheduleCommand;
 import com.kssasarma.confluencebot.schedule.command.UpdateScheduleCommand;
 import com.kssasarma.confluencebot.schedule.strategy.FixedIntervalScheduleStrategy;
+import com.kssasarma.confluencebot.schedule.strategy.ScheduleStrategyRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -34,8 +34,9 @@ class IngestionScheduleServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new IngestionScheduleServiceImpl(
-                scheduleRepo, new FixedIntervalScheduleStrategy(), jobService);
+        ScheduleStrategyRegistry registry = new ScheduleStrategyRegistry(
+                List.of(new FixedIntervalScheduleStrategy()));
+        service = new IngestionScheduleServiceImpl(scheduleRepo, registry, jobService);
     }
 
     // ─── createOrReplace ─────────────────────────────────────────────────────
@@ -45,7 +46,8 @@ class IngestionScheduleServiceTest {
         when(scheduleRepo.findBySpaceKey("IT")).thenReturn(Optional.empty());
         when(scheduleRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        CreateScheduleCommand cmd = new CreateScheduleCommand(24, true, "admin@example.com");
+        CreateScheduleCommand cmd = new CreateScheduleCommand(
+                24, true, "FIXED_INTERVAL", null, "admin@example.com");
         IngestionScheduleEntity result = service.createOrReplace("IT", cmd);
 
         assertThat(result.getSpaceKey()).isEqualTo("IT");
@@ -60,11 +62,13 @@ class IngestionScheduleServiceTest {
     @Test
     void createOrReplace_existingSpace_updatesInPlace() {
         IngestionScheduleEntity existing = IngestionScheduleEntity.create(
-                "IT", 24, true, false, "orig@example.com", OffsetDateTime.now().plusHours(24));
+                "IT", 24, true, false, "FIXED_INTERVAL", null,
+                "orig@example.com", OffsetDateTime.now().plusHours(24));
         when(scheduleRepo.findBySpaceKey("IT")).thenReturn(Optional.of(existing));
         when(scheduleRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        CreateScheduleCommand cmd = new CreateScheduleCommand(12, false, "admin2@example.com");
+        CreateScheduleCommand cmd = new CreateScheduleCommand(
+                12, false, "FIXED_INTERVAL", null, "admin2@example.com");
         IngestionScheduleEntity result = service.createOrReplace("IT", cmd);
 
         assertThat(result.getIntervalHours()).isEqualTo(12);
@@ -79,11 +83,13 @@ class IngestionScheduleServiceTest {
     @Test
     void update_existingSchedule_appliesPartialChange() {
         IngestionScheduleEntity existing = IngestionScheduleEntity.create(
-                "IT", 24, true, false, "admin@example.com", OffsetDateTime.now().plusHours(24));
+                "IT", 24, true, false, "FIXED_INTERVAL", null,
+                "admin@example.com", OffsetDateTime.now().plusHours(24));
         when(scheduleRepo.findBySpaceKey("IT")).thenReturn(Optional.of(existing));
         when(scheduleRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        UpdateScheduleCommand cmd = new UpdateScheduleCommand(null, false, "admin@example.com");
+        UpdateScheduleCommand cmd = new UpdateScheduleCommand(
+                null, false, null, null, "admin@example.com");
         IngestionScheduleEntity result = service.update("IT", cmd);
 
         assertThat(result.isEnabled()).isFalse();
@@ -95,7 +101,8 @@ class IngestionScheduleServiceTest {
     void update_unknownSpace_throwsResourceNotFound() {
         when(scheduleRepo.findBySpaceKey("MISSING")).thenReturn(Optional.empty());
 
-        UpdateScheduleCommand cmd = new UpdateScheduleCommand(null, false, "admin@example.com");
+        UpdateScheduleCommand cmd = new UpdateScheduleCommand(
+                null, false, null, null, "admin@example.com");
         assertThatThrownBy(() -> service.update("MISSING", cmd))
                 .isInstanceOf(ResourceNotFoundException.class)
                 .hasMessageContaining("MISSING");
@@ -106,7 +113,8 @@ class IngestionScheduleServiceTest {
     @Test
     void delete_existingSchedule_removesIt() {
         IngestionScheduleEntity existing = IngestionScheduleEntity.create(
-                "IT", 24, true, false, "admin@example.com", OffsetDateTime.now().plusHours(24));
+                "IT", 24, true, false, "FIXED_INTERVAL", null,
+                "admin@example.com", OffsetDateTime.now().plusHours(24));
         when(scheduleRepo.findBySpaceKey("IT")).thenReturn(Optional.of(existing));
 
         service.delete("IT");
@@ -127,7 +135,8 @@ class IngestionScheduleServiceTest {
     @Test
     void triggerNow_existingSchedule_submitsJobWithScheduledForceFlag() {
         IngestionScheduleEntity existing = IngestionScheduleEntity.create(
-                "IT", 24, true, true, "admin@example.com", OffsetDateTime.now().plusHours(24));
+                "IT", 24, true, true, "FIXED_INTERVAL", null,
+                "admin@example.com", OffsetDateTime.now().plusHours(24));
         when(scheduleRepo.findBySpaceKey("IT")).thenReturn(Optional.of(existing));
         IngestionJobEntity fakeJob = IngestionJobEntity.forSpace("IT", true, "admin@example.com");
         when(jobService.submitSpaceJob("IT", true, "admin@example.com")).thenReturn(fakeJob);
@@ -162,9 +171,11 @@ class IngestionScheduleServiceTest {
     void claimDueSchedules_dueSchedules_advancesNextRunAtAndReturnsSpecs() {
         OffsetDateTime now = OffsetDateTime.now();
         IngestionScheduleEntity s1 = IngestionScheduleEntity.create(
-                "IT", 24, true, false, "admin@example.com", now.minusMinutes(1));
+                "IT", 24, true, false, "FIXED_INTERVAL", null,
+                "admin@example.com", now.minusMinutes(1));
         IngestionScheduleEntity s2 = IngestionScheduleEntity.create(
-                "HR", 12, true, true, "admin@example.com", now.minusMinutes(5));
+                "HR", 12, true, true, "FIXED_INTERVAL", null,
+                "admin@example.com", now.minusMinutes(5));
 
         when(scheduleRepo.findByEnabledTrueAndNextRunAtLessThanEqual(any()))
                 .thenReturn(List.of(s1, s2));
@@ -191,7 +202,8 @@ class IngestionScheduleServiceTest {
     void claimDueSchedules_returnsCorrectForceFlag() {
         OffsetDateTime now = OffsetDateTime.now();
         IngestionScheduleEntity forced = IngestionScheduleEntity.create(
-                "ENG", 24, true, true, "admin@example.com", now.minusMinutes(1));
+                "ENG", 24, true, true, "FIXED_INTERVAL", null,
+                "admin@example.com", now.minusMinutes(1));
         when(scheduleRepo.findByEnabledTrueAndNextRunAtLessThanEqual(any()))
                 .thenReturn(List.of(forced));
         when(scheduleRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));

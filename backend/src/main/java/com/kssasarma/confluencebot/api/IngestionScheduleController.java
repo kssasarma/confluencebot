@@ -101,7 +101,11 @@ public class IngestionScheduleController {
             Authentication auth) {
 
         CreateScheduleCommand command = new CreateScheduleCommand(
-                request.intervalHours(), request.enabled(), auth.getName());
+                request.intervalHours() != null ? request.intervalHours() : 0,
+                request.enabled(),
+                request.scheduleType(),
+                request.cronExpression(),
+                auth.getName());
 
         IngestionScheduleEntity saved = scheduleService.createOrReplace(spaceKey, command);
         return ResponseEntity.ok(IngestionScheduleResponse.from(saved));
@@ -133,7 +137,9 @@ public class IngestionScheduleController {
             Authentication auth) {
 
         UpdateScheduleCommand command = new UpdateScheduleCommand(
-                request.intervalHours(), request.enabled(), auth.getName());
+                request.intervalHours(), request.enabled(),
+                request.scheduleType(), request.cronExpression(),
+                auth.getName());
 
         IngestionScheduleEntity updated = scheduleService.update(spaceKey, command);
         return ResponseEntity.ok(IngestionScheduleResponse.from(updated));

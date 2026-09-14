@@ -17,8 +17,8 @@ public class FixedIntervalScheduleStrategy implements ScheduleStrategy {
     public static final String TYPE = "FIXED_INTERVAL";
 
     @Override
-    public OffsetDateTime calculateNextRun(OffsetDateTime from, int intervalHours) {
-        return from.plusHours(intervalHours);
+    public OffsetDateTime calculateNextRun(OffsetDateTime from, ScheduleConfig config) {
+        return from.plusHours(config.intervalHours());
     }
 
     @Override

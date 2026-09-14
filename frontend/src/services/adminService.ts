@@ -151,11 +151,15 @@ export const retriggerJob = (jobId: string): Promise<IngestionJob> =>
 
 // ── Ingestion schedules ──────────────────────────────────────────────────────
 
+export type ScheduleType = 'FIXED_INTERVAL' | 'CRON'
+
 export interface IngestionSchedule {
   id: string
   spaceKey: string
   enabled: boolean
+  scheduleType: ScheduleType
   intervalHours: number
+  cronExpression: string | null
   force: boolean
   lastRunAt: string | null
   nextRunAt: string
@@ -166,8 +170,10 @@ export interface IngestionSchedule {
 }
 
 export interface ScheduleUpsertRequest {
+  scheduleType: ScheduleType
   intervalHours: number
   enabled: boolean
+  cronExpression?: string | null
 }
 
 export const listSchedules = (): Promise<IngestionSchedule[]> =>
