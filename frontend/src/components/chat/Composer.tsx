@@ -10,8 +10,8 @@ interface ComposerProps {
   onSend: (question: string) => void
   onStop: () => void
   isStreaming: boolean
-  /** Fired on ArrowUp in an empty composer, to bring back the last question for editing. */
-  lastQuestion?: string
+  /** All previous user questions oldest-first; ArrowUp/Down cycles through them like a terminal. */
+  questionHistory?: string[]
   /**
    * `docked` is the composer beneath a transcript: a bar along the bottom edge, ruled off from
    * the conversation above it. `centred` is the composer on a conversation with nothing in it,
@@ -34,15 +34,18 @@ const COUNTER_THRESHOLD = 0.9
  * something and losing a paragraph you had just typed.
  */
 export default function Composer({
-  chatId, onSend, onStop, isStreaming, lastQuestion, variant = 'docked',
+  chatId, onSend, onStop, isStreaming, questionHistory, variant = 'docked',
 }: ComposerProps) {
   const [value, setValue] = useState(() => readDraft(chatId))
+  const [historyIndex, setHistoryIndex] = useState<number | null>(null)
+  const savedDraftRef = useRef<string>('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const isCentred = variant === 'centred'
 
   // Re-read on a conversation switch: each conversation keeps its own unsent question.
-  useEffect(() => setValue(readDraft(chatId)), [chatId])
-  useEffect(() => writeDraft(chatId, value), [chatId, value])
+  useEffect(() => { setValue(readDraft(chatId)); setHistoryIndex(null) }, [chatId])
+  // Only persist the draft when not browsing history — history items are not unsent drafts.
+  useEffect(() => { if (historyIndex === null) writeDraft(chatId, value) }, [chatId, value, historyIndex])
 
   /**
    * An empty conversation opens with the caret already in the box.
@@ -80,6 +83,7 @@ export default function Composer({
     if (!question || isStreaming) return
     setValue('')
     writeDraft(chatId, '')
+    setHistoryIndex(null)
     onSend(question)
   }
 
@@ -89,10 +93,37 @@ export default function Composer({
       send()
       return
     }
-    // The terminal convention: ArrowUp in an empty prompt recalls the last thing you said.
-    if (event.key === 'ArrowUp' && value === '' && lastQuestion) {
+
+    // Terminal-style history: ArrowUp/Down cycle through previous questions.
+    const history = questionHistory ?? []
+
+    if (event.key === 'ArrowUp' && (value === '' || historyIndex !== null) && history.length > 0) {
       event.preventDefault()
-      setValue(lastQuestion)
+      if (historyIndex === null) {
+        // Entering history — save what the user had typed so ArrowDown can restore it.
+        savedDraftRef.current = value
+        const next = history.length - 1
+        setHistoryIndex(next)
+        setValue(history[next])
+      } else if (historyIndex > 0) {
+        const next = historyIndex - 1
+        setHistoryIndex(next)
+        setValue(history[next])
+      }
+      return
+    }
+
+    if (event.key === 'ArrowDown' && historyIndex !== null) {
+      event.preventDefault()
+      if (historyIndex < history.length - 1) {
+        const next = historyIndex + 1
+        setHistoryIndex(next)
+        setValue(history[next])
+      } else {
+        // Back to the present — restore the draft the user had before entering history.
+        setHistoryIndex(null)
+        setValue(savedDraftRef.current)
+      }
     }
   }
 
@@ -119,7 +150,7 @@ export default function Composer({
             ref={textareaRef}
             rows={1}
             value={value}
-            onChange={event => setValue(event.target.value)}
+            onChange={event => { setValue(event.target.value); if (historyIndex !== null) setHistoryIndex(null) }}
             onKeyDown={handleKeyDown}
             placeholder="Ask a question about your Confluence pages…"
             aria-label="Ask a question"
@@ -153,7 +184,7 @@ export default function Composer({
 
         <div className="mt-1.5 flex items-center justify-between gap-3">
           <p id="composer-hint" className="text-2xs text-muted-foreground">
-            Enter to send · Shift + Enter for a new line · / to focus
+            Enter to send · Shift + Enter for a new line · ↑↓ for history · / to focus
           </p>
           {showCounter && (
             <p

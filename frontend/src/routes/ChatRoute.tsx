@@ -121,7 +121,7 @@ export default function ChatRoute() {
     if (chatId) writePendingChatPreferences(chatId, next)
   }
 
-  const lastQuestion = messages.findLast(message => message.role === 'user')?.content
+  const questionHistory = messages.filter(m => m.role === 'user').map(m => m.content)
 
   /**
    * Sends the first message from the welcome screen.
@@ -245,7 +245,7 @@ export default function ChatRoute() {
         onSend={ask}
         onStop={chat.stop}
         isStreaming={isStreaming}
-        lastQuestion={lastQuestion}
+        questionHistory={questionHistory}
         variant={showWelcome ? 'centred' : 'docked'}
       />
 
