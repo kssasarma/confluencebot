@@ -158,9 +158,12 @@ public class IngestionServiceImpl implements IngestionService {
     @Override
     public IngestionResult ingestPage(String pageId) {
         long startMs = System.currentTimeMillis();
-        SpaceMetadata spaceMeta = confluenceClient.fetchSpaceMetadata(props.spaceKey());
         ConfluencePageDetail page = confluenceClient.fetchPage(pageId);
-        int chunks = processPage(page, props.spaceKey(), spaceMeta.name(), spaceMeta.homepageId());
+        String spaceKey = (page.space() != null && page.space().key() != null && !page.space().key().isBlank())
+                ? page.space().key()
+                : props.spaceKey();
+        SpaceMetadata spaceMeta = confluenceClient.fetchSpaceMetadata(spaceKey);
+        int chunks = processPage(page, spaceKey, spaceMeta.name(), spaceMeta.homepageId());
         long durationMs = System.currentTimeMillis() - startMs;
         return new IngestionResult(1, chunks, 0, durationMs);
     }
