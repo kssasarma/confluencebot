@@ -351,7 +351,19 @@ public class IngestionServiceImpl implements IngestionService {
                 metadata.put("is_homepage",      String.valueOf(isHomepage));
                 metadata.put("chunk_type",       chunk.chunkType());
 
-                docs.add(new Document(chunk.text(), metadata));
+                // TABLE chunks embed a focused retrieval text (heading prefix + primary column
+                // values as a natural list) instead of the raw pipe-delimited rows. Diverse column
+                // data — URLs, version numbers, type labels — dilutes the embedding vector away
+                // from the topical signal in the page title, causing table chunks to rank below
+                // prose even when the page title exactly matches the query. The full table content
+                // is stored in metadata so the LLM still receives every column and row.
+                String documentText = chunk.text();
+                if ("TABLE".equals(chunk.chunkType())) {
+                    metadata.put("full_table_content", chunk.text());
+                    documentText = buildTableRetrievalText(chunk.text());
+                }
+
+                docs.add(new Document(documentText, metadata));
             }
         }
 
@@ -426,6 +438,40 @@ public class IngestionServiceImpl implements IngestionService {
         String heading = table.hasHeading() ? table.heading().strip() : "";
         String subject = heading.isBlank() ? "This table" : "The " + heading + " table";
         return subject + " lists " + String.join(", ", columns) + ".";
+    }
+
+    /**
+     * Builds the retrieval text embedded for a TABLE chunk. The full pipe-delimited content goes
+     * into {@code full_table_content} metadata; only the heading prefix (page title, section
+     * heading, caption) plus the primary-column values as a comma-separated sentence are embedded.
+     * This removes URL and version-number noise from the vector while keeping both the topical
+     * anchor and the specific item names — so the chunk matches queries about the table's subject
+     * AND queries that mention a specific item by name.
+     */
+    private static String buildTableRetrievalText(String fullChunkText) {
+        if (fullChunkText == null || fullChunkText.isBlank()) return fullChunkText;
+        String[] lines = fullChunkText.split("\n");
+        StringBuilder heading = new StringBuilder();
+        List<String> keyValues = new ArrayList<>();
+        boolean tableStarted = false;
+        boolean headerSkipped = false;
+
+        for (String line : lines) {
+            if (line.contains("|")) {
+                tableStarted = true;
+                if (!headerSkipped) { headerSkipped = true; continue; } // skip header row
+                String firstCol = line.split("\\|")[0].strip();
+                if (!firstCol.isBlank()) keyValues.add(firstCol);
+            } else if (!tableStarted) {
+                if (!heading.isEmpty()) heading.append("\n");
+                heading.append(line);
+            }
+        }
+
+        if (!tableStarted) return fullChunkText; // no table rows found — leave as-is
+        String headingStr = heading.toString().strip();
+        if (keyValues.isEmpty()) return headingStr.isEmpty() ? fullChunkText : headingStr;
+        return (headingStr.isEmpty() ? "" : headingStr + "\n") + "Items: " + String.join(", ", keyValues) + ".";
     }
 
     private void upsertPageTracking(ConfluencePageDetail page, String spaceKey, String spaceName,
