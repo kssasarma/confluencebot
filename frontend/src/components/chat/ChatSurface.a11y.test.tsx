@@ -176,7 +176,7 @@ describe('the composer', () => {
         onSend={() => {}}
         onStop={() => {}}
         isStreaming={false}
-        lastQuestion="How do I deploy?"
+        questionHistory={['How do I deploy?']}
       />,
     )
 
