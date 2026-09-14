@@ -133,8 +133,8 @@ public class HybridSearchService {
             presentIds.add(c.chunk().getChunkId());
             if ("TABLE".equals(c.chunk().getChunkType())) {
                 String pageId  = c.chunk().getPageId();
-                String heading = c.chunk().getSectionHeading();
-                if (pageId != null && !pageId.isBlank() && heading != null && !heading.isBlank()) {
+                String heading = c.chunk().getSectionHeading() != null ? c.chunk().getSectionHeading() : "";
+                if (pageId != null && !pageId.isBlank()) {
                     tableGroups.putIfAbsent(pageId + '\0' + heading, new String[]{pageId, heading});
                 }
             }
