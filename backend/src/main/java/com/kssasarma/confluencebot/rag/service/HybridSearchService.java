@@ -46,6 +46,9 @@ public class HybridSearchService {
     @Value("${chat.retrieval.candidate-pool-size:25}")
     private int candidatePoolSize;
 
+    @Value("${chat.retrieval.table-candidate-pool-size:10}")
+    private int tableCandidatePoolSize;
+
     public HybridSearchService(ChunkSearchRepository searchRepo,
                                 ReRankingService reRankingService,
                                 EmbeddingModel embeddingModel) {
@@ -80,6 +83,7 @@ public class HybridSearchService {
 
         List<ReRankingService.ScoredCandidate> fused =
             fuseAndScore(denseResults, lexicalResults, queryEmbedding);
+        fused = injectTableCandidates(fused, queryEmbedding, spaceKey);
         fused = expandTableSiblings(fused, queryEmbedding);
 
         List<RetrievedChunk> reranked = reRankingService.rerank(query, queryEmbedding, fused, topK);
@@ -112,6 +116,46 @@ public class HybridSearchService {
             })
             .filter(Objects::nonNull)
             .toList();
+    }
+
+    /**
+     * Runs a dedicated dense retrieval pass restricted to TABLE chunks and merges any that are
+     * not already in the fused pool. Table cell text routinely scores below prose in joint
+     * retrieval — even batches from a highly relevant table can miss the top-N cutoff entirely,
+     * which means {@link #expandTableSiblings} never triggers for them (it can only expand a
+     * group already represented in the pool). This pass guarantees at least one batch from each
+     * of the closest TABLE chunks enters the pool, giving sibling expansion something to work
+     * with. Pool size is intentionally small (default 10) — we are supplementing, not replacing,
+     * the main retrieval pool.
+     */
+    private List<ReRankingService.ScoredCandidate> injectTableCandidates(
+            List<ReRankingService.ScoredCandidate> fused,
+            float[] queryEmbedding, String spaceKey) {
+
+        List<RawCandidate> tableResults =
+                searchRepo.findTopNDenseTable(toVectorString(queryEmbedding), tableCandidatePoolSize, spaceKey);
+        if (tableResults.isEmpty()) return fused;
+
+        Set<String> presentIds = new HashSet<>();
+        double minFusionScore = Double.MAX_VALUE;
+        for (ReRankingService.ScoredCandidate c : fused) {
+            presentIds.add(c.chunk().getChunkId());
+            if (c.fusionScore() < minFusionScore) minFusionScore = c.fusionScore();
+        }
+
+        List<ReRankingService.ScoredCandidate> extras = new ArrayList<>();
+        for (RawCandidate raw : tableResults) {
+            if (!presentIds.add(raw.chunkId())) continue;
+            RetrievedChunk chunk = searchRepo.toRetrievedChunk(raw, queryEmbedding);
+            extras.add(new ReRankingService.ScoredCandidate(chunk, chunk.getEmbedding(), minFusionScore));
+            log.info("Table retrieval pass: injecting TABLE chunk {} (page '{}') absent from main pool",
+                    raw.chunkId(), chunk.getPageId());
+        }
+
+        if (extras.isEmpty()) return fused;
+        List<ReRankingService.ScoredCandidate> expanded = new ArrayList<>(fused);
+        expanded.addAll(extras);
+        return expanded;
     }
 
     /**

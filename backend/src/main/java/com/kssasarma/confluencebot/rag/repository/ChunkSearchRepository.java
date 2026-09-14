@@ -103,6 +103,46 @@ public class ChunkSearchRepository {
         }
     }
 
+    private static final String TABLE_DENSE_QUERY = """
+            SELECT id::text            AS chunk_id,
+                   content,
+                   metadata::text      AS metadata_json,
+                   embedding::text     AS embedding_text
+            FROM   confluence_chunks
+            WHERE  metadata->>'chunk_type' = 'TABLE'
+            ORDER  BY embedding <=> CAST(? AS vector)
+            LIMIT  ?
+            """;
+
+    private static final String TABLE_DENSE_QUERY_BY_SPACE = """
+            SELECT id::text            AS chunk_id,
+                   content,
+                   metadata::text      AS metadata_json,
+                   embedding::text     AS embedding_text
+            FROM   confluence_chunks
+            WHERE  metadata->>'chunk_type' = 'TABLE'
+            AND    metadata->>'space_key'  = ?
+            ORDER  BY embedding <=> CAST(? AS vector)
+            LIMIT  ?
+            """;
+
+    /**
+     * Dense ANN search restricted to TABLE chunks. Used as a dedicated table retrieval pass so
+     * table chunks are never entirely absent from the candidate pool — bare cell text routinely
+     * scores below prose in joint retrieval, meaning the sibling expansion in
+     * {@code HybridSearchService} never triggers for tables that ranked below the pool cutoff.
+     */
+    public List<RawCandidate> findTopNDenseTable(String embeddingStr, int limit, String spaceKey) {
+        try {
+            return (spaceKey == null || spaceKey.isBlank())
+                    ? jdbc.query(TABLE_DENSE_QUERY, RAW_CANDIDATE_MAPPER, embeddingStr, limit)
+                    : jdbc.query(TABLE_DENSE_QUERY_BY_SPACE, RAW_CANDIDATE_MAPPER, spaceKey, embeddingStr, limit);
+        } catch (Exception e) {
+            log.warn("Table-only dense search failed: {}", e.getMessage());
+            return Collections.emptyList();
+        }
+    }
+
     private static final String TABLE_SIBLINGS_QUERY = """
             SELECT id::text            AS chunk_id,
                    content,

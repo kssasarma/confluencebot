@@ -210,6 +210,14 @@ chat:
     # Candidate pool for hybrid search before RRF fusion + re-ranking
     candidate-pool-size: ${CHAT_CANDIDATE_POOL_SIZE:25}
 
+    # Dedicated TABLE-only dense retrieval pool, merged into the main candidate pool after RRF
+    # fusion. TABLE chunks (bare cell text) routinely score below prose in joint retrieval and
+    # can miss the main pool entirely. This pass ensures at least the closest table chunks enter
+    # the pool so the sibling expansion (expandTableSiblings) and the table floor guarantee
+    # (ensureTableRepresented) have something to work with. Keep this small — it supplements the
+    # main pool, not replaces it.
+    table-candidate-pool-size: ${CHAT_TABLE_CANDIDATE_POOL_SIZE:10}
+
     # Chunking parameters (roughly 4 chars/token)
     chunk-size: ${CHAT_CHUNK_SIZE:800}
     chunk-overlap: ${CHAT_CHUNK_OVERLAP:100}
