@@ -103,6 +103,47 @@ public class ChunkSearchRepository {
         }
     }
 
+    private static final String TABLE_SIBLINGS_QUERY = """
+            SELECT id::text            AS chunk_id,
+                   content,
+                   metadata::text      AS metadata_json,
+                   embedding::text     AS embedding_text
+            FROM   confluence_chunks
+            WHERE  metadata->>'page_id'         = ?
+            AND    metadata->>'section_heading' = ?
+            AND    metadata->>'chunk_type'      = 'TABLE'
+            """;
+
+    private static final String TABLE_SIBLINGS_NO_HEADING_QUERY = """
+            SELECT id::text            AS chunk_id,
+                   content,
+                   metadata::text      AS metadata_json,
+                   embedding::text     AS embedding_text
+            FROM   confluence_chunks
+            WHERE  metadata->>'page_id'    = ?
+            AND    (metadata->>'section_heading' IS NULL OR metadata->>'section_heading' = '')
+            AND    metadata->>'chunk_type' = 'TABLE'
+            """;
+
+    /**
+     * Fetches every TABLE chunk that belongs to the same logical table as the given
+     * (pageId, sectionHeading) pair. When sectionHeading is blank — meaning the table sits
+     * directly under the page with no section heading stored — falls back to matching by
+     * pageId alone among headingless TABLE chunks, which is the correct group boundary in
+     * that case (all row-batch splits share the same blank heading).
+     */
+    public List<RawCandidate> findTableSiblings(String pageId, String sectionHeading) {
+        if (pageId == null || pageId.isBlank()) return Collections.emptyList();
+        try {
+            return (sectionHeading == null || sectionHeading.isBlank())
+                    ? jdbc.query(TABLE_SIBLINGS_NO_HEADING_QUERY, RAW_CANDIDATE_MAPPER, pageId)
+                    : jdbc.query(TABLE_SIBLINGS_QUERY, RAW_CANDIDATE_MAPPER, pageId, sectionHeading);
+        } catch (Exception e) {
+            log.warn("Table sibling fetch failed for page={} heading={}: {}", pageId, sectionHeading, e.getMessage());
+            return Collections.emptyList();
+        }
+    }
+
     /**
      * Lexical full-text search using the GIN tsvector index (added in V4 migration).
      *

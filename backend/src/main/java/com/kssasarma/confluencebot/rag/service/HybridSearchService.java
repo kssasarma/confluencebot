@@ -10,10 +10,13 @@ import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * Hybrid retrieval: fuses a dense (pgvector cosine-similarity) candidate pool with a lexical
@@ -77,6 +80,7 @@ public class HybridSearchService {
 
         List<ReRankingService.ScoredCandidate> fused =
             fuseAndScore(denseResults, lexicalResults, queryEmbedding);
+        fused = expandTableSiblings(fused, queryEmbedding);
 
         List<RetrievedChunk> reranked = reRankingService.rerank(query, queryEmbedding, fused, topK);
 
@@ -108,6 +112,54 @@ public class HybridSearchService {
             })
             .filter(Objects::nonNull)
             .toList();
+    }
+
+    /**
+     * Ensures every row-batch chunk from a logical table is in the candidate pool when any of
+     * its siblings already made it through retrieval. Retrieval ranks by query similarity — the
+     * oldest/most generically-named rows in a large table routinely miss the pool even though
+     * they belong to the same answer. This fetches those missing siblings directly from the DB
+     * and appends them at the bottom of the pool; {@link ReRankingService#ensureTableRepresented}
+     * then lifts the whole group through MMR's diversity cut.
+     */
+    private List<ReRankingService.ScoredCandidate> expandTableSiblings(
+            List<ReRankingService.ScoredCandidate> fused, float[] queryEmbedding) {
+
+        Set<String> presentIds = new HashSet<>();
+        Map<String, String[]> tableGroups = new LinkedHashMap<>(); // groupKey → [pageId, heading]
+        double minFusionScore = Double.MAX_VALUE;
+
+        for (ReRankingService.ScoredCandidate c : fused) {
+            presentIds.add(c.chunk().getChunkId());
+            if ("TABLE".equals(c.chunk().getChunkType())) {
+                String pageId  = c.chunk().getPageId();
+                String heading = c.chunk().getSectionHeading() != null ? c.chunk().getSectionHeading() : "";
+                if (pageId != null && !pageId.isBlank()) {
+                    tableGroups.putIfAbsent(pageId + '\0' + heading, new String[]{pageId, heading});
+                }
+            }
+            if (c.fusionScore() < minFusionScore) minFusionScore = c.fusionScore();
+        }
+
+        if (tableGroups.isEmpty()) return fused;
+
+        double siblingScore = minFusionScore; // bottom of pool; group guarantee rescues them
+        List<ReRankingService.ScoredCandidate> extras = new ArrayList<>();
+
+        for (String[] parts : tableGroups.values()) {
+            for (RawCandidate raw : searchRepo.findTableSiblings(parts[0], parts[1])) {
+                if (!presentIds.add(raw.chunkId())) continue; // already in pool
+                RetrievedChunk chunk = searchRepo.toRetrievedChunk(raw, queryEmbedding);
+                extras.add(new ReRankingService.ScoredCandidate(chunk, chunk.getEmbedding(), siblingScore));
+                log.info("Table sibling expansion: injecting chunk {} (page '{}', heading '{}') missed by retrieval",
+                        raw.chunkId(), parts[0], parts[1]);
+            }
+        }
+
+        if (extras.isEmpty()) return fused;
+        List<ReRankingService.ScoredCandidate> expanded = new ArrayList<>(fused);
+        expanded.addAll(extras);
+        return expanded;
     }
 
     private float[] embed(String text) {
