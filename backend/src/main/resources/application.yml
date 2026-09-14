@@ -236,11 +236,13 @@ chat:
     # this MMR can drop the chunk that actually answers the question. See ReRankingService.
     guarantee-table-chunk: ${CHAT_GUARANTEE_TABLE_CHUNK:true}
 
-    # How many distinct table chunks the floor above protects. More than one exists because a real
-    # corpus can hold several unrelated tables that are all plausible candidates for a similar
-    # question (e.g. a production model catalog and a separate sandbox's own model list) —
-    # guaranteeing only the single best-scoring table lets a weaker one satisfy the check first and
-    # silently blocks a second, equally real table from ever being considered.
+    # How many distinct tables the floor above protects. "Distinct" means a unique
+    # (pageId, sectionHeading) pair — all row-batch chunks produced by splitting one large table
+    # share that pair and are treated as one group. When a group earns a guaranteed seat, every
+    # row-batch chunk in that group is pulled into the result, so a large table split across
+    # N batches never loses the rows in the lower-scoring batches. More than one table may be
+    # relevant for the same question (e.g. a production model catalog and a sandbox's own list);
+    # raise this value so each gets a seat rather than only the strongest table being seen.
     guarantee-table-chunk-count: ${CHAT_GUARANTEE_TABLE_CHUNK_COUNT:2}
 
   # The optional LLM pass that orders the excerpts MMR selected. Its own endpoint, key and model:

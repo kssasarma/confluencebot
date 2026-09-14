@@ -18,10 +18,12 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * Narrows a fused (dense + lexical) candidate pool to the final result set the LLM actually sees.
@@ -118,8 +120,15 @@ public class ReRankingService {
      * several unrelated tables are all plausible candidates for the same question, whichever one
      * MMR happens to keep — not necessarily the most relevant one — satisfies that check and blocks
      * every other table from ever being considered, even a much better match sitting right there in
-     * the candidate pool. So this ranks every table candidate by fusion score and guarantees the top
-     * {@link #guaranteeTableChunkCount} of them a seat, regardless of what MMR already kept.
+     * the candidate pool. So this identifies the top {@link #guaranteeTableChunkCount} <em>distinct
+     * tables</em> (by fusion score of their best chunk) and guarantees all row-batch chunks from
+     * each of those tables — not just the one batch that happened to score highest.
+     *
+     * <p>The group-buddy expansion is the key difference from a plain top-N chunk guarantee: a
+     * large table is split into multiple row-batch chunks by {@code SemanticChunkingStrategy}
+     * (see its {@code tableRowBudgetTokens} field). Without expansion, only the highest-scoring
+     * batch survives; the rows in every other batch are silently dropped even though they belong to
+     * the same answer.
      *
      * <p>This does not second-guess MMR's choice among prose chunks: a guaranteed table only ever
      * displaces a slot that isn't already holding one of the tables this pass is protecting.
@@ -128,18 +137,35 @@ public class ReRankingService {
                                                           List<ScoredCandidate> selected) {
         if (!guaranteeTableChunk || selected.isEmpty() || guaranteeTableChunkCount <= 0) return selected;
 
-        List<ScoredCandidate> topTables = candidates.stream()
+        // Rank each distinct logical table by the fusion score of its best-scoring chunk, then
+        // take the top-N tables. "Distinct" means same (pageId, sectionHeading) pair — all
+        // row-batch chunks produced by splitting one large table share that pair.
+        Map<String, ScoredCandidate> bestPerGroup = new LinkedHashMap<>();
+        candidates.stream()
             .filter(c -> TABLE_CHUNK_TYPE.equals(c.chunk().getChunkType()))
             .sorted(Comparator.comparingDouble(ScoredCandidate::fusionScore).reversed())
+            .forEach(c -> bestPerGroup.putIfAbsent(tableGroupKey(c.chunk()), c));
+        if (bestPerGroup.isEmpty()) return selected;
+
+        Set<String> guaranteedGroupKeys = bestPerGroup.entrySet().stream()
+            .sorted(Map.Entry.<String, ScoredCandidate>comparingByValue(
+                Comparator.comparingDouble(ScoredCandidate::fusionScore)).reversed())
             .limit(guaranteeTableChunkCount)
+            .map(Map.Entry::getKey)
+            .collect(Collectors.toCollection(LinkedHashSet::new));
+
+        // All row-batch chunks that belong to any of the selected tables, best-scoring first.
+        List<ScoredCandidate> allGuaranteed = candidates.stream()
+            .filter(c -> TABLE_CHUNK_TYPE.equals(c.chunk().getChunkType())
+                      && guaranteedGroupKeys.contains(tableGroupKey(c.chunk())))
+            .sorted(Comparator.comparingDouble(ScoredCandidate::fusionScore).reversed())
             .toList();
-        if (topTables.isEmpty()) return selected;
 
         Set<String> guaranteedIds = new LinkedHashSet<>();
-        for (ScoredCandidate table : topTables) guaranteedIds.add(table.chunk().getChunkId());
+        for (ScoredCandidate table : allGuaranteed) guaranteedIds.add(table.chunk().getChunkId());
 
         List<ScoredCandidate> result = new ArrayList<>(selected);
-        for (ScoredCandidate table : topTables) {
+        for (ScoredCandidate table : allGuaranteed) {
             boolean alreadyPresent = result.stream()
                 .anyMatch(c -> c.chunk().getChunkId().equals(table.chunk().getChunkId()));
             if (alreadyPresent) continue;
@@ -152,6 +178,16 @@ public class ReRankingService {
             result.set(replaceAt, table);
         }
         return result;
+    }
+
+    /**
+     * Identity key for a logical table: all row-batch chunks produced by splitting one table share
+     * the same (pageId, sectionHeading) pair, so this key groups them without touching chunk IDs.
+     */
+    private static String tableGroupKey(RetrievedChunk chunk) {
+        String pageId  = chunk.getPageId()        != null ? chunk.getPageId()        : "";
+        String heading = chunk.getSectionHeading() != null ? chunk.getSectionHeading() : "";
+        return pageId + '\0' + heading;
     }
 
     /** The last slot not already holding one of the tables this pass is protecting — never
