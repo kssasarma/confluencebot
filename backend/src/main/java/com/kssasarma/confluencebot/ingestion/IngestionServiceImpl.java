@@ -6,7 +6,6 @@ import com.kssasarma.confluencebot.confluence.dto.SpaceMetadata;
 import com.kssasarma.confluencebot.confluence.parser.ParsedSection;
 import com.kssasarma.confluencebot.confluence.parser.StorageFormatParser;
 import com.kssasarma.confluencebot.config.ConfluenceProperties;
-import com.kssasarma.confluencebot.domain.ConfluencePageEntity;
 import com.kssasarma.confluencebot.ingestion.chunking.SemanticChunkingStrategy;
 import com.kssasarma.confluencebot.ingestion.chunking.SemanticChunkingStrategy.ChunkedContent;
 import com.kssasarma.confluencebot.repository.ConfluencePageRepository;
@@ -17,7 +16,8 @@ import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.PreparedStatementSetter;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.OffsetDateTime;
 import java.util.*;
@@ -35,6 +35,7 @@ public class IngestionServiceImpl implements IngestionService {
     private final ConfluencePageRepository pageRepository;
     private final ConfluenceProperties props;
     private final JdbcTemplate jdbcTemplate;
+    private final TransactionTemplate transactionTemplate;
 
     public IngestionServiceImpl(
             ConfluenceClient confluenceClient,
@@ -43,7 +44,8 @@ public class IngestionServiceImpl implements IngestionService {
             VectorStore vectorStore,
             ConfluencePageRepository pageRepository,
             ConfluenceProperties props,
-            JdbcTemplate jdbcTemplate) {
+            JdbcTemplate jdbcTemplate,
+            PlatformTransactionManager txManager) {
         this.confluenceClient = confluenceClient;
         this.parser = parser;
         this.chunkingStrategy = chunkingStrategy;
@@ -51,6 +53,7 @@ public class IngestionServiceImpl implements IngestionService {
         this.pageRepository = pageRepository;
         this.props = props;
         this.jdbcTemplate = jdbcTemplate;
+        this.transactionTemplate = new TransactionTemplate(txManager);
     }
 
     @Override
@@ -59,7 +62,6 @@ public class IngestionServiceImpl implements IngestionService {
     }
 
     @Override
-    @Transactional
     public IngestionResult ingestSpace(String spaceKey, boolean force) {
         long startMs = System.currentTimeMillis();
         log.info("Starting ingestion for space: {} (force={})", spaceKey, force);
@@ -125,30 +127,35 @@ public class IngestionServiceImpl implements IngestionService {
     private int deleteRemovedPages(String spaceKey, Set<String> currentPageIds) {
         String[] fetchedIds = currentPageIds.toArray(new String[0]);
 
-        PreparedStatementSetter deletePagesPss = ps -> {
-            ps.setString(1, spaceKey);
-            ps.setArray(2, ps.getConnection().createArrayOf("varchar", fetchedIds));
-        };
-        List<String> removedIds = jdbcTemplate.query(
-                "DELETE FROM confluence_pages WHERE space_key = ? AND page_id <> ALL (?) RETURNING page_id",
-                deletePagesPss,
-                (rs, rowNum) -> rs.getString("page_id"));
+        // The two DELETEs (pages then chunks) run in a single transaction so that we never leave
+        // orphan chunks behind if the second statement fails after the first has removed the rows.
+        Integer removed = transactionTemplate.execute(status -> {
+            PreparedStatementSetter deletePagesPss = ps -> {
+                ps.setString(1, spaceKey);
+                ps.setArray(2, ps.getConnection().createArrayOf("varchar", fetchedIds));
+            };
+            List<String> removedIds = jdbcTemplate.query(
+                    "DELETE FROM confluence_pages WHERE space_key = ? AND page_id <> ALL (?) RETURNING page_id",
+                    deletePagesPss,
+                    (rs, rowNum) -> rs.getString("page_id"));
 
-        if (removedIds.isEmpty()) {
-            return 0;
-        }
+            if (removedIds.isEmpty()) {
+                return 0;
+            }
 
-        String[] removedIdsArray = removedIds.toArray(new String[0]);
-        PreparedStatementSetter deleteChunksPss = ps ->
-                ps.setArray(1, ps.getConnection().createArrayOf("varchar", removedIdsArray));
-        jdbcTemplate.update("DELETE FROM confluence_chunks WHERE metadata->>'page_id' = ANY (?)", deleteChunksPss);
+            String[] removedIdsArray = removedIds.toArray(new String[0]);
+            PreparedStatementSetter deleteChunksPss = ps ->
+                    ps.setArray(1, ps.getConnection().createArrayOf("varchar", removedIdsArray));
+            jdbcTemplate.update("DELETE FROM confluence_chunks WHERE metadata->>'page_id' = ANY (?)", deleteChunksPss);
 
-        log.info("Removed {} page(s) no longer present in space {}: {}", removedIds.size(), spaceKey, removedIds);
-        return removedIds.size();
+            log.info("Removed {} page(s) no longer present in space {}: {}", removedIds.size(), spaceKey, removedIds);
+            return removedIds.size();
+        });
+
+        return removed != null ? removed : 0;
     }
 
     @Override
-    @Transactional
     public IngestionResult ingestPage(String pageId) {
         long startMs = System.currentTimeMillis();
         SpaceMetadata spaceMeta = confluenceClient.fetchSpaceMetadata(props.spaceKey());
@@ -416,16 +423,24 @@ public class IngestionServiceImpl implements IngestionService {
 
     private void upsertPageTracking(ConfluencePageDetail page, String spaceKey, String spaceName,
                                      String pageUrl, int chunkCount) {
-        ConfluencePageEntity entity = pageRepository.findById(page.id())
-                .orElseGet(() -> ConfluencePageEntity.newPage(
-                        page.id(), spaceKey, spaceName, page.title(), pageUrl));
-        // Keeps the name current on re-ingestion (e.g. after a rename in Confluence), whether the
-        // entity is the freshly-built one above or one already tracked from an earlier run.
-        entity.setSpaceName(spaceName);
-        entity.setVersion(page.version().number());
-        entity.setChunkCount(chunkCount);
-        entity.setIngestedAt(OffsetDateTime.now());
-        pageRepository.save(entity);
+        // INSERT … ON CONFLICT DO UPDATE avoids the read-then-insert race: two concurrent jobs
+        // processing the same page would both attempt a JPA findById → save, with the second
+        // INSERT failing on the page_id primary key and aborting the whole transaction. A single
+        // atomic upsert statement is safe under concurrent runs on the same or different spaces.
+        jdbcTemplate.update("""
+                INSERT INTO confluence_pages
+                    (page_id, space_key, space_name, title, page_url, version, chunk_count, ingested_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (page_id) DO UPDATE SET
+                    space_name  = EXCLUDED.space_name,
+                    title       = EXCLUDED.title,
+                    page_url    = EXCLUDED.page_url,
+                    version     = EXCLUDED.version,
+                    chunk_count = EXCLUDED.chunk_count,
+                    ingested_at = EXCLUDED.ingested_at
+                """,
+                page.id(), spaceKey, spaceName, page.title(), pageUrl,
+                page.version().number(), chunkCount, OffsetDateTime.now());
     }
 
     private String buildPageUrl(ConfluencePageDetail page) {

@@ -6,7 +6,6 @@ import com.kssasarma.confluencebot.confluence.dto.SpaceMetadata;
 import com.kssasarma.confluencebot.confluence.parser.ParsedSection;
 import com.kssasarma.confluencebot.confluence.parser.StorageFormatParser;
 import com.kssasarma.confluencebot.config.ConfluenceProperties;
-import com.kssasarma.confluencebot.domain.ConfluencePageEntity;
 import com.kssasarma.confluencebot.ingestion.chunking.SemanticChunkingStrategy;
 import com.kssasarma.confluencebot.ingestion.chunking.SemanticChunkingStrategy.ChunkedContent;
 import com.kssasarma.confluencebot.repository.ConfluencePageRepository;
@@ -20,6 +19,8 @@ import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.PreparedStatementSetter;
 import org.springframework.jdbc.core.RowMapper;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionStatus;
 
 import java.util.List;
 import java.util.Optional;
@@ -37,6 +38,8 @@ class IngestionServiceImplTest {
     @Mock private VectorStore vectorStore;
     @Mock private ConfluencePageRepository pageRepository;
     @Mock private JdbcTemplate jdbcTemplate;
+    @Mock private PlatformTransactionManager txManager;
+    @Mock private TransactionStatus transactionStatus;
 
     // Direct instantiation avoids mocking a record
     private final ConfluenceProperties props = new ConfluenceProperties(
@@ -55,9 +58,12 @@ class IngestionServiceImplTest {
 
     @BeforeEach
     void setUp() {
+        // TransactionTemplate calls getTransaction() then commit(); lenient so ingestPage tests
+        // (which never reach deleteRemovedPages) don't trigger UnnecessaryStubbingException.
+        lenient().when(txManager.getTransaction(any())).thenReturn(transactionStatus);
         service = new IngestionServiceImpl(
                 confluenceClient, parser, chunkingStrategy,
-                vectorStore, pageRepository, props, jdbcTemplate);
+                vectorStore, pageRepository, props, jdbcTemplate, txManager);
     }
 
     @Test
@@ -83,8 +89,6 @@ class IngestionServiceImplTest {
                 .thenReturn(List.of(new ParsedSection("Intro", "Some text")));
         when(chunkingStrategy.chunk(any(), eq("Guide")))
                 .thenReturn(List.of(new ChunkedContent("chunk one", "TEXT")));
-        when(pageRepository.findById("p2")).thenReturn(Optional.empty());
-        when(pageRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         IngestionResult result = service.ingestSpace("ENG");
 
@@ -102,15 +106,21 @@ class IngestionServiceImplTest {
                 .thenReturn(List.of(new ParsedSection("Intro", "Some text")));
         when(chunkingStrategy.chunk(any(), eq("Guide")))
                 .thenReturn(List.of(new ChunkedContent("chunk one", "TEXT")));
-        when(pageRepository.findById("p2")).thenReturn(Optional.empty());
-        when(pageRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         service.ingestSpace("ENG");
 
-        ArgumentCaptor<ConfluencePageEntity> saved = ArgumentCaptor.forClass(ConfluencePageEntity.class);
-        verify(pageRepository).save(saved.capture());
-        assertThat(saved.getValue().getSpaceKey()).isEqualTo("ENG");
-        assertThat(saved.getValue().getSpaceName()).isEqualTo("Engineering");
+        // upsertPageTracking now uses a SQL INSERT ... ON CONFLICT upsert instead of JPA save().
+        // Verify that the space_key and space_name from the fetched metadata reach the statement.
+        verify(jdbcTemplate).update(
+                argThat(sql -> sql.contains("ON CONFLICT")),
+                eq("p2"),
+                eq("ENG"),
+                eq("Engineering"),
+                eq("Guide"),
+                any(),
+                eq(5),
+                eq(1),
+                any());
     }
 
     @Test
@@ -125,8 +135,6 @@ class IngestionServiceImplTest {
                 .thenReturn(List.of(new ParsedSection("", "Good content")));
         when(chunkingStrategy.chunk(any(), eq("Good Page")))
                 .thenReturn(List.of(new ChunkedContent("chunk", "TEXT")));
-        when(pageRepository.findById("good")).thenReturn(Optional.empty());
-        when(pageRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         IngestionResult result = service.ingestSpace("ENG");
 
@@ -216,8 +224,6 @@ class IngestionServiceImplTest {
                 .thenReturn(List.of(new ChunkedContent("intro chunk", "TEXT")));
         when(chunkingStrategy.chunk(any(), eq("Spec Page"), anyString()))
                 .thenReturn(List.of(new ChunkedContent("table chunk", "TABLE")));
-        when(pageRepository.findById("sp1")).thenReturn(Optional.empty());
-        when(pageRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         service.ingestPage("sp1");
 
@@ -240,8 +246,6 @@ class IngestionServiceImplTest {
                 .thenReturn(List.of(new ChunkedContent("intro chunk", "TEXT")));
         when(chunkingStrategy.chunk(any(), eq("Spec Page"), anyString()))
                 .thenReturn(List.of(new ChunkedContent("table chunk", "TABLE")));
-        when(pageRepository.findById("sp1")).thenReturn(Optional.empty());
-        when(pageRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         service.ingestPage("sp1");
 
@@ -260,8 +264,6 @@ class IngestionServiceImplTest {
                 new ParsedSection("Models", "Name | Status\nA | Active", ParsedSection.SectionType.TABLE)));
         when(chunkingStrategy.chunk(any(), eq("Spec Page"), anyString()))
                 .thenReturn(List.of(new ChunkedContent("table chunk", "TABLE")));
-        when(pageRepository.findById("sp1")).thenReturn(Optional.empty());
-        when(pageRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         service.ingestPage("sp1");
 
@@ -279,8 +281,6 @@ class IngestionServiceImplTest {
                 new ParsedSection("", "|||", ParsedSection.SectionType.TABLE)));
         when(chunkingStrategy.chunk(any(), eq("Spec Page"), anyString()))
                 .thenReturn(List.of(new ChunkedContent("table chunk", "TABLE")));
-        when(pageRepository.findById("sp1")).thenReturn(Optional.empty());
-        when(pageRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         service.ingestPage("sp1");
 
@@ -308,8 +308,6 @@ class IngestionServiceImplTest {
                 .thenReturn(List.of(new ChunkedContent("intro chunk", "TEXT")));
         when(chunkingStrategy.chunk(any(), eq("Spec Page"), anyString()))
                 .thenReturn(List.of(new ChunkedContent("table chunk", "TABLE")));
-        when(pageRepository.findById("sp1")).thenReturn(Optional.empty());
-        when(pageRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         IngestionResult result = service.ingestPage("sp1");
 
@@ -342,8 +340,6 @@ class IngestionServiceImplTest {
 
         when(chunkingStrategy.chunk(any(), eq("Spec Page")))
                 .thenReturn(List.of(new ChunkedContent("intro chunk", "TEXT")));
-        when(pageRepository.findById("sp1")).thenReturn(Optional.empty());
-        when(pageRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         IngestionResult result = service.ingestPage("sp1");
 
@@ -369,8 +365,6 @@ class IngestionServiceImplTest {
 
         when(chunkingStrategy.chunk(any(), eq("Spec Page")))
                 .thenReturn(List.of(new ChunkedContent("chunk", "TEXT")));
-        when(pageRepository.findById("sp1")).thenReturn(Optional.empty());
-        when(pageRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         IngestionResult result = service.ingestPage("sp1");
 
@@ -399,8 +393,6 @@ class IngestionServiceImplTest {
 
         when(chunkingStrategy.chunk(any(), eq("Spec Page"), anyString()))
                 .thenReturn(List.of(new ChunkedContent("table chunk", "TABLE")));
-        when(pageRepository.findById("sp1")).thenReturn(Optional.empty());
-        when(pageRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         service.ingestPage("sp1");
 
@@ -427,8 +419,6 @@ class IngestionServiceImplTest {
                 .thenReturn(List.of(new ParsedSection("Sec", "Text")));
         when(chunkingStrategy.chunk(any(), eq("Spec Page")))
                 .thenReturn(List.of(new ChunkedContent("chunk", "TEXT")));
-        when(pageRepository.findById("sp1")).thenReturn(Optional.empty());
-        when(pageRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         IngestionResult result = service.ingestPage("sp1");
 

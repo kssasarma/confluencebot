@@ -3,6 +3,7 @@ package com.kssasarma.confluencebot.ingestion;
 import com.kssasarma.confluencebot.domain.IngestionJobEntity;
 import com.kssasarma.confluencebot.domain.IngestionJobStatus;
 import com.kssasarma.confluencebot.domain.IngestionJobType;
+import com.kssasarma.confluencebot.exception.DuplicateIngestionJobException;
 import com.kssasarma.confluencebot.repository.IngestionJobRepository;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -11,6 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -27,6 +29,19 @@ public class IngestionJobService {
 
     @Transactional
     public IngestionJobEntity submitSpaceJob(String spaceKey, boolean force) {
+        // Reject the request rather than allowing two concurrent runs on the same space.
+        // Two simultaneous jobs cause a primary-key collision in confluence_pages and double-insert
+        // chunks into the vector store — see upsertPageTracking / deleteChunksForPage race notes.
+        // Note: there is a narrow TOCTOU window between this check and the save below (two
+        // requests arriving within the same millisecond could both pass). The risk is low
+        // in practice and fully mitigated by the SQL upsert in upsertPageTracking.
+        boolean active = jobRepo.existsBySpaceKeyAndStatusIn(spaceKey,
+                List.of(IngestionJobStatus.PENDING, IngestionJobStatus.RUNNING));
+        if (active) {
+            throw new DuplicateIngestionJobException(
+                    "A space ingestion job for '" + spaceKey + "' is already PENDING or RUNNING — " +
+                    "wait for it to finish before submitting another.");
+        }
         IngestionJobEntity job = IngestionJobEntity.forSpace(spaceKey, force);
         jobRepo.save(job);
         UUID jobId = job.getId();
