@@ -49,7 +49,7 @@ class IngestionJobServiceTest {
         TransactionSynchronizationManager.initSynchronization();
         UUID jobId = stubIdOnSave();
 
-        IngestionJobEntity job = service.submitPageJob("131073");
+        IngestionJobEntity job = service.submitPageJob("131073", null);
 
         assertThat(job.getId()).isEqualTo(jobId);
         verify(jobRepo).save(job);
@@ -65,7 +65,7 @@ class IngestionJobServiceTest {
         TransactionSynchronizationManager.initSynchronization();
         UUID jobId = stubIdOnSave();
 
-        service.submitSpaceJob("IT", true);
+        service.submitSpaceJob("IT", true, null);
 
         verifyNoInteractions(runner);
 
@@ -79,7 +79,7 @@ class IngestionJobServiceTest {
         TransactionSynchronizationManager.initSynchronization();
         stubIdOnSave();
 
-        service.submitPageJob("131073");
+        service.submitPageJob("131073", null);
 
         // A rollback runs the completion callbacks but not afterCommit. There is no row left to
         // read, so a job handed to the pool here could only fail on arrival.
@@ -92,21 +92,21 @@ class IngestionJobServiceTest {
     void submitPageJob_withoutTransaction_dispatchesImmediately() {
         UUID jobId = stubIdOnSave();
 
-        service.submitPageJob("131073");
+        service.submitPageJob("131073", null);
 
         verify(runner).runPageJob(jobId, "131073");
     }
 
     @Test
     void retriggerJob_failedSpaceJob_runsAFreshJobAndLeavesTheFailureIntact() {
-        IngestionJobEntity failed = IngestionJobEntity.forSpace("IT", true);
+        IngestionJobEntity failed = IngestionJobEntity.forSpace("IT", true, null);
         failed.markFailed("Confluence timed out");
         UUID failedId = UUID.randomUUID();
         ReflectionTestUtils.setField(failed, "id", failedId);
         when(jobRepo.findById(failedId)).thenReturn(Optional.of(failed));
         UUID retryId = stubIdOnSave();
 
-        Optional<IngestionJobEntity> retry = service.retriggerJob(failedId);
+        Optional<IngestionJobEntity> retry = service.retriggerJob(failedId, "admin@test.com");
 
         assertThat(retry).isPresent();
         assertThat(retry.get().getStatus()).isEqualTo(IngestionJobStatus.PENDING);
@@ -121,14 +121,14 @@ class IngestionJobServiceTest {
 
     @Test
     void retriggerJob_failedPageJob_runsAFreshPageJob() {
-        IngestionJobEntity failed = IngestionJobEntity.forPage("131073");
+        IngestionJobEntity failed = IngestionJobEntity.forPage("131073", null);
         failed.markFailed("boom");
         UUID failedId = UUID.randomUUID();
         ReflectionTestUtils.setField(failed, "id", failedId);
         when(jobRepo.findById(failedId)).thenReturn(Optional.of(failed));
         UUID retryId = stubIdOnSave();
 
-        assertThat(service.retriggerJob(failedId)).isPresent();
+        assertThat(service.retriggerJob(failedId, "admin@test.com")).isPresent();
 
         verify(runner).runPageJob(retryId, "131073");
     }
@@ -137,13 +137,13 @@ class IngestionJobServiceTest {
     void retriggerJob_jobThatHasNotFailed_isRefused() {
         // Retriggering a running job would put two ingestions over the same space at once, and a
         // completed one has nothing to retry.
-        IngestionJobEntity completed = IngestionJobEntity.forSpace("IT", false);
+        IngestionJobEntity completed = IngestionJobEntity.forSpace("IT", false, null);
         completed.markCompleted(3, 9, 0);
         UUID completedId = UUID.randomUUID();
         ReflectionTestUtils.setField(completed, "id", completedId);
         when(jobRepo.findById(completedId)).thenReturn(Optional.of(completed));
 
-        assertThat(service.retriggerJob(completedId)).isEmpty();
+        assertThat(service.retriggerJob(completedId, "admin@test.com")).isEmpty();
 
         verify(jobRepo, never()).save(any(IngestionJobEntity.class));
         verifyNoInteractions(runner);
@@ -154,7 +154,7 @@ class IngestionJobServiceTest {
         UUID missing = UUID.randomUUID();
         when(jobRepo.findById(missing)).thenReturn(Optional.empty());
 
-        assertThat(service.retriggerJob(missing)).isEmpty();
+        assertThat(service.retriggerJob(missing, "admin@test.com")).isEmpty();
 
         verifyNoInteractions(runner);
     }

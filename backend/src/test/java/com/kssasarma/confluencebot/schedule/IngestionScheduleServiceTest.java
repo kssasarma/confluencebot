@@ -129,20 +129,20 @@ class IngestionScheduleServiceTest {
         IngestionScheduleEntity existing = IngestionScheduleEntity.create(
                 "IT", 24, true, true, "admin@example.com", OffsetDateTime.now().plusHours(24));
         when(scheduleRepo.findBySpaceKey("IT")).thenReturn(Optional.of(existing));
-        IngestionJobEntity fakeJob = IngestionJobEntity.forSpace("IT", true);
-        when(jobService.submitSpaceJob("IT", true)).thenReturn(fakeJob);
+        IngestionJobEntity fakeJob = IngestionJobEntity.forSpace("IT", true, "admin@example.com");
+        when(jobService.submitSpaceJob("IT", true, "admin@example.com")).thenReturn(fakeJob);
 
-        IngestionJobEntity result = service.triggerNow("IT");
+        IngestionJobEntity result = service.triggerNow("IT", "admin@example.com");
 
         assertThat(result).isSameAs(fakeJob);
-        verify(jobService).submitSpaceJob("IT", true);
+        verify(jobService).submitSpaceJob("IT", true, "admin@example.com");
     }
 
     @Test
     void triggerNow_unknownSpace_throwsResourceNotFound() {
         when(scheduleRepo.findBySpaceKey("MISSING")).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.triggerNow("MISSING"))
+        assertThatThrownBy(() -> service.triggerNow("MISSING", "admin@example.com"))
                 .isInstanceOf(ResourceNotFoundException.class);
     }
 

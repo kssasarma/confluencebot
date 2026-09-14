@@ -38,7 +38,7 @@ class AutoIngestionSchedulerTest {
 
         scheduler.checkAndTriggerDueSchedules();
 
-        verify(jobService).submitSpaceJob("IT", false);
+        verify(jobService).submitSpaceJob("IT", false, "System (Scheduled)");
     }
 
     @Test
@@ -50,8 +50,8 @@ class AutoIngestionSchedulerTest {
 
         scheduler.checkAndTriggerDueSchedules();
 
-        verify(jobService).submitSpaceJob("IT", false);
-        verify(jobService).submitSpaceJob("HR", true);
+        verify(jobService).submitSpaceJob("IT", false, "System (Scheduled)");
+        verify(jobService).submitSpaceJob("HR", true, "System (Scheduled)");
     }
 
     @Test
@@ -61,13 +61,13 @@ class AutoIngestionSchedulerTest {
                         new ScheduledRunSpec("IT", false),
                         new ScheduledRunSpec("HR", false)));
         doThrow(new DuplicateIngestionJobException("already running"))
-                .when(jobService).submitSpaceJob("IT", false);
+                .when(jobService).submitSpaceJob("IT", false, "System (Scheduled)");
 
         // Must not throw; HR job must still be submitted after IT fails
         scheduler.checkAndTriggerDueSchedules();
 
-        verify(jobService).submitSpaceJob("IT", false);
-        verify(jobService).submitSpaceJob("HR", false);
+        verify(jobService).submitSpaceJob("IT", false, "System (Scheduled)");
+        verify(jobService).submitSpaceJob("HR", false, "System (Scheduled)");
     }
 
     @Test
@@ -77,11 +77,11 @@ class AutoIngestionSchedulerTest {
                         new ScheduledRunSpec("IT", false),
                         new ScheduledRunSpec("HR", false)));
         doThrow(new RuntimeException("db down"))
-                .when(jobService).submitSpaceJob("IT", false);
+                .when(jobService).submitSpaceJob("IT", false, "System (Scheduled)");
 
         scheduler.checkAndTriggerDueSchedules();
 
-        verify(jobService).submitSpaceJob("HR", false);
+        verify(jobService).submitSpaceJob("HR", false, "System (Scheduled)");
     }
 
     @Test

@@ -5,6 +5,7 @@ import com.kssasarma.confluencebot.domain.IngestionJobEntity;
 import com.kssasarma.confluencebot.exception.GlobalExceptionHandler;
 import com.kssasarma.confluencebot.ingestion.IngestionJobService;
 import com.kssasarma.confluencebot.repository.ConfluencePageRepository;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -15,6 +16,8 @@ import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.MediaType;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
@@ -39,18 +42,27 @@ class IngestionControllerTest {
 
     private MockMvc mockMvc;
 
+    private static final String TEST_USER = "test@example.com";
+
     @BeforeEach
     void setUp() {
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(TEST_USER, null, List.of()));
         mockMvc = MockMvcBuilders
                 .standaloneSetup(new IngestionController(jobService, props, pageRepository))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
     }
 
+    @AfterEach
+    void clearSecurityContext() {
+        SecurityContextHolder.clearContext();
+    }
+
     @Test
     void ingestSpace_bodyWithSpaceKey_returns202WithPendingJob() throws Exception {
-        IngestionJobEntity job = IngestionJobEntity.forSpace("MYSPACE", false);
-        when(jobService.submitSpaceJob("MYSPACE", false)).thenReturn(job);
+        IngestionJobEntity job = IngestionJobEntity.forSpace("MYSPACE", false, TEST_USER);
+        when(jobService.submitSpaceJob("MYSPACE", false, TEST_USER)).thenReturn(job);
 
         mockMvc.perform(post("/api/ingest/space")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -65,8 +77,8 @@ class IngestionControllerTest {
 
     @Test
     void ingestSpace_noBody_fallsBackToConfiguredSpaceKey() throws Exception {
-        IngestionJobEntity job = IngestionJobEntity.forSpace("ENG", false);
-        when(jobService.submitSpaceJob("ENG", false)).thenReturn(job);
+        IngestionJobEntity job = IngestionJobEntity.forSpace("ENG", false, TEST_USER);
+        when(jobService.submitSpaceJob("ENG", false, TEST_USER)).thenReturn(job);
 
         mockMvc.perform(post("/api/ingest/space"))
                 .andExpect(status().isAccepted())
@@ -76,8 +88,8 @@ class IngestionControllerTest {
 
     @Test
     void ingestPage_validPageId_returns202WithPendingJob() throws Exception {
-        IngestionJobEntity job = IngestionJobEntity.forPage("131073");
-        when(jobService.submitPageJob("131073")).thenReturn(job);
+        IngestionJobEntity job = IngestionJobEntity.forPage("131073", TEST_USER);
+        when(jobService.submitPageJob("131073", TEST_USER)).thenReturn(job);
 
         mockMvc.perform(post("/api/ingest/page/131073"))
                 .andExpect(status().isAccepted())
@@ -88,7 +100,7 @@ class IngestionControllerTest {
 
     @Test
     void getJob_existingJobId_returns200WithJob() throws Exception {
-        IngestionJobEntity job = IngestionJobEntity.forSpace("ENG", false);
+        IngestionJobEntity job = IngestionJobEntity.forSpace("ENG", false, TEST_USER);
         UUID jobId = UUID.randomUUID();
         when(jobService.findById(jobId)).thenReturn(Optional.of(job));
 
