@@ -1,0 +1,5 @@
+Question:
+{query}
+
+Excerpts:
+{documentsBlock}

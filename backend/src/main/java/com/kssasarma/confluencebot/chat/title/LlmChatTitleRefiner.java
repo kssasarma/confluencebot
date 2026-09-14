@@ -2,12 +2,16 @@ package com.kssasarma.confluencebot.chat.title;
 
 import com.kssasarma.confluencebot.chat.LlmGateway;
 import com.kssasarma.confluencebot.chat.LlmPrompt;
+import com.kssasarma.confluencebot.prompt.PromptResources;
 import com.kssasarma.confluencebot.user.ChatSessionService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.ai.chat.prompt.PromptTemplate;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+
+import java.util.Map;
 
 import java.time.Duration;
 import java.util.Locale;
@@ -42,13 +46,8 @@ public class LlmChatTitleRefiner implements ChatTitleRefiner {
 
     private static final Logger log = LoggerFactory.getLogger(LlmChatTitleRefiner.class);
 
-    private static final String SYSTEM_MESSAGE = """
-            You name conversations. Given a question and its answer, reply with a title of 3 to 6 \
-            words describing the topic.
-
-            Reply with the title alone. No quotation marks, no trailing punctuation, no prefix such \
-            as "Title:", no explanation. Use sentence case. If the exchange has no clear topic, \
-            reply with the single word NONE.""";
+    private static final PromptTemplate SYSTEM_TEMPLATE = PromptResources.load("prompts/title/system.st");
+    private static final PromptTemplate USER_TEMPLATE = PromptResources.load("prompts/title/user.st");
 
     /** Long enough to establish the topic; short enough to keep the call cheap. */
     private static final int MAX_EXCERPT = 600;
@@ -114,9 +113,10 @@ public class LlmChatTitleRefiner implements ChatTitleRefiner {
     }
 
     private LlmPrompt promptFor(TitleRefinementRequest request) {
-        String user = "Question: " + excerpt(request.question())
-                + "\n\nAnswer: " + excerpt(request.answer());
-        return new LlmPrompt(SYSTEM_MESSAGE, user);
+        String user = USER_TEMPLATE.render(Map.of(
+                "question", excerpt(request.question()),
+                "answer", excerpt(request.answer())));
+        return new LlmPrompt(SYSTEM_TEMPLATE.render(), user);
     }
 
     private static String excerpt(String text) {
