@@ -103,6 +103,34 @@ public class ChunkSearchRepository {
         }
     }
 
+    private static final String TABLE_SIBLINGS_QUERY = """
+            SELECT id::text            AS chunk_id,
+                   content,
+                   metadata::text      AS metadata_json,
+                   embedding::text     AS embedding_text
+            FROM   confluence_chunks
+            WHERE  metadata->>'page_id'         = ?
+            AND    metadata->>'section_heading' = ?
+            AND    metadata->>'chunk_type'      = 'TABLE'
+            """;
+
+    /**
+     * Fetches every TABLE chunk that shares the same logical table as the given (pageId,
+     * sectionHeading) pair. Used by {@code HybridSearchService} to inject row-batch siblings
+     * that retrieval missed into the candidate pool before re-ranking.
+     */
+    public List<RawCandidate> findTableSiblings(String pageId, String sectionHeading) {
+        if (pageId == null || pageId.isBlank() || sectionHeading == null || sectionHeading.isBlank()) {
+            return Collections.emptyList();
+        }
+        try {
+            return jdbc.query(TABLE_SIBLINGS_QUERY, RAW_CANDIDATE_MAPPER, pageId, sectionHeading);
+        } catch (Exception e) {
+            log.warn("Table sibling fetch failed for page={} heading={}: {}", pageId, sectionHeading, e.getMessage());
+            return Collections.emptyList();
+        }
+    }
+
     /**
      * Lexical full-text search using the GIN tsvector index (added in V4 migration).
      *
