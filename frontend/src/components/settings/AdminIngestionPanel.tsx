@@ -163,7 +163,7 @@ export default function AdminIngestionPanel() {
         {spaces.isLoading ? (
           <SkeletonText lines={2} />
         ) : !spaces.data?.length ? (
-          <EmptyState title="No ingested spaces" description="Ingest a space first to manage its content here." />
+          <EmptyState title="No ingested spaces" description="No spaces have been indexed yet — start an ingestion above to see them here." />
         ) : (
           <div className="overflow-x-auto rounded-lg border border-border">
             <table className="w-full text-sm">
